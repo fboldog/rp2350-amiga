@@ -7,7 +7,10 @@
 
 ---
 
-## Phase 1 – Compile target (COMPLETE)
+## Phase 1 – Compile target (COMPLETE — clean build verified 2026-09-01)
+
+Toolchain: ARM GNU Toolchain 14.2.rel1 (aarch64-arm-none-eabi) + Pico SDK 2.1.1.
+Output `build/omega-amiga.uf2` builds clean. Not yet run on hardware.
 
 - [x] Project structure: `omega/` (upstream), `src/` (RP2350 platform)
 - [x] CMakeLists.txt for Pico SDK 2.x, board `pico2`
@@ -21,6 +24,10 @@
 - [x] `omega/Floppy.h` – `mfmData` is `uint8_t*` (pointer) on PICO_BUILD
 - [x] `omega/Floppy.c` – `ADF2MFM_from_mem()` added (no malloc/lseek/read)
 - [x] `tools/combine_uf2.py` – merges firmware.uf2 + ROM + optional ADFs
+- [x] Build fixes (never compiled before 2026-09-01):
+      `src/psram.c` XIP flush → `xip_cache_invalidate_all()` (RP2350 has no
+      `xip_ctrl_hw->flush`); `src/main.c` +`hardware/clocks.h`; `omega/DMA.c`
+      +`<stdlib.h>` and sprite2chunky `uint8_t*`→`uint32_t*` cast (GCC 14)
 
 ---
 

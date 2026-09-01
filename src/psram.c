@@ -5,7 +5,7 @@
 
 #include "psram.h"
 #include "hardware/structs/qmi.h"
-#include "hardware/structs/xip_ctrl.h"
+#include "hardware/xip_cache.h"
 #include "hardware/clocks.h"
 #include "pico/stdlib.h"
 
@@ -89,7 +89,8 @@ void psram_init(void) {
     _psram_enter_quad_mode();
     _psram_set_qspi_timing();
 
-    // Flush XIP cache so PSRAM region is clean
-    xip_ctrl_hw->flush = 1;
-    while (!(xip_ctrl_hw->stat & XIP_STAT_FLUSH_READY_BITS)) tight_loop_contents();
+    // Invalidate the XIP cache so any stale lines covering the PSRAM
+    // window (CS1) are dropped.  On RP2350 the cache-maintenance path
+    // replaces the RP2040 xip_ctrl_hw->flush register.
+    xip_cache_invalidate_all();
 }

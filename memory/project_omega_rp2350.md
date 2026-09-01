@@ -7,9 +7,13 @@ metadata:
 
 Port of Omega (https://github.com/h5n1xp/Omega) to RP2350B (Pimoroni Pico Plus 2) in Cortex-M33 mode.
 
-Project directory: /home/fboldog/source/repos/rp2350-amiga/
+Project directory varies by machine: `/home/fboldog/source/repos/rp2350-amiga/` (machine 1),
+`/root/source/repos/rp2350-amiga/` (machine 2). Git remote is the source of truth.
 
-## Phase 1 complete (2026-08-31):
+## Phase 1 complete (2026-08-31), clean build verified (2026-09-01):
+- Toolchain on machine 2: ARM GNU Toolchain 14.2.rel1 (aarch64-arm-none-eabi) at
+  /root/toolchains/, Pico SDK 2.1.1 at /root/pico-sdk. `build/omega-amiga.uf2` builds.
+- 4 build breakers fixed (code never compiled on machine 1) — see MEMORY.md Session 2.
 - Build system (Pico SDK 2.x, pico2 board)
 - PSRAM init (APS6404L on QMI CS1 → 0x11000000)
 - Memory.c replaced with PSRAM-backed version

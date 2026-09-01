@@ -95,6 +95,8 @@ immediately after `psram_init()` in `src/main.c`.
 | `omega/Chipset.c` | `chipramW = CHIPRAM_BASE_PTR` | Points into PSRAM instead of `low16Meg` |
 | `omega/DMA.c` | `CHIPRAM_BASE_PTR` for disk DMA writes | Same reason |
 | `omega/DMA.c` | SDL_Atomic calls commented out | No threading in Phase 1; no SDL |
+| `omega/DMA.c` | `+#include <stdlib.h>` | `rand()` in `drawBlank()`; upstream got it transitively |
+| `omega/DMA.c` | sprite2chunky ptr cast `uint8_t*`→`uint32_t*` (line ~697) | GCC 14 rejects incompatible pointer type; same byte address |
 | `omega/Floppy.h` | `mfmData` is `uint8_t*` on PICO_BUILD | 2 MB inline array would be in SRAM; pointer into PSRAM instead |
 | `omega/Floppy.c` | `ADF2MFM_from_mem()` added; original in `#ifndef PICO_BUILD` | No file I/O on RP2350; ADF lives in flash, passed as pointer |
 
@@ -119,3 +121,32 @@ immediately after `psram_init()` in `src/main.c`.
 - Created `combine_uf2.py` for ROM+firmware flashing
 - Created `AGENT.md`, `TODO.md`, this `MEMORY.md`
 - Next session: implement display output (Phase 2)
+
+### 2026-09-01 – Session 2 (different machine: repo at `/root/source/repos/rp2350-amiga`)
+- Set up toolchain: Arch Linux ARM (aarch64 host), pacman has no `arm-none-eabi-*`.
+  Installed `cmake`+`ninja` via pacman; downloaded ARM GNU Toolchain 14.2.rel1
+  (`aarch64-arm-none-eabi`) to `/root/toolchains/`. Pico SDK 2.1.1 cloned to
+  `/root/pico-sdk` (with submodules).
+- **Phase 1 code had never been compiled** – fixed 4 build breakers:
+  1. `src/psram.c`: RP2350 has no `xip_ctrl_hw->flush` register – replaced the
+     flush loop with `xip_cache_invalidate_all()` (`hardware/xip_cache.h`);
+     added `hardware_xip_cache` to `target_link_libraries`.
+  2. `src/main.c`: added `#include "hardware/clocks.h"` (for `set_sys_clock_khz`,
+     `clock_get_hz`, `clk_sys`).
+  3. `omega/DMA.c:697`: `sprite2chunky()` was passed a `uint8_t*` but the proto
+     takes `uint32_t*` – GCC 14 makes `-Wincompatible-pointer-types` an error.
+     Changed to `&((uint32_t*)host.pixels)[(mod+(Ny*640*4))/4]` (same address).
+     Same bug is present in upstream Omega; older compilers only warned.
+  4. `omega/DMA.c`: added `#include <stdlib.h>` for `rand()` in `drawBlank()`.
+- **Clean build passes**: `build/omega-amiga.uf2` (515 KB). `arm-none-eabi-size`:
+  text 257 KB (flash), bss 463 KB (of 520 KB SRAM – tight, mostly Musashi tables).
+  Remaining warnings are all benign (upstream `m68kdasm.c` format-overflow,
+  `CPU.c` `%x`/`uint32_t`, `debug.c` nested-comment, SDK/mbedtls sha512).
+- Build command (env not persisted – export each session):
+  ```
+  export PICO_SDK_PATH=/root/pico-sdk
+  export PATH=/root/toolchains/arm-gnu-toolchain-14.2.rel1-aarch64-arm-none-eabi/bin:$PATH
+  cd build && cmake .. -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release && ninja
+  ```
+- Not yet done: no hardware to flash/test; display output (Phase 2) still open.
+- Next session: implement display output (Phase 2).

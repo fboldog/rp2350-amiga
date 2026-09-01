@@ -21,6 +21,7 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/vreg.h"
+#include "hardware/clocks.h"
 
 #include "psram.h"
 #include "Memory.h"

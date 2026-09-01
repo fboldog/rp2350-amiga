@@ -12,6 +12,8 @@
 //  Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed
 //  with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+#include <stdlib.h>   // rand()
+
 #include "DMA.h"
 #include "Memory.h"
 #include "Chipset.h"
@@ -694,7 +696,7 @@ void dma_execute(){
                     
                     
                     for(int i=2;i<32; i +=2){
-                        sprite2chunky(&((uint8_t *)host.pixels)[mod+(Ny*640*4)], &internal.palette[16], Nx, pos[i], pos[i+1],16);
+                        sprite2chunky(&((uint32_t *)host.pixels)[(mod+(Ny*640*4))/4], &internal.palette[16], Nx, pos[i], pos[i+1],16);
                         mod +=640*4;
                     }
                     

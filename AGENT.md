@@ -22,7 +22,8 @@ rp2350-amiga/
 ├── omega/                  Upstream Omega source (minimal diffs from original)
 │   ├── CPU.c               +#ifdef PICO_BUILD guard in cpu_pulse_reset
 │   ├── Chipset.c           +chipramW = CHIPRAM_BASE_PTR (not low16Meg)
-│   ├── DMA.c               +CHIPRAM_BASE_PTR for disk DMA; SDL_Atomic commented
+│   ├── DMA.c               +CHIPRAM_BASE_PTR for disk DMA; SDL_Atomic commented;
+│   │                       +#include <stdlib.h>; sprite2chunky ptr cast (GCC14)
 │   ├── Floppy.h            +mfmData is uint8_t* on PICO_BUILD (not inline array)
 │   ├── Floppy.c            +ADF2MFM_from_mem(); original ADF2MFM in #ifndef guard
 │   └── [all other files]   UNCHANGED from upstream
@@ -76,6 +77,31 @@ cmake .. -DPICO_BOARD=pico2
 make -j$(nproc)
 # Output: build/omega-amiga.uf2
 ```
+
+### This machine (`/root/source/repos/rp2350-amiga`, Arch Linux ARM aarch64)
+
+`pacman` has **no** `arm-none-eabi-*` packages. Setup used:
+
+```bash
+pacman -S --noconfirm cmake ninja
+# ARM GNU Toolchain 14.2.rel1 for aarch64 Linux hosts:
+curl -fLO https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-aarch64-arm-none-eabi.tar.xz
+tar xf arm-gnu-toolchain-14.2.rel1-aarch64-arm-none-eabi.tar.xz -C /root/toolchains/
+git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk /root/pico-sdk
+cd /root/pico-sdk && git submodule update --init --depth 1
+```
+
+Per-session env (not persisted):
+
+```bash
+export PICO_SDK_PATH=/root/pico-sdk
+export PATH=/root/toolchains/arm-gnu-toolchain-14.2.rel1-aarch64-arm-none-eabi/bin:$PATH
+cd build && cmake .. -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release && ninja
+```
+
+GCC 14 note: `-Wincompatible-pointer-types` is now an **error**, not a warning.
+The Phase 1 tree had four such build breakers (now fixed) — see MEMORY.md
+Session 2 if similar issues resurface after an upstream merge.
 
 Flash with Kickstart ROM:
 ```bash

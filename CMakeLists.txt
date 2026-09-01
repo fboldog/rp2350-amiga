@@ -73,7 +73,8 @@ target_link_libraries(omega-amiga
     pico_multicore
     hardware_vreg
     hardware_clocks
-    hardware_structs    # qmi_hw, xip_ctrl_hw
+    hardware_structs    # qmi_hw
+    hardware_xip_cache  # xip_cache_invalidate_all() (RP2350 XIP maintenance)
     # hardware_dma      # uncomment if you add DMA transfers for display
 )
 
