@@ -4,3 +4,8 @@
 *.bin
 *.hex
 *.map
+
+# native head-less runner artifacts
+/native/omega-native
+*.ppm
+*.png

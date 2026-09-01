@@ -12,6 +12,11 @@
 Toolchain: ARM GNU Toolchain 14.2.rel1 (aarch64-arm-none-eabi) + Pico SDK 2.1.1.
 Output `build/omega-amiga.uf2` builds clean. Not yet run on hardware.
 
+Core logic verified via `native/` head-less runner (2026-09-01): Kickstart 1.3 +
+`original2.adf` boot to the AmigaDOS CLI on a PC build of the same `omega/*.c`.
+Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
+(The `rp2350-emu` crate can't run the firmware — no QMI/PSRAM emulation.)
+
 - [x] Project structure: `omega/` (upstream), `src/` (RP2350 platform)
 - [x] CMakeLists.txt for Pico SDK 2.x, board `pico2`
 - [x] `src/psram.c` – QMI CS1 init for APS6404L at 0x11000000

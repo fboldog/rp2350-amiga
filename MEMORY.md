@@ -149,4 +149,20 @@ immediately after `psram_init()` in `src/main.c`.
   cd build && cmake .. -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release && ninja
   ```
 - Not yet done: no hardware to flash/test; display output (Phase 2) still open.
+
+**Native head-less runner added (`native/`)** to validate the core without hardware:
+- Builds the same `omega/*.c` with `PICO_BUILD` undefined (desktop paths) +
+  a `malloc` framebuffer + upstream `Memory.c` (`low16Meg`). No SDL; dumps PPM.
+- `rp2350-emu`/`picoem` crate was evaluated and rejected: it does **not** emulate
+  QMI or external PSRAM at `0x11000000`, and UART is a stub — our firmware faults
+  on the first PSRAM access. It's a CPU/PIO validator, not a system emulator.
+- Result: embedded Kickstart 1.3 boots to the insert-disk screen; `original2.adf`
+  (WB 1.3.2 UK) boots through startup-sequence to `[CLI 2]`. So Musashi + Chipset
+  + CIA + DMA + Blitter + Floppy all work. `src/psram.c` / `src/Memory.c` /
+  `src/main.c` / PSRAM framebuffer are NOT covered (RP2350-only).
+- Known cosmetic bug (both targets, same Blitter/DMA): the ROM diskette-logo
+  bitmap on the insert screen renders horizontally mirrored; normal WB text is
+  fine. Battery-clock at `0xDC0000` is a stub (`date` prints `<invalid>`).
+- Build/run: `./native/build.sh` then
+  `./native/omega-native <adf> 300000 50000 3000`; `native/ppm2png.py` for PNGs.
 - Next session: implement display output (Phase 2).

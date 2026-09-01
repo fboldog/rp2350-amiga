@@ -152,6 +152,22 @@ on core 0. Add a spinlock for shared chipset register access.
 
 ---
 
+## Running the core without hardware
+
+`native/` builds the same `omega/*.c` for the host (no `PICO_BUILD`, no SDL) and
+dumps framebuffer PPMs. Good for regression-checking CPU/chipset/DMA/Floppy after
+an upstream merge:
+
+```bash
+./native/build.sh
+./native/omega-native <workbench13.adf> 300000 50000 3000   # boots to [CLI 2]
+python3 native/ppm2png.py frame_final.ppm frame_final.png
+```
+
+It does NOT cover `src/psram.c`, `src/Memory.c`, `src/main.c` or the PSRAM
+framebuffer. The `rp2350-emu` / `picoem` crate is not usable here — it has no
+QMI/PSRAM emulation, so the firmware faults on the first `0x11000000` access.
+
 ## Debugging tips
 
 - UART0 (TX=GPIO0, RX=GPIO1) at 115200. `printf()` works via `pico_stdio_uart`.
