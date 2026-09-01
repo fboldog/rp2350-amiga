@@ -99,10 +99,14 @@ int main(int argc, char **argv) {
     }
 
     // ── DF0: floppy (optional) ──────────────────────────────────────────
-    if (adfPath) {
+    // Always call floppyInit(0) so the drive is properly identified (idMode=-1
+    // triggers the 32-pulse ID sequence that Kickstart needs to see before it
+    // will attempt disk I/O).  Without this the ROM skips to the ROM disk.
+    if (adfPath && *adfPath) {
         int fd = open(adfPath, O_RDONLY);
         if (fd < 1) {
-            printf("  DF0: cannot open %s\n", adfPath);
+            printf("  DF0: cannot open %s — drive present, no disk\n", adfPath);
+            floppyInit(0);
         } else {
             ADF2MFM(fd, floppyInit(0));
             close(fd);
@@ -111,7 +115,9 @@ int main(int argc, char **argv) {
                    adfPath, insertAt);
         }
     } else {
-        printf("  DF0: empty\n");
+        // No path or empty path = drive present, no disk
+        floppyInit(0);
+        printf("  DF0: drive present, no disk\n");
     }
 
     // ── Bring up the emulator ───────────────────────────────────────────

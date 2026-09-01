@@ -635,7 +635,6 @@ void dma_execute(){
             
             if(vBeam==0){
                 //printf("NLine");
-                
             }
 
             
