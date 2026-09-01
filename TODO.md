@@ -125,6 +125,45 @@ Omega has audio register stubs but no PCM output.
 
 ---
 
+## Phase 6 – CPU / memory performance (do only if profiling shows a need)
+
+Musashi at 250 MHz ≈ 10–12× an A500's 68000, so this is a "later" item. The
+likely real costs on RP2350 are XIP-cache misses on the interpreter hot path
+and QSPI round-trips to chip RAM in PSRAM — not the interpreter itself.
+Decided against swapping Musashi for an Emu68-style JIT: Emu68 is an AArch64
+JIT that needs ~30 host regs + an MMU + an RWX cache in fast RAM, none of which
+exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
+
+- [ ] **Profile first.** Add a cycle counter (DWT CYCCNT / `systick`) around
+      `cpu_execute()` vs `dma_execute()` vs `hostDisplay()` for a WB boot, and
+      count `chipRead*/chipWrite*` calls by address range. Confirm it is
+      CPU/memory-bound before optimizing.
+- [ ] **Keep Musashi's tables in SRAM** (they already are by default —
+      `m68ki_instruction_jump_table` 256 KB @ 0x2000_9b88, `m68ki_cycles`
+      192 KB @ 0x2004_9e68). Guard against a future refactor pushing them to
+      flash; the `m68ki_cpu` register struct (272 B) is already SRAM-resident.
+- [ ] **Run the Musashi hot path from SRAM**, not XIP flash. Tag the dispatch
+      loop + the most common opcode handlers (MOVE, ADD/SUB, Bcc, JSR/RTS,
+      LEA, CMP, Tcc, ANDI/ORI to CCR) with `__not_in_flash_func(...)` so
+      interpreter dispatch does not stall on XIP-cache misses. Watch SRAM
+      budget — only ~40–50 KB headroom; move the hottest handlers only, by
+      profile.
+- [ ] **SRAM window over low chip RAM.** The 68k SSP/USP stacks, the exception
+      vector table (0x0000–0x03FF) and hot Exec structures all cluster in low
+      chip RAM. Back the first 64–128 KB of chip RAM with an SRAM array and
+      keep the rest in PSRAM; add an `addr < BOARD_CHIPRAM_SRAM_WINDOW`
+      branch to `chipRead*/chipWrite*` and `CHIPRAM_BASE_PTR` users
+      (`omega/Chipset.c` chipramW, `omega/DMA.c` disk DMA). One compare+branch
+      per access vs. a saved QSPI transaction on the hottest region.
+- [ ] **Consider const Musashi tables in flash.** If SRAM is tight after the
+      above, pre-generate `m68ki_instruction_jump_table` / `m68ki_cycles` as
+      `const` (XIP-cached reads) to reclaim ~448 KB SRAM for the chip-RAM
+      window. Requires baking the tables at build time instead of
+      `m68k_build_opcode_table()` at boot.
+- [ ] Re-profile after each step; stop when WB feels responsive.
+
+---
+
 ## Known issues / investigation needed
 
 - [ ] **PSRAM timing at 250 MHz**: `src/psram.c` uses `clkdiv=2` (QSPI at 125 MHz).
