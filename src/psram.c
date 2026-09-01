@@ -4,9 +4,11 @@
 // After this call, 8MB of PSRAM is accessible at PSRAM_BASE (0x11000000).
 
 #include "psram.h"
+#include "board_config.h"
 #include "hardware/structs/qmi.h"
 #include "hardware/xip_cache.h"
 #include "hardware/clocks.h"
+#include "hardware/gpio.h"
 #include "pico/stdlib.h"
 
 // QMI register field helpers (SDK 2.x symbols)
@@ -15,9 +17,9 @@
 #endif
 
 static void _psram_set_qspi_timing(void) {
-    // System clock (typically 150 MHz on Pico Plus 2 after PLL).
-    // APS6404L max read clock: 133 MHz in Quad mode → clkdiv ≥ 2 at 150 MHz.
-    const uint32_t clkdiv = 2;
+    // QSPI clock = sys_clk / clkdiv.  At 250 MHz sys and clkdiv=2 that is
+    // 125 MHz, within the APS6404L 133 MHz quad-read rating.  Board-tunable.
+    const uint32_t clkdiv = BOARD_PSRAM_CLKDIV;
 
     // Timing register: clkdiv, min-deselect, max-select, rxdelay
     qmi_hw->m[1].timing =
@@ -25,7 +27,7 @@ static void _psram_set_qspi_timing(void) {
         (2u        << QMI_M1_TIMING_MIN_DESELECT_LSB)   |  // ≥12 ns
         (0x3fu     << QMI_M1_TIMING_MAX_SELECT_LSB)     |  // max CS active
         (2u        << QMI_M1_TIMING_SELECT_HOLD_LSB)    |
-        (1u        << QMI_M1_TIMING_RXDELAY_LSB);
+        (BOARD_PSRAM_RXDELAY << QMI_M1_TIMING_RXDELAY_LSB);
 
     // Read format: Quad I/O, EBh command, 6 dummy cycles
     qmi_hw->m[1].rfmt =
@@ -33,7 +35,7 @@ static void _psram_set_qspi_timing(void) {
         (QMI_M1_RFMT_ADDR_WIDTH_VALUE_Q   << QMI_M1_RFMT_ADDR_WIDTH_LSB)   |
         (QMI_M1_RFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M1_RFMT_SUFFIX_WIDTH_LSB) |
         (QMI_M1_RFMT_DUMMY_WIDTH_VALUE_Q  << QMI_M1_RFMT_DUMMY_WIDTH_LSB)  |
-        (6u << QMI_M1_RFMT_DUMMY_LEN_LSB)                                   |
+        (BOARD_PSRAM_READ_DUMMY << QMI_M1_RFMT_DUMMY_LEN_LSB)              |
         (QMI_M1_RFMT_DATA_WIDTH_VALUE_Q   << QMI_M1_RFMT_DATA_WIDTH_LSB)   |
         (1u << QMI_M1_RFMT_PREFIX_LEN_LSB);   // 8-bit prefix
 
@@ -85,6 +87,11 @@ static void _psram_enter_quad_mode(void) {
 }
 
 void psram_init(void) {
+    // Route the QMI CS1 (chip-select 1) signal to the board's PSRAM CS GPIO.
+    // On the Pimoroni Pico Plus 2 the SDK board header does this; on a bare
+    // pico2 / generic RP2350B target nobody does, so do it explicitly.
+    gpio_set_function(BOARD_PSRAM_CS_PIN, GPIO_FUNC_XIP_CS1);
+
     _psram_reset();
     _psram_enter_quad_mode();
     _psram_set_qspi_timing();

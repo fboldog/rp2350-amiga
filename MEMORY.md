@@ -165,4 +165,26 @@ immediately after `psram_init()` in `src/main.c`.
   fine. Battery-clock at `0xDC0000` is a stub (`date` prints `<invalid>`).
 - Build/run: `./native/build.sh` then
   `./native/omega-native <adf> 300000 50000 3000`; `native/ppm2png.py` for PNGs.
-- Next session: implement display output (Phase 2).
+
+**Board retargeted to Waveshare RP2350-PiZero (2026-09-01).** User's test board.
+- `src/board_config.h` — central pin/feature map. `src/boards/waveshare_rp2350_pizero.h`
+  — Pico SDK board header (SDK 2.1.1 has none; `// pico_cmake_set PICO_PLATFORM=rp2350`).
+  `CMakeLists.txt` now `PICO_BOARD=waveshare_rp2350_pizero` + `PICO_BOARD_HEADER_DIRS`.
+  Builds as `rp2350-arm-s`. `psram.h`/`Memory.h`/`main.c` now pull from board_config.h.
+- **RP2350B**, 16 MB flash. **PSRAM is NOT fitted from the factory** — empty 8-pin
+  QSPI pad (U1) on the shared QMI bus, CS = **GPIO47**. User must solder an
+  APS6404L-class part; 8 MB max on one die (their "16 MB" isn't possible on this
+  board's single CS). `board_config.h` has `BOARD_HAS_PSRAM` (default 1).
+- `src/psram.c` now does `gpio_set_function(47, GPIO_FUNC_XIP_CS1)` — the old code
+  never routed CS1 (worked on Pico Plus 2 only because its SDK header did it).
+- DVI/HDMI on-board: TMDS D0=GPIO36 D1=GPIO34 D2=GPIO32 CLK=GPIO38,
+  invert_diffpairs=false, PIO0, gpio_base=16 (= PicoDVI `pico_sock_cfg`).
+  DDC SDA=44/SCL=45, CEC=46.
+- microSD: SPI1 SCK=30 MOSI=31 MISO=40 CS=43 (SDIO alt: D0=40 D1=41 D2=42 D3=43 CLK=38).
+- WS2812 LED=GPIO2, I2C0 SDA=6/SCL=7, UART0 TX=0/RX=1. PIO-USB D+ pin is a guess
+  (GPIO12) — verify against schematic before use.
+- Pin data cross-checked: Waveshare RP2350-PiZero.pdf schematic + demo pack
+  (01-DVI common_dvi_pin_configs.h, 03-MicroSD hw_config.c). Local copies were in
+  /tmp/pizero-demo (gone next session — re-download from
+  files.waveshare.com/wiki/RP2350-PiZero/RP2350-PiZero.zip / .pdf).
+- Next session: implement display output (Phase 2) — PicoDVI via `BOARD_DVI_SERIALISER_CFG`.

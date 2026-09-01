@@ -23,6 +23,7 @@
 #include "hardware/vreg.h"
 #include "hardware/clocks.h"
 
+#include "board_config.h"
 #include "psram.h"
 #include "Memory.h"
 #include "Host.h"
@@ -46,13 +47,12 @@
 #define ADF_FLASH_SIZE   0x200000u     // 2 MB per drive (MFM encoded)
 
 // ── Overclock ─────────────────────────────────────────────────────────────
-// RP2350 default: 150 MHz.  Push to 250 MHz for headroom.
-// PSRAM timing in psram.c is set for ≤ 133 MHz QSPI (clkdiv=2 → 125 MHz).
-// Bump clkdiv to 2 gives ~125 MHz PSRAM which is within spec.
-#define OVERCLOCK_KHZ  250000u
+// RP2350 default: 150 MHz.  BOARD_SYS_CLK_KHZ (board_config.h) is the working
+// point (250 MHz).  PSRAM QSPI = sys / BOARD_PSRAM_CLKDIV, kept ≤ 133 MHz.
+#define OVERCLOCK_KHZ  BOARD_SYS_CLK_KHZ
 
 static void set_sys_clock_250mhz(void) {
-    vreg_set_voltage(VREG_VOLTAGE_1_15);
+    vreg_set_voltage(BOARD_VREG_VOLTAGE);
     sleep_ms(10);
     set_sys_clock_khz(OVERCLOCK_KHZ, true);
 }
@@ -87,7 +87,8 @@ static void load_floppy_from_flash(int drive, uint32_t flash_abs_addr) {
 int main(void) {
     // 1. Clock and UART
     set_sys_clock_250mhz();
-    stdio_uart_init_full(uart0, 115200, 0 /*TX GPIO*/, 1 /*RX GPIO*/);
+    stdio_uart_init_full(BOARD_UART_ID, BOARD_UART_BAUD,
+                         BOARD_UART_TX_PIN, BOARD_UART_RX_PIN);
     printf("\n\nOmega/RP2350 – Amiga emulator\n");
     printf("Sys clock: %lu kHz\n", (unsigned long)(clock_get_hz(clk_sys) / 1000));
 

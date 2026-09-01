@@ -1,7 +1,11 @@
 # Agent Instructions – Omega RP2350 Port
 
 This is a bare-metal Amiga emulator port from Linux/macOS (SDL2) to the
-RP2350B microcontroller (Pimoroni Pico Plus 2, Cortex-M33, 8 MB PSRAM).
+RP2350B microcontroller.  Target board: **Waveshare RP2350-PiZero**
+(Cortex-M33, 16 MB flash, DVI/HDMI, microSD, PSRAM *pad* on GPIO47 — not
+fitted from the factory, must be soldered).  All board pins and feature
+flags are in `src/board_config.h`; the SDK board header is
+`src/boards/waveshare_rp2350_pizero.h`.
 
 Read this file before doing any work. It tells you the architecture, what changed,
 and where every important decision lives so you don't re-derive it.
@@ -12,13 +16,16 @@ and where every important decision lives so you don't re-derive it.
 
 ```
 rp2350-amiga/
-├── CMakeLists.txt          Pico SDK 2.x build; board=pico2; -DPICO_BUILD=1
+├── CMakeLists.txt          Pico SDK 2.x; PICO_BOARD=waveshare_rp2350_pizero; -DPICO_BUILD=1
 ├── pico_sdk_import.cmake   Standard SDK import helper (copy from SDK)
 ├── src/                    RP2350-specific code (overrides omega/ platform layer)
+│   ├── board_config.h      ◀ ALL board pins / feature flags / PSRAM+Amiga map
+│   ├── boards/waveshare_rp2350_pizero.h   Pico SDK board header (local)
 │   ├── main.c              Bare-metal entry: overclock, PSRAM, ROM, emulation loop
-│   ├── psram.h / psram.c   QMI CS1 init for APS6404L 8 MB PSRAM at 0x11000000
+│   ├── psram.h / psram.c   QMI CS1 init (routes CS1→GPIO47) for APS6404L-class PSRAM
 │   ├── Memory.h / Memory.c PSRAM-backed chipRead*/chipWrite* (no 16 MB array)
 │   └── Host.h / Host.c     SDL-free host: PSRAM framebuffer, UART printf, stubs
+├── native/                 Head-less PC runner (see native/README.md)
 ├── omega/                  Upstream Omega source (minimal diffs from original)
 │   ├── CPU.c               +#ifdef PICO_BUILD guard in cpu_pulse_reset
 │   ├── Chipset.c           +chipramW = CHIPRAM_BASE_PTR (not low16Meg)
@@ -50,7 +57,9 @@ The original Omega used:
 unsigned char low16Meg[16777216];  // 16 MB static array – impossible on RP2350
 ```
 
-The RP2350 port uses 8 MB PSRAM (memory-mapped at 0x11000000) with this layout:
+The RP2350 port uses up to 8 MB PSRAM (memory-mapped at 0x11000000; the
+RP2350-PiZero pad takes a single 8-pin APS6404L-class die) with this layout
+(defined in `src/board_config.h`, `BOARD_MAP_*`):
 
 | PSRAM offset      | Content              | Amiga address     |
 |-------------------|----------------------|-------------------|
@@ -73,8 +82,8 @@ It is used by `omega/Chipset.c` (chipramW) and `omega/DMA.c` (disk DMA writes).
 ```bash
 export PICO_SDK_PATH=/path/to/pico-sdk   # SDK 2.x required
 mkdir build && cd build
-cmake .. -DPICO_BOARD=pico2
-make -j$(nproc)
+cmake .. -G Ninja   # PICO_BOARD defaults to waveshare_rp2350_pizero
+ninja
 # Output: build/omega-amiga.uf2
 ```
 
@@ -96,7 +105,7 @@ Per-session env (not persisted):
 ```bash
 export PICO_SDK_PATH=/root/pico-sdk
 export PATH=/root/toolchains/arm-gnu-toolchain-14.2.rel1-aarch64-arm-none-eabi/bin:$PATH
-cd build && cmake .. -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release && ninja
+cd build && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja
 ```
 
 GCC 14 note: `-Wincompatible-pointer-types` is now an **error**, not a warning.
@@ -135,10 +144,9 @@ All RP2350-specific code in omega/ files uses:
 Implement `display_push_frame()` in `src/Host.c`. The framebuffer is already rendered
 into PSRAM at `PSRAM_BASE + PSRAM_FRAMEBUF_OFFSET` in ARGB32, 640×400.
 
-Three options (pick one):
-1. **SPI TFT** (ILI9341/ST7789) – easiest hardware, lowest effort
-2. **VGA via PIO** (pico-extras scanvideo) – good resolution, resistor DAC needed
-3. **DVI/HDMI via PicoDVI** – best quality, needs HDMI breakout board
+The RP2350-PiZero has HDMI on-board → use **PicoDVI**. Pins are in
+`board_config.h` (`BOARD_DVI_SERIALISER_CFG`, `BOARD_DVI_GPIO_BASE`), matching
+PicoDVI's `pico_sock_cfg`. See TODO.md Phase 2 Option C.
 
 ### Input
 Wire `pressKey(keyCode)` / `releaseKey(keyCode)` to TinyUSB HID keyboard events.

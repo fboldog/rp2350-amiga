@@ -13,6 +13,10 @@
 #pragma once
 #include <stdint.h>
 
+#ifdef PICO_BUILD
+#include "board_config.h"
+#endif
+
 // ── chip RAM size ─────────────────────────────────────────────────────────
 #define CHIPTOP 0x1FFFFFu   // 2 MB chip RAM top
 
@@ -20,8 +24,13 @@
 // Kickstart ROM is stored in flash starting at this absolute address.
 // Place the ROM file at flash offset 0x200000 (2 MB from flash start) in
 // your CMakeLists.txt / UF2 combined image so it lands at 0x10200000.
+#ifdef PICO_BUILD
+#define ROM_FLASH_BASE  BOARD_ROM_FLASH_BASE
+#define ROM_SIZE        BOARD_ROM_SIZE
+#else
 #define ROM_FLASH_BASE  0x10200000u
 #define ROM_SIZE        0x080000u   // 512 KB max (256 KB ROMs are mirrored)
+#endif
 
 // ── Direct chip RAM access helpers (used by Chipset.c and DMA.c) ─────────
 // On desktop, chip RAM is the start of the low16Meg array.

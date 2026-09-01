@@ -20,11 +20,27 @@ to the **RP2350B** (Pimoroni Pico Plus 2), running on Cortex-M33 @ 250 MHz.
 
 ## Hardware
 
-- **MCU**: RP2350B on Pimoroni Pico Plus 2 (or equivalent)
-- **PSRAM**: 8 MB APS6404L-3SQR on QMI CS1 → mapped at `0x11000000`
-- **Flash**: 16 MB on QMI CS0 → firmware at `0x10000000`, ROM at `0x10200000`
+Target board: **Waveshare RP2350-PiZero** (RP2350B).  All board wiring is in
+[`src/board_config.h`](src/board_config.h); the Pico SDK board header is
+[`src/boards/waveshare_rp2350_pizero.h`](src/boards/waveshare_rp2350_pizero.h).
+
+- **MCU**: RP2350B (80-pin, GPIO0..47), Cortex-M33 @ 250 MHz
+- **PSRAM**: ⚠️ **not fitted from the factory** — the PiZero has an empty 8-pin
+  QSPI pad (U1) on the shared QMI bus, CS = GPIO47.  Solder an APS6404L-class
+  part (3.3 V quad, `0x35` enter-QPI, `0xEB` fast-read).  8 MB max on one die.
+  Mapped at `0x11000000` after `psram_init()`.
+- **Flash**: 16 MB QSPI (CS0) → firmware at `0x10000000`, ROM at `0x10200000`
 - **UART**: TX=GPIO0, RX=GPIO1 (115200 8N1) for debug output
-- **Display**: Connect your own (see Phase 2 notes)
+- **Display (Phase 2)**: on-board DVI/HDMI.  TMDS D0=GPIO36, D1=GPIO34,
+  D2=GPIO32, CLK=GPIO38 (`invert_diffpairs=false`, PIO0, `gpio_base=16`) —
+  i.e. PicoDVI's `pico_sock_cfg`.
+- **microSD (Phase 3)**: SPI1 — SCK=GPIO30, MOSI=GPIO31, MISO=GPIO40,
+  CS=GPIO43 (4-bit SDIO also wired: D0=40, D1=41, D2=42, D3=43, CLK=38).
+- **USB**: native USB-C (TinyUSB host for HID), plus an optional PIO-USB port.
+- **LED**: one WS2812 on GPIO2 (no plain LED).
+
+To build for the original Pimoroni Pico Plus 2 instead, pass
+`-DPICO_BOARD=pimoroni_pico_plus2_rp2350` and add `BOARD_*` overrides.
 
 ## PSRAM Layout
 
@@ -59,8 +75,8 @@ sudo apt install cmake gcc-arm-none-eabi
 
 ```bash
 mkdir build && cd build
-cmake .. -DPICO_BOARD=pico2
-make -j4
+cmake .. -G Ninja        # PICO_BOARD defaults to waveshare_rp2350_pizero
+ninja
 ```
 
 Output: `build/omega-amiga.uf2`

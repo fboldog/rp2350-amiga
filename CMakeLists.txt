@@ -5,11 +5,16 @@ cmake_minimum_required(VERSION 3.18)
 #   export PICO_SDK_PATH=/path/to/pico-sdk
 # Or set -DPICO_SDK_PATH=... on the cmake command line.
 #
-# Pimoroni Pico Plus 2 board definition:
-#   Option A (Pimoroni SDK): set PICO_BOARD_CMAKE_DIRS to pimoroni-pico/boards
-#   Option B (vanilla SDK 2.x): set PICO_BOARD=pico2 (no PSRAM autoconfig;
-#             psram_init() in src/psram.c handles QMI setup manually).
-set(PICO_BOARD pico2 CACHE STRING "Target board")
+# Target board: Waveshare RP2350-PiZero (RP2350B, 16MB flash, PSRAM pad on
+# GPIO47, DVI, microSD).  We ship a local Pico SDK board header for it since
+# SDK 2.1.1 does not include one.  All peripheral pins live in
+# src/board_config.h; psram_init() in src/psram.c does the QMI CS1 setup.
+#
+# To build for the original Pimoroni Pico Plus 2 instead, set
+#   -DPICO_BOARD=pimoroni_pico_plus2_rp2350
+# and define BOARD_* overrides, or revert to -DPICO_BOARD=pico2 (RP2350A).
+set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/src/boards)
+set(PICO_BOARD waveshare_rp2350_pizero CACHE STRING "Target board")
 
 # Pull in Pico SDK (must be before project())
 include(pico_sdk_import.cmake)

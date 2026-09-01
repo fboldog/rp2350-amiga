@@ -38,6 +38,13 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 
 ## Phase 2 – Display output
 
+Target board is the **Waveshare RP2350-PiZero** (see `src/board_config.h`),
+which has an on-board **DVI/HDMI** connector — so Option C below is the natural
+choice. Pin map is already in `board_config.h`:
+TMDS D0=GPIO36, D1=GPIO34, D2=GPIO32, CLK=GPIO38, `invert_diffpairs=false`,
+PIO0, `pio_set_gpio_base(pio0, 16)` — identical to PicoDVI's `pico_sock_cfg`.
+Use `BOARD_DVI_SERIALISER_CFG` to init libdvi.
+
 Pick ONE output method and implement `display_push_frame()` in `src/Host.c`.
 
 ### Option A: SPI TFT (easiest hardware, lowest bandwidth)
@@ -53,12 +60,27 @@ Pick ONE output method and implement `display_push_frame()` in `src/Host.c`.
 - [ ] In DMA `evenCycle` VBL handler, push each scanline to the VGA scanvideo buffer
 - [ ] Add `pico_scanvideo_dpi` to target_link_libraries
 
-### Option C: DVI/HDMI via PicoDVI (best quality, needs HDMI breakout)
-- [ ] Wire TMDS pairs (4 GPIO pairs) to HDMI connector (through 270 Ω)
-- [ ] Clone PicoDVI and add as submodule / CMake subdirectory
-- [ ] Allocate DVI framebuffer (640×480 16bpp = 614 KB) – needs PSRAM
-- [ ] In `display_push_frame()`: convert ARGB32 framebuf → RGB565 and hand to PicoDVI
-- [ ] Add `libdvi` to target_link_libraries
+### Option C: DVI/HDMI via PicoDVI  ◀ RP2350-PiZero has this on-board
+- [ ] Add PicoDVI `libdvi` (Waveshare ship a known-good copy in their
+      RP2350-PiZero demo pack; or upstream Wren6991/PicoDVI)
+- [ ] `struct dvi_serialiser_cfg cfg = BOARD_DVI_SERIALISER_CFG;` +
+      `pio_set_gpio_base(pio0, BOARD_DVI_GPIO_BASE);`
+- [ ] Pick timing: 640×480p60. Reconcile `BOARD_SYS_CLK_KHZ` with the DVI bit
+      clock (252 MHz full-res, ~126 MHz scanbuf). May need to drop the CPU
+      overclock or run DVI on its own clock.
+- [ ] Allocate DVI scanline/framebuffer in PSRAM; convert Omega's ARGB32
+      640×400 → RGB565 (letterbox to 480 lines) in `display_push_frame()`
+- [ ] DVI IRQ + scanout on core 1 (see Phase 4)
+
+---
+
+## Phase 2b – microSD (optional, RP2350-PiZero has a slot)
+
+- [ ] Add a FatFS + SD-SPI driver (Waveshare bundle no-OS-FatFS; pins in
+      `board_config.h`: SPI1 SCK30/MOSI31/MISO40/CS43)
+- [ ] Load Kickstart ROM + ADF images from the card instead of baking them into
+      flash with `combine_uf2.py` — makes disk swapping practical
+- [ ] Optional: a tiny on-screen disk chooser
 
 ---
 
