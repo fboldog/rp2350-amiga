@@ -108,7 +108,7 @@ immediately after `psram_init()` in `src/main.c`.
 |------|-----------|
 | PSRAM timing marginal at 250 MHz | Drop to 200 MHz if unstable; or adjust dummy cycles in psram.c |
 | Musashi stack overflow | Add `pico_set_binary_type(omega-amiga no_flash)` or increase stack limit |
-| KS 3.x ROMs don't boot | Omega limitation, not RP2350; KS 1.3 and 2.x work |
+| KS 2.x/3.x don't reach a GUI | Omega display/chipset gap (upstream), not RP2350 or a CPU issue. Per Omega's README: KS 1.x boots fully (insert-disk screen + WB); KS 2.x/3.x "bootstrap" and can open an Intuition screen with working mouse/keyboard but don't render the insert-disk screen. A500/A600 KS 3.1 (40.63) and 3.2 are plain 68000 + OCS/ECS — no 68020 needed; only AGA-line ROM images (40.68, A1200/A4000) would also need an '020 core + AGA chipset. Incremental work, not a rewrite. |
 | DMA cycle accuracy | Omega's DMA is approximate; will affect some demos, not WB |
 
 ---

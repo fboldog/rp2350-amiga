@@ -172,8 +172,22 @@ exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
 - [ ] **`chipset.vposr` PAL/NTSC flag**: currently hardcoded to NTSC value `0x1000`.
       PAL should be `0x0000`. Change in `omega/DMA.c:dma_execute()`.
 - [ ] **ROM validation**: `src/Memory.c:memory_init()` checks `rom_base[0] == 0x11`.
-      KS 2.x ROMs start with `0x11 0x14`; KS 1.3 with `0x11 0x11`. Both pass.
-      KS 3.x ROMs not supported (Omega limitation, not RP2350 limitation).
+      KS 2.x ROMs start with `0x11 0x14`; KS 1.3 with `0x11 0x11`. KS 3.1/3.2
+      also start `0x11 ..` so they pass and execute.
+- [ ] **KS 2.x / 3.x don't reach a GUI** (upstream Omega gap, not RP2350, not a
+      CPU issue). Omega's own README: KS 1.x boots fully (insert-disk screen +
+      Workbench); KS 2.x/3.x "bootstrap" and can open an Intuition screen with a
+      working pointer/keyboard but never render the insert-disk screen. Root
+      cause is display bring-up: 1.3 uses a trivial copper + bitplane setup;
+      2.0+ graphics.library uses a richer copper list, ECS-aware display-window
+      regs (`DIWHIGH`, `BPLCON3`), a sprite pointer and `BEAMCON0`, and Omega's
+      copper/sprite/blitter/beam emulation is approximate. A500/A600 KS 3.1
+      (40.63) and 3.2 are plain **68000 + OCS/ECS** - no 68020 needed; only
+      AGA-line ROM dumps (40.68, A1200/A4000) would additionally need an '020
+      core (`m68kconf.h` has 010/020 `OPT_OFF`) and AGA chipset
+      (`Chipset.c:713` "No AGA support yet"). To chase KS 3.1 A500: feed the
+      40.63 ROM, watch UART for where exec/graphics init diverges, fill in the
+      missing ECS register behaviour. Incremental, not a rewrite.
 - [ ] **Slow RAM shadow**: Omega's original code has `#define NOSLOWRAM` to mirror
       chipset registers at 0xC00000. This is not implemented in `src/Memory.c`.
       Add if KS 1.x boot hangs.
