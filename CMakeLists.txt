@@ -1,0 +1,113 @@
+cmake_minimum_required(VERSION 3.18)
+
+# ── Board / SDK setup ────────────────────────────────────────────────────
+# Point PICO_SDK_PATH to your Pico SDK 2.x checkout before running cmake:
+#   export PICO_SDK_PATH=/path/to/pico-sdk
+# Or set -DPICO_SDK_PATH=... on the cmake command line.
+#
+# Pimoroni Pico Plus 2 board definition:
+#   Option A (Pimoroni SDK): set PICO_BOARD_CMAKE_DIRS to pimoroni-pico/boards
+#   Option B (vanilla SDK 2.x): set PICO_BOARD=pico2 (no PSRAM autoconfig;
+#             psram_init() in src/psram.c handles QMI setup manually).
+set(PICO_BOARD pico2 CACHE STRING "Target board")
+
+# Pull in Pico SDK (must be before project())
+include(pico_sdk_import.cmake)
+
+project(omega-amiga C CXX ASM)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+
+pico_sdk_init()
+
+# ── Sources ───────────────────────────────────────────────────────────────
+# RP2350-specific files (override platform-dependent Omega originals)
+set(PLATFORM_SOURCES
+    src/main.c
+    src/psram.c
+    src/Memory.c
+    src/Host.c
+)
+
+# Omega emulator core (platform-independent)
+set(OMEGA_SOURCES
+    omega/Blitter.c
+    omega/Chipset.c
+    omega/CIA.c
+    omega/CPU.c
+    omega/debug.c
+    omega/DMA.c
+    omega/Floppy.c
+    omega/Gayle.c
+    omega/m68kcpu.c
+    omega/m68kdasm.c
+    omega/m68kopac.c
+    omega/m68kopdm.c
+    omega/m68kopnz.c
+    omega/m68kops.c
+)
+
+add_executable(omega-amiga
+    ${PLATFORM_SOURCES}
+    ${OMEGA_SOURCES}
+)
+
+# ── Include paths ─────────────────────────────────────────────────────────
+# src/ comes first so our Memory.h / host.h shadow the SDL originals in omega/
+target_include_directories(omega-amiga PRIVATE
+    src
+    omega
+)
+
+# ── Compile definitions ────────────────────────────────────────────────────
+target_compile_definitions(omega-amiga PRIVATE
+    PICO_BUILD=1
+    # Overclock: vreg / PLL config in main.c sets the actual clock;
+    # this constant is just for documentation.
+    OMEGA_SYS_KHZ=250000
+)
+
+# ── Pico SDK libraries ────────────────────────────────────────────────────
+target_link_libraries(omega-amiga
+    pico_stdlib
+    pico_multicore
+    hardware_vreg
+    hardware_clocks
+    hardware_structs    # qmi_hw, xip_ctrl_hw
+    # hardware_dma      # uncomment if you add DMA transfers for display
+)
+
+# ── UART stdio (printf → UART0) ───────────────────────────────────────────
+pico_enable_stdio_uart(omega-amiga 1)
+pico_enable_stdio_usb(omega-amiga 0)
+
+# ── Output formats ────────────────────────────────────────────────────────
+pico_add_extra_outputs(omega-amiga)   # generates .uf2, .hex, .bin, .map
+
+# ── ROM embedding ─────────────────────────────────────────────────────────
+# The Kickstart ROM must be placed at flash offset 0x200000.
+# After building, combine firmware.uf2 + kickstart.rom into a single image:
+#
+#   python3 tools/combine_uf2.py omega-amiga.uf2 kickstart.rom combined.uf2
+#
+# The combine_uf2.py script handles the flash offset and UF2 block IDs.
+# See tools/combine_uf2.py for details.
+#
+# Alternatively: use picotool to load both separately:
+#   picotool load omega-amiga.uf2
+#   picotool load kickstart.rom -o 0x10200000
+
+# ── Compiler flags ────────────────────────────────────────────────────────
+# -O2 is the SDK default; push to -O3 for the emulator inner loop.
+target_compile_options(omega-amiga PRIVATE
+    -O3
+    -Wall
+    -Wno-unused-function
+    -Wno-unused-variable
+    # Musashi generates lots of implicit-fallthrough; suppress it
+    -Wno-implicit-fallthrough
+)
+
+message(STATUS "Board:       ${PICO_BOARD}")
+message(STATUS "SDK path:    $ENV{PICO_SDK_PATH}")
+message(STATUS "Build type:  ${CMAKE_BUILD_TYPE}")
