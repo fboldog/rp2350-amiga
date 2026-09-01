@@ -187,4 +187,20 @@ immediately after `psram_init()` in `src/main.c`.
   (01-DVI common_dvi_pin_configs.h, 03-MicroSD hw_config.c). Local copies were in
   /tmp/pizero-demo (gone next session — re-download from
   files.waveshare.com/wiki/RP2350-PiZero/RP2350-PiZero.zip / .pdf).
-- Next session: implement display output (Phase 2) — PicoDVI via `BOARD_DVI_SERIALISER_CFG`.
+
+**KS 3.1 investigation (2026-09-01, native runner).** User supplied a KS 3.1
+ROM (exec 40.10). Native runner gained `OMEGA_ROM=<file>` / `OMEGA_DISASM=1`.
+- Found + fixed a real OOB bug: `sprite2chunky()` only clamped the upper edge;
+  KS 3.1 parks sprite 0 at X=-254 → `pixBuff[-254]` write → SIGSEGV (native) /
+  silent wild write ~1 KB before the PSRAM framebuffer (device). Fixed in
+  `src/Host.c` + `native/host_native.c`; also guard negative sprite row `Ny`
+  in `omega/DMA.c`. Upstream Omega has the same bug.
+- After the fix KS 3.1 comes up to its grey Workbench screen but the
+  insert-disk graphic doesn't draw. `omega/Blitter.c` stubs two modes KS 3.1
+  uses: **one-dot-per-h-line** line draw (`bltcon1` bit 1 SING, printf at
+  ~L178) and **area fill** inclusive/exclusive (`bltcon1` bits 3/4, printfs at
+  ~L434/438). Full implementation guide is in **TODO.md** under the KS 3.1
+  item ("Implementing the two missing blitter modes"). This is the handoff
+  point — continuing on the other machine.
+- Next: implement those two blitter modes; also still open: display output
+  (Phase 2) — PicoDVI via `BOARD_DVI_SERIALISER_CFG`.

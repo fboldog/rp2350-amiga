@@ -184,12 +184,76 @@ exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
       - [ ] KS 3.1 now brings up its grey Workbench screen and starts drawing
             but the insert-disk graphic doesn't appear. `omega/Blitter.c` logs
             "No Single pixel per H-line mode yet" and "NO EXCLUSIVE FILL MODE
-            YET!!" — graphics.library 40.x uses blitter line-draw (one pixel
-            per hline) and exclusive-fill modes that Omega doesn't implement.
-            Implementing those two blitter modes is the next step.
+            YET!!" — graphics.library 40.x uses blitter one-dot line draw and
+            exclusive area-fill, which Omega stubs with a printf. **Next step:
+            implement both in `blitter_execute()` (see the guide below).**
       - Note: A500/A600 KS 3.1 (40.63) / 3.2 are plain 68000 + OCS/ECS — no
         68020 needed. Only AGA-line ROM dumps (40.68) would also need an '020
         core (`m68kconf.h` 010/020 `OPT_OFF`) + AGA chipset (`Chipset.c:713`).
+
+      #### Implementing the two missing blitter modes (`omega/Blitter.c`)
+
+      `blitter_execute(Chipset_t*)` is the immediate-mode blitter (the
+      `OblitterExecute` / `blitterCycle` cycle-accurate skeleton is an unused
+      empty stub). It splits on `bltcon1 & 1`: set = **line mode** (8 octants,
+      `case 0..7`), clear = **area/copy mode** (channels A/B/C/D, minterms,
+      masks, shifts, ascending/descending). Both paths currently ignore the
+      two features KS 3.1 needs.
+
+      BLTCON1 bit map (for reference):
+      | bit | area mode | line mode |
+      |----|-----------|-----------|
+      | 0  | LINE=0    | LINE=1 |
+      | 1  | DESC (address decrement) | SING (one dot per h-line) |
+      | 2  | FCI (fill carry input)   | SUD  (octant select) |
+      | 3  | IFE (inclusive fill)     | SUL  (octant select) |
+      | 4  | EFE (exclusive fill)     | AUL  (octant select) |
+      | 12-15 | BLTBSH (B/pattern shift) | texture start bit |
+
+      **(a) One-dot-per-horizontal-line** — `bltcon1 bit 1` (SING) in line mode.
+      `Blitter.c:175` already reads `oneDot`; line ~178 just prints. In the
+      octant loops the Bresenham step does `d += 1` (a step along the minor
+      axis) only when `D > 0`, otherwise it stays on the same minor-axis row.
+      With SING set, plot the pixel **only on the iteration where the minor
+      axis (the raster line) is about to change or on the first pixel of a new
+      line** — i.e. suppress the `chipramW[addr] = pixel` write on steps where
+      the current raster line equals the previously plotted one. Concretely:
+      keep `int lastRow = INT_MIN;` before the loop; compute this step's row
+      (for x-dominant octants 0/1/4/6 the row is the running minor coordinate
+      `d` plus the plane's base row; for y-dominant octants 2/3/5/7 it is `i`);
+      write the pixel only when `row != lastRow`, then `lastRow = row`. Used
+      by graphics.library for un-fillable outlines and `Move()/Draw()` with a
+      write mask that must not double-hit a scanline.
+
+      **(b) Area fill (inclusive `IFE` / exclusive `EFE`)** — `bltcon1` bits
+      3/4; `fillmode = (bltcon1 & 0x18) >> 3` (1 = inclusive, 2 = exclusive),
+      already computed at `Blitter.c:426`. Fill always runs with **DESC set**
+      (right-to-left), which is why the current stub sits inside
+      `if(bltcon1 & 2)` — keep that. Also read `int fci = (bltcon1 >> 2) & 1;`
+      (not currently read).
+
+      Fill runs on channel **D after the logic function**, per row, LSB→MSB of
+      each output word as the blit walks right-to-left, with a 1-bit `carry`
+      that is reset to `fci` at the **start of every row** (`for y` loop) and
+      carried across words within the row. Per output bit `b`:
+      ```
+      inclusive: out = b | carry;   carry ^= b;
+      exclusive: out = b ^ carry;   carry ^= b;   // i.e. out = carry_after
+      ```
+      Apply this to `channelD` before the byte-swap + `chipramW[dpt] = ` store
+      in the area-mode inner loop (around `Blitter.c:539-552`). Because the
+      area loop already runs `x` from 0..sizeh-1 with `xIncrement == -1`, the
+      words arrive in right-to-left order; iterate the 16 bits of each
+      `channelD` from bit 0 upward. Reset `carry = fci` in the `for(y…)` body,
+      before the `for(x…)` loop.
+
+      Verify with the native runner:
+      `OMEGA_ROM=kick31.rom ./native/omega-native "" 120000 15000 999999`
+      then `native/ppm2png.py frame_final.ppm out.png` — success = the
+      insert-disk graphic (hand + disk) appears instead of the bare grey
+      screen. The "…YET!!" printfs should stop. Re-check KS 1.3 still boots
+      to `[CLI 2]` and demos with fills (e.g. any WB 1.3 program that draws
+      filled shapes) still look right.
 - [ ] **Slow RAM shadow**: Omega's original code has `#define NOSLOWRAM` to mirror
       chipset registers at 0xC00000. This is not implemented in `src/Memory.c`.
       Add if KS 1.x boot hangs.
