@@ -192,6 +192,17 @@ exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
         68020 needed. Only AGA-line ROM dumps (40.68) would also need an '020
         core + AGA chipset.
 
+- [~] **KS 2.0.4 boot hangs after WB2 backdrop (2026-09-01).** ROM signature `11 14`,
+      512 KB. Tested with native runner, no disk.
+      - Grey Workbench 2 backdrop renders correctly by vbl=18 (~230 active lines,
+        NTSC copper). Faint title-bar separator visible at y≈175.
+      - CPU then freezes: non-black pixel count locked at 146919 for 1267+ VBLs
+        (~42 simulated seconds). No insert-disk requester, no cursor blink.
+      - KS 2.0.4 has a ROM disk (Workbench 2.04-in-ROM); it boots from it but stalls
+        after setting up the screen. Likely waiting for a CIA timer or disk-side
+        handshake that Omega's CIA/floppy emulation never delivers.
+      - Next step: add CIA-A/B timer debug or 68k PC trace to find the spin loop.
+
 - [ ] **Slow RAM shadow**: Omega's original code has `#define NOSLOWRAM` to mirror
       chipset registers at 0xC00000. This is not implemented in `src/Memory.c`.
       Add if KS 1.x boot hangs.
