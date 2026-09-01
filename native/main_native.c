@@ -2,9 +2,8 @@
 //
 // Builds the SAME omega/*.c sources the RP2350 firmware uses (with PICO_BUILD
 // undefined, so the desktop code paths are taken), links them against a plain
-// malloc'd framebuffer and the 16 MB low16Meg array, boots the embedded
-// Kickstart 1.3 ROM plus an ADF, runs the emulator for a while and dumps
-// framebuffer snapshots as PPM files.
+// malloc'd framebuffer and the 16 MB low16Meg array, boots a Kickstart ROM
+// plus an ADF, runs the emulator for a while and dumps framebuffer PPMs.
 //
 // Usage: omega-native [disk.adf] [iterations] [dump_every] [insert_at]
 //   disk.adf     ADF image for DF0:              (default: none)
@@ -12,6 +11,12 @@
 //   dump_every   write frameNNNN.ppm every N batches (default: 4000)
 //   insert_at    batch index at which to "insert" DF0: (default: 3000;
 //                Kickstart must finish drive identification first)
+//
+// Environment:
+//   OMEGA_ROM=<file>   load this Kickstart ROM (256 KB mirrored, or 512 KB)
+//                      instead of the built-in Kickstart 1.3.
+//   OMEGA_DISASM=1     turn on the Musashi disassembler (to UART/stdout) -
+//                      useful for seeing where a ROM's early init diverges.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +41,31 @@ extern void          native_dump_ppm(const char *path);
 
 int screenWidth  = 640;   // referenced by some omega translation units
 int screenHeight = 200;
-int disass       = 0;     // Musashi disassembler off
+int disass       = 0;     // Musashi disassembler (toggled by OMEGA_DISASM)
+
+// Load a Kickstart ROM file into low16Meg at 0xF80000.
+// 512 KB -> straight copy;  256 KB -> mirrored into 0xF80000 and 0xFC0000.
+// Returns 0 on success.
+static int load_rom_file(const char *path) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 1) { printf("  ROM: cannot open %s\n", path); return 1; }
+    off_t sz = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    if (sz == 0x40000) {                       // 256 KB
+        (void)!read(fd, &low16Meg[0xF80000], 0x40000);
+        memcpy(&low16Meg[0xFC0000], &low16Meg[0xF80000], 0x40000);
+    } else if (sz == 0x80000) {                // 512 KB
+        (void)!read(fd, &low16Meg[0xF80000], 0x80000);
+    } else {
+        printf("  ROM: %s is %lld bytes (expected 262144 or 524288)\n",
+               path, (long long)sz);
+        close(fd);
+        return 1;
+    }
+    close(fd);
+    printf("  ROM: %s loaded (%lld KB)\n", path, (long long)(sz >> 10));
+    return 0;
+}
 
 int main(int argc, char **argv) {
     const char  *adfPath   = (argc > 1) ? argv[1] : NULL;
@@ -45,15 +74,27 @@ int main(int argc, char **argv) {
     long         insertAt   = (argc > 4) ? strtol(argv[4], NULL, 0) : 3000;
     int          haveDisk   = 0;
 
-    printf("Omega native runner\n");
-    printf("  iterations=%ld  dump_every=%ld\n", iterations, dumpEvery);
+    const char *romPath = getenv("OMEGA_ROM");
+    if (getenv("OMEGA_DISASM")) disass = 1;
 
-    // ── Kickstart ROM into low16Meg at 0xF80000 (512 KB image) ───────────
-    memcpy(&low16Meg[0xF80000], kick13, 524288);
-    if (low16Meg[0xF80000] == 0x11) {
-        printf("  ROM: Kickstart loaded (first byte 0x11 OK)\n");
+    printf("Omega native runner\n");
+    printf("  iterations=%ld  dump_every=%ld  disasm=%d\n",
+           iterations, dumpEvery, disass);
+
+    // ── Kickstart ROM into low16Meg at 0xF80000 ─────────────────────────
+    if (romPath) {
+        if (load_rom_file(romPath)) return 1;
     } else {
-        printf("  ROM: bad signature 0x%02x\n", low16Meg[0xF80000]);
+        memcpy(&low16Meg[0xF80000], kick13, 524288);   // built-in KS 1.3
+        printf("  ROM: built-in Kickstart 1.3\n");
+    }
+    printf("  ROM: reset vector %02x %02x %02x %02x, entry %08x\n",
+           low16Meg[0xF80000], low16Meg[0xF80001],
+           low16Meg[0xF80002], low16Meg[0xF80003],
+           (low16Meg[0xF80004] << 24) | (low16Meg[0xF80005] << 16) |
+           (low16Meg[0xF80006] << 8)  |  low16Meg[0xF80007]);
+    if (low16Meg[0xF80000] != 0x11) {
+        printf("  ROM: bad signature (expected 0x11)\n");
         return 1;
     }
 
