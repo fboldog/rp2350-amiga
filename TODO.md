@@ -174,20 +174,22 @@ exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
 - [ ] **ROM validation**: `src/Memory.c:memory_init()` checks `rom_base[0] == 0x11`.
       KS 2.x ROMs start with `0x11 0x14`; KS 1.3 with `0x11 0x11`. KS 3.1/3.2
       also start `0x11 ..` so they pass and execute.
-- [ ] **KS 2.x / 3.x don't reach a GUI** (upstream Omega gap, not RP2350, not a
-      CPU issue). Omega's own README: KS 1.x boots fully (insert-disk screen +
-      Workbench); KS 2.x/3.x "bootstrap" and can open an Intuition screen with a
-      working pointer/keyboard but never render the insert-disk screen. Root
-      cause is display bring-up: 1.3 uses a trivial copper + bitplane setup;
-      2.0+ graphics.library uses a richer copper list, ECS-aware display-window
-      regs (`DIWHIGH`, `BPLCON3`), a sprite pointer and `BEAMCON0`, and Omega's
-      copper/sprite/blitter/beam emulation is approximate. A500/A600 KS 3.1
-      (40.63) and 3.2 are plain **68000 + OCS/ECS** - no 68020 needed; only
-      AGA-line ROM dumps (40.68, A1200/A4000) would additionally need an '020
-      core (`m68kconf.h` has 010/020 `OPT_OFF`) and AGA chipset
-      (`Chipset.c:713` "No AGA support yet"). To chase KS 3.1 A500: feed the
-      40.63 ROM, watch UART for where exec/graphics init diverges, fill in the
-      missing ECS register behaviour. Incremental, not a rewrite.
+- [~] **KS 3.1 boots but doesn't render the insert-disk screen.** Tested
+      2026-09-01 with a KS 3.1 ROM (exec 40.10) in the native runner.
+      - [x] FIXED: hard crash in `sprite2chunky()` — no lower-bound check, and
+            KS 3.1 parks sprite 0 (the pointer) at X = -254, so `pixBuff[-254]`
+            = OOB write (segfault native / silent PSRAM corruption on RP2350).
+            Also guarded a negative sprite row (`Ny < 0`) at `omega/DMA.c:699`.
+            Upstream Omega has the same bug; it just didn't fault under SDL.
+      - [ ] KS 3.1 now brings up its grey Workbench screen and starts drawing
+            but the insert-disk graphic doesn't appear. `omega/Blitter.c` logs
+            "No Single pixel per H-line mode yet" and "NO EXCLUSIVE FILL MODE
+            YET!!" — graphics.library 40.x uses blitter line-draw (one pixel
+            per hline) and exclusive-fill modes that Omega doesn't implement.
+            Implementing those two blitter modes is the next step.
+      - Note: A500/A600 KS 3.1 (40.63) / 3.2 are plain 68000 + OCS/ECS — no
+        68020 needed. Only AGA-line ROM dumps (40.68) would also need an '020
+        core (`m68kconf.h` 010/020 `OPT_OFF`) + AGA chipset (`Chipset.c:713`).
 - [ ] **Slow RAM shadow**: Omega's original code has `#define NOSLOWRAM` to mirror
       chipset registers at 0xC00000. This is not implemented in `src/Memory.c`.
       Add if KS 1.x boot hangs.

@@ -108,7 +108,7 @@ immediately after `psram_init()` in `src/main.c`.
 |------|-----------|
 | PSRAM timing marginal at 250 MHz | Drop to 200 MHz if unstable; or adjust dummy cycles in psram.c |
 | Musashi stack overflow | Add `pico_set_binary_type(omega-amiga no_flash)` or increase stack limit |
-| KS 2.x/3.x don't reach a GUI | Omega display/chipset gap (upstream), not RP2350 or a CPU issue. Per Omega's README: KS 1.x boots fully (insert-disk screen + WB); KS 2.x/3.x "bootstrap" and can open an Intuition screen with working mouse/keyboard but don't render the insert-disk screen. A500/A600 KS 3.1 (40.63) and 3.2 are plain 68000 + OCS/ECS — no 68020 needed; only AGA-line ROM images (40.68, A1200/A4000) would also need an '020 core + AGA chipset. Incremental work, not a rewrite. |
+| KS 2.x/3.x don't reach a GUI | Omega display/chipset gap (upstream), not RP2350 / not a CPU issue. Tested KS 3.1 (exec 40.10) in the native runner 2026-09-01: (1) FIXED a hard crash — `sprite2chunky()` had no lower-bound check and KS 3.1 parks sprite 0 at X=-254 → OOB write (segfault native / silent PSRAM corruption on device); fixed in `src/Host.c` + `native/host_native.c` + guarded negative `Ny` in `omega/DMA.c`. (2) KS 3.1 now shows its grey WB screen but not the insert-disk graphic — `omega/Blitter.c` lacks "single pixel per H-line" (line draw) and "exclusive fill" modes that graphics.library 40.x uses. Implement those next. A500/A600 KS 3.1 (40.63)/3.2 are plain 68000 + OCS/ECS; only AGA ROM dumps (40.68) also need an '020 core + AGA chipset. |
 | DMA cycle accuracy | Omega's DMA is approximate; will affect some demos, not WB |
 
 ---

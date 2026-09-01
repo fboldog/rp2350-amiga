@@ -196,13 +196,17 @@ void sprite2chunky(uint32_t *pixBuff, uint32_t *palette, int x,
         uint32_t c2 =  (plane1 >> k) & 1;
         c2 |= (((plane2 >> k) & 1) << 1);
 
-        if (c1 > 0 && counter < SCREEN_W)            pixBuff[counter]         = palette[c1];
-        if (c2 > 0 && (counter + delta) < SCREEN_W)  pixBuff[counter + delta] = palette[c2];
+        if (c1 > 0 && counter >= 0 && counter < SCREEN_W)
+            pixBuff[counter] = palette[c1];
+        if (c2 > 0 && (counter + delta) >= 0 && (counter + delta) < SCREEN_W)
+            pixBuff[counter + delta] = palette[c2];
         counter++;
 
         if (delta == 16) {
-            if (c1 > 0 && counter < SCREEN_W)           pixBuff[counter]         = palette[c1];
-            if (c2 > 0 && (counter + delta) < SCREEN_W) pixBuff[counter + delta] = palette[c2];
+            if (c1 > 0 && counter >= 0 && counter < SCREEN_W)
+                pixBuff[counter] = palette[c1];
+            if (c2 > 0 && (counter + delta) >= 0 && (counter + delta) < SCREEN_W)
+                pixBuff[counter + delta] = palette[c2];
             counter++;
         }
     }

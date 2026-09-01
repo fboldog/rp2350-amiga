@@ -693,10 +693,13 @@ void dma_execute(){
                     Nx |=( (pos[1] >> 8) & 1);
                     Nx = (Nx * 2)-254;
                     int Ny= ((pos[0] & 255))-43;
-                    
-                    
+
+
                     for(int i=2;i<32; i +=2){
-                        sprite2chunky(&((uint32_t *)host.pixels)[(mod+(Ny*640*4))/4], &internal.palette[16], Nx, pos[i], pos[i+1],16);
+                        int row = Ny + ((i-2)>>1);
+                        if(row >= 0 && row < 400){   // sprite row may be off-screen (KS 3.x)
+                            sprite2chunky(&((uint32_t *)host.pixels)[row*640], &internal.palette[16], Nx, pos[i], pos[i+1],16);
+                        }
                         mod +=640*4;
                     }
                     
