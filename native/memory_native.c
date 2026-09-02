@@ -151,14 +151,24 @@ unsigned int chipReadWord(unsigned int address){
     
     //Slow RAM
     if(address>0xBFFFFF){
-        
+        // Incomplete address decoding: the 16 readable chipset word-registers
+        // (offsets 0x000-0x01E from 0xDFF000) are mirrored throughout this
+        // region via the low 12 bits.  KS 3.x uses this shadow to verify
+        // INTENA/INTREQ writes without going through the chipset address range.
+        {
+            uint32_t regOff = address & 0xFFFu;
+            if (regOff < 0x20u)
+                return getChipReg16[regOff >> 1]();
+        }
+
 #ifdef NOSLOWRAM
-        //Chipset shadow - incomplete address decoding
+        // Fallback full shadow (all chipset offsets) — kept for reference but
+        // unsafe without bounds checking; the selective path above covers
+        // the common cases.
         address &=0xFFF;
-        //return ChipsetRead(&chipset, address >> 1);
         return getChipReg16[address >> 1]();
 #endif
-        
+
         //return READ_WORD(chipset.chipram,address);
         uint16_t value = *(uint16_t*)&low16Meg[address];
         value = (value << 8) | (value >> 8);

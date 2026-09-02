@@ -27,6 +27,10 @@
 
 #include "Memory.h"          // src/Memory.h -> #else branch: extern low16Meg
 #include "Host.h"
+
+#ifdef HAVE_SDL2
+#include "display_sdl.h"
+#endif
 #include "../omega/CPU.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
@@ -139,8 +143,16 @@ int main(int argc, char **argv) {
     printf("Entering emulation loop\n");
     fflush(stdout);
 
+#ifdef HAVE_SDL2
+    if (!getenv("OMEGA_HEADLESS"))
+        sdl_display_open(SCREEN_W, SCREEN_H);
+#endif
+
     int dumpIndex = 0;
     for (long it = 0; it < iterations; ++it) {
+#ifdef HAVE_SDL2
+        if (sdl_display_poll()) break;
+#endif
         for (int i = 0; i < 200; ++i) {
             dma_execute();
             cpu_execute();
@@ -515,5 +527,8 @@ int main(int argc, char **argv) {
     native_dump_ppm("frame_final.ppm");
     printf("Done. vbl=%lu  nonblack_px=%lu  -> frame_final.ppm\n",
            native_frame_counter, native_nonblack_pixels());
+#ifdef HAVE_SDL2
+    sdl_display_close();
+#endif
     return 0;
 }

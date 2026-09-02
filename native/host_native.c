@@ -13,6 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef HAVE_SDL2
+#include "display_sdl.h"
+#endif
+
 Host_t host;
 
 static uint32_t *fb;                    // SCREEN_W * SCREEN_H, 32-bit ARGB
@@ -37,6 +41,9 @@ void hostInit(void) {
 
 void hostDisplay(void) {
     native_frame_counter++;
+#ifdef HAVE_SDL2
+    sdl_display_push(fb);
+#endif
 }
 
 // Dump the current framebuffer to a binary PPM (P6).  Called from main.

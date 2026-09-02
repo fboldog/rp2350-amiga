@@ -214,9 +214,18 @@ exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
       Result: KS 2.04 + `Install3.2.adf` boots to the Workbench 2.x desktop in ~1000
       VBLs. Title bar, Ram Disk, and the Install3.2 volume all render correctly.
 
-- [ ] **Slow RAM shadow**: Omega's original code has `#define NOSLOWRAM` to mirror
-      chipset registers at 0xC00000. This is not implemented in `src/Memory.c`.
-      Add if KS 1.x boot hangs.
+- [x] **Slow RAM shadow fixed (2026-09-03).** KS 3.14 early-boot code accesses
+      chipset registers through their slow-RAM mirror (e.g. reads INTENAR via
+      `A2-0xFE4` where A2=0xC20000 → effective address 0xC1F01C).  The low 12
+      bits of such addresses map to chipset register offsets (0x01C = INTENAR,
+      0x01E = INTREQR).  `native/memory_native.c chipReadWord` now checks
+      `(addr & 0xFFF) < 0x20` in the slow-RAM path and redirects to
+      `getChipReg16[]` for the 16 readable word registers, leaving genuine
+      slow-RAM reads untouched.  The unsafe original `#ifdef NOSLOWRAM` path
+      (which had no bounds check and would OOB-index into `getChipReg16`) is
+      superseded by this targeted fix.
+      `src/Memory.c` still needs the equivalent fix if KS 3.x is ever run on
+      the RP2350 target.
 - [ ] **Stack size**: Musashi uses recursion for instruction dispatch. Default Pico
       stack (2 KB) may be too small. Add `pico_set_binary_type(omega-amiga copy_to_ram)`
       or increase stack in linker script if crashes occur.

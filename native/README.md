@@ -3,7 +3,8 @@
 Runs the **same `omega/*.c` sources** the RP2350 firmware uses (compiled with
 `PICO_BUILD` **undefined**, so the original desktop code paths are taken), linked
 against a plain `malloc`'d framebuffer and the 16 MB `low16Meg` array instead of
-PSRAM. No SDL, no display — it dumps framebuffer snapshots as binary PPM.
+PSRAM. Displays in a live SDL2 window when SDL2 is available; otherwise dumps
+framebuffer snapshots as binary PPM.
 
 Purpose: validate the CPU + chipset + CIA + DMA + Blitter + Floppy logic on a PC
 without RP2350 hardware. It does **not** exercise `src/psram.c`, `src/Memory.c`
@@ -13,8 +14,13 @@ without RP2350 hardware. It does **not** exercise `src/psram.c`, `src/Memory.c`
 ## Build & run
 
 ```bash
-./native/build.sh                       # -> native/omega-native  (needs gcc, no SDL)
+./native/build.sh                       # -> native/omega-native
 ```
+
+`build.sh` auto-detects SDL2 via `sdl2-config`:
+- **SDL2 present** — a live 1280×800 window (2× nearest-neighbour) opens automatically.
+  Press **Esc** or close the window to stop early; the final PPM is still written.
+- **SDL2 absent** — headless PPM-only build (install `sdl2` / `libsdl2-dev` for the window).
 
 The ROM is selected via the `OMEGA_ROM` environment variable (256 KB ROMs are
 mirrored automatically to fill the 512 KB window at 0xF80000–0xFFFFFF):
@@ -61,6 +67,9 @@ any floppy image.
 - Kickstart 2.04 boots Workbench 2.x from ADF (`Install3.2.adf` confirmed). ✅
   Title bar, Ram Disk volume, and disk name all render correctly (~1000 VBLs).
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
+  (Regression after CIA ICR fix was resolved by implementing the chipset
+  slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the
+  correct chipset read-register instead of raw chip RAM.)
 - Battery-clock reads at `0xDC0000` return junk (`<invalid>` from `date`) — the
   Gayle/RTC path is a stub; unrelated to the RP2350 port.
 - The ROM diskette-logo bitmap renders horizontally mirrored on the insert
@@ -72,8 +81,10 @@ any floppy image.
 | File | Role |
 |---|---|
 | `main_native.c`   | entry: load ROM/ADF, run loop, dump PPM |
-| `host_native.c`   | SDL-free `Host` layer; planar→chunky identical to `src/Host.c` |
+| `host_native.c`   | `Host` layer; planar→chunky identical to `src/Host.c`; calls `sdl_display_push` each VBL |
 | `memory_native.c` | upstream Omega `Memory.c` verbatim (`low16Meg`, `chipRead*/Write*`) |
+| `display_sdl.c`   | SDL2 window: open / push (30 fps cap) / poll / close |
+| `display_sdl.h`   | public API for `display_sdl.c` |
 | `sdl_shim.h`      | no-op `SDL_AtomicGet/Set` so `waitFreeSlot()` links without SDL |
-| `build.sh`        | one-shot gcc build |
+| `build.sh`        | gcc build; auto-detects SDL2, compiles `display_sdl.c` without the shim |
 | `ppm2png.py`      | dependency-free P6-PPM → PNG |
