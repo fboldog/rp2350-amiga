@@ -14,21 +14,45 @@ without RP2350 hardware. It does **not** exercise `src/psram.c`, `src/Memory.c`
 
 ```bash
 ./native/build.sh                       # -> native/omega-native  (needs gcc, no SDL)
+```
 
-# Insert-disk screen only (embedded Kickstart 1.3, no floppy):
+The ROM is selected via the `OMEGA_ROM` environment variable (256 KB ROMs are
+mirrored automatically to fill the 512 KB window at 0xF80000–0xFFFFFF):
+
+```bash
+# Kickstart 1.3 — insert-disk screen only (no floppy):
 ./native/omega-native
 
-# Boot a Workbench ADF to the AmigaDOS CLI:
-./native/omega-native path/to/workbench13.adf 300000 50000 3000
-#                      ^disk.adf              ^iters ^dump  ^insert-at (batch)
+# Kickstart 1.3 — boot a WB 1.3 ADF to the AmigaDOS CLI:
+OMEGA_ROM=kick13.rom ./native/omega-native workbench13.adf 300000 50000 3000
+#                                           ^disk.adf       ^iters ^dump ^insert-at
 
+# Kickstart 2.04 — ROM disk, no floppy (purple "Insert Workbench" backdrop):
+OMEGA_ROM=kick204.rom ./native/omega-native "" 500000
+
+# Kickstart 2.04 — boot a WB 2.x / Install ADF:
+OMEGA_ROM=kick204.rom ./native/omega-native Install3.2.adf 500000 4000 3000
+
+# Kickstart 3.14 — ROM-based Workbench, no floppy (boots automatically):
+OMEGA_ROM=kick314.rom ./native/omega-native "" 500000
+
+# Convert the final PPM snapshot to PNG:
 python3 native/ppm2png.py frame_final.ppm frame_final.png
 ```
 
 Each "iteration" is 200×(`dma_execute()` + `cpu_execute()`), matching the RP2350
-`main.c` main loop. `insert-at` delays the simulated DF0 disk-insert until
-Kickstart has finished drive ID mode (`df[0].idMode == 0`); the runner then polls
-`floppyInsert(0)` until the drive latches the disk.
+`main.c` main loop. Rough timing guide:
+
+| Iterations | Simulated VBLs | Wall time (PC) | Notes |
+|---|---|---|---|
+| 40 000  |   133 |  ~1 s | Initial screen up (KS 1.3 / 2.04 backdrop) |
+| 500 000 | 1 667 |  ~8 s | KS 2.04 + ADF boots to Workbench desktop |
+| 500 000 | 1 667 | ~8 s  | KS 3.14 ROM-Workbench fully rendered |
+
+`insert-at` delays the simulated DF0 disk-insert until Kickstart has finished
+drive ID mode (`df[0].idMode == 0`); the runner then polls `floppyInsert(0)`
+until the drive latches the disk. Use `""` as the disk argument to run without
+any floppy image.
 
 ## Status (2026-09-02)
 
