@@ -16,9 +16,11 @@
 //#include "Kick13.h"
 #include "Chipset.h"
 #include "CIA.h"
+#include "Floppy.h"
 #include "debug.h"
 #include "DMA.h"
 #include "Gayle.h"
+#include "../omega/m68k.h"
 
 unsigned char low16Meg[16777216];
 
@@ -69,21 +71,35 @@ unsigned int chipReadByte(unsigned int address){
     //CIA A
     if(address>=0xBFE001){
         address = (address - 0xBFE001) >> 8;
+        {
+            static int ciaa_pra_count = 0;
+            if (address == 0 && ciaa_pra_count < 200) {
+                uint8_t result = CIARead(&CIAA, 0);
+                uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+                uint32_t d0 = m68k_get_reg(NULL, M68K_REG_D0);
+                uint32_t d1 = m68k_get_reg(NULL, M68K_REG_D1);
+                printf("[CIAA.pra] read=0x%02X (/CHNG=%d /DKRDY=%d) D0=%08X D1=%08X drv=%d  PC=%08X (hit %d)\n",
+                       result, (result>>2)&1, (result>>5)&1,
+                       d0, d1, driveSelected, pc, ++ciaa_pra_count);
+                fflush(stdout);
+                return result;
+            }
+        }
         return CIARead(&CIAA,address);
     }
-    
+
     //CIA B
     if(address>=0xBFD000){
         address = (address - 0xBFD000) >> 8;
         return CIARead(&CIAB,address);
     }
-    
+
     //24bit fast ram
     if(address>0x1FFFFF){
         //return 0;
         return low16Meg[address];
     }
-    
+
     //RAM
     address &=CHIPTOP;
     return low16Meg[address];
@@ -237,7 +253,25 @@ unsigned int chipReadLong(unsigned int address){
     return value << 16 | value >> 16;
 }
 
+static int sig_byte_hook_count = 0;
 void chipWriteByte(unsigned int address,unsigned int value){   //ROM
+    // Catch any byte write into tc_SigRecvd (0xC00C22..0xC00C25)
+    if (address >= 0xC00C22u && address <= 0xC00C25u && sig_byte_hook_count < 20) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[SIGRECVD-B] write_byte @%08X = 0x%02X  PC=%08X  (hit %d)\n",
+               address, value & 0xFF, pc, ++sig_byte_hook_count);
+        fflush(stdout);
+    }
+    // Catch byte writes to Zorro II autoconfig space (0xE80000-0xE8FFFF)
+    if (address >= 0xE80000u && address <= 0xE8FFFFu) {
+        static int autoconf_bwrite_count = 0;
+        if (autoconf_bwrite_count < 40) {
+            uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+            printf("[AUTOCONF-B] write_byte @%08X = 0x%02X  PC=%08X  (hit %d)\n",
+                   address, value & 0xFF, pc, ++autoconf_bwrite_count);
+            fflush(stdout);
+        }
+    }
     if(address>0xF80000){
         return;
     }
@@ -276,6 +310,13 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
     //CIA B
     if(address>=0xBFD000){
         address = (address - 0xBFD000) >> 8;
+        static int ciab_prb_count = 0;
+        if (address == 1 && ciab_prb_count < 200) {
+            uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+            printf("[CIAB.prb] write 0x%02X  pra=0x%02X hasDisk=%d idMode=%d  PC=%08X (hit %d)\n",
+                   value, CIAA.pra, df[0].hasDisk, df[0].idMode, pc, ++ciab_prb_count);
+            fflush(stdout);
+        }
         CIAWrite(&CIAB,address,value);return;
     }
     
@@ -295,7 +336,55 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
     low16Meg[address] = value;
 }
 
+static int dsklen_hook_count = 0;
+static int intena_hook_count = 0;
+static int dmacon_hook_count = 0;
 void chipWriteWord(unsigned int address,unsigned int value){
+    // DSKLEN write (0xDFF024): disk DMA start
+    if (address == 0xDFF024u && dsklen_hook_count < 30) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[DSKLEN] write_word @0xDFF024 = 0x%04X  dmaconr=0x%04X  PC=%08X  (hit %d)\n",
+               value, chipset.dmaconr, pc, ++dsklen_hook_count);
+        fflush(stdout);
+    }
+    // DMACON write (0xDFF096): log disk DMA enable/disable
+    if (address == 0xDFF096u && dmacon_hook_count < 40) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[DMACON] write 0x%04X  dmaconr=0x%04X  PC=%08X  (hit %d)\n",
+               value, chipset.dmaconr, pc, ++dmacon_hook_count);
+        fflush(stdout);
+    }
+    // INTENA write (0xDFF09A): log when DSKBLK (bit1) is set or cleared
+    if (address == 0xDFF09Au && intena_hook_count < 40) {
+        if (value & 0x8002u) {  // SET bit1 (DSKBLK)
+            uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+            printf("[INTENA] DSKBLK SET 0x%04X  PC=%08X  (hit %d)\n",
+                   value, pc, ++intena_hook_count);
+            fflush(stdout);
+        } else if (value & 0x0002u) {  // CLR bit1
+            uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+            printf("[INTENA] DSKBLK CLR 0x%04X  PC=%08X  (hit %d)\n",
+                   value, pc, ++intena_hook_count);
+            fflush(stdout);
+        }
+    }
+    // INTREQ write (0xDFF09C): log DSKBLK done and DSKSYNC
+    {
+        static int intreq_hook_count = 0;
+        if (address == 0xDFF09Cu && intreq_hook_count < 60) {
+            if (value & 0x0003u) {   // bit0=TBE, bit1=DSKBLK, bit2=SOFT — any disk-related
+                uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+                printf("[INTREQ] 0x%04X  PC=%08X  (hit %d)\n",
+                       value, pc, ++intreq_hook_count);
+                fflush(stdout);
+            } else if (value & 0x1000u) {  // bit12=DSKSYNC
+                uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+                printf("[INTREQ-DSKSYNC] 0x%04X  PC=%08X  (hit %d)\n",
+                       value, pc, ++intreq_hook_count);
+                fflush(stdout);
+            }
+        }
+    }
     //ROM
     if(address>0xF80000){
         return;
@@ -370,22 +459,99 @@ void chipWriteWord(unsigned int address,unsigned int value){
     *dest = value;return;
 
 }
+static int sig_hook_count  = 0;
+static int q_hook_count    = 0;
+static int rp_hook_count   = 0;  // reply port message list
+static int sig2_hook_count = 0;  // tc_SigRecvd of input.device @C026E2
+static int tr_hook_count   = 0;  // TaskReady lh_TailPred
+static int execlib_sig_count = 0; // tc_SigRecvd of exec.library task @C01570
+static int condev_sig_count  = 0; // tc_SigRecvd of console.device @C0A7E0
+static int tdsig_hook_count  = 0; // tc_SigRecvd of trackdisk.device @C0485E
 void chipWriteLong(unsigned int address,unsigned int value){
+    // Catch Signal() to trackdisk.device @C0485E: tc_SigRecvd at +0x1A = 0xC04878
+    if (address == 0xC04878u && tdsig_hook_count < 40) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[TRACKDISK-SIG] write_long @0xC04878 = 0x%08X  PC=%08X  (hit %d)\n",
+               value, pc, ++tdsig_hook_count);
+        fflush(stdout);
+    }
+    // Catch writes to tc_SigRecvd (0xC00C22) — old hook (stale)
+    if (address == 0xC00C22 && sig_hook_count < 20) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[SIGRECVD] write_long @0xC00C22 = 0x%08X  PC=%08X  (hit %d)\n",
+               value, pc, ++sig_hook_count);
+        fflush(stdout);
+    }
+    // Catch Signal() to input.device @C026E2: tc_SigRecvd at +0x1A = 0xC026FC
+    if (address == 0xC026FCu && sig2_hook_count < 30) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[INPUTDEV-SIG] write_long @0xC026FC = 0x%08X  PC=%08X  (hit %d)\n",
+               value, pc, ++sig2_hook_count);
+        fflush(stdout);
+    }
+    // Catch Signal() to exec.library boot task @C01570: tc_SigRecvd at +0x1A = 0xC0158A
+    if (address == 0xC0158Au && execlib_sig_count < 30) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[EXECLIB-SIG] write_long @0xC0158A = 0x%08X  PC=%08X  (hit %d)\n",
+               value, pc, ++execlib_sig_count);
+        fflush(stdout);
+    }
+    // Catch Signal() to console.device task @C0A7E0: tc_SigRecvd at +0x1A = 0xC0A7FA
+    if (address == 0xC0A7FAu && condev_sig_count < 30) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[CONDEV-SIG] write_long @0xC0A7FA = 0x%08X  PC=%08X  (hit %d)\n",
+               value, pc, ++condev_sig_count);
+        fflush(stdout);
+    }
+    // Catch AddTail() to TaskReady (ExecBase=0xC00276; lh_TailPred at ExecBase+0x19E=0xC00414)
+    if (address == 0xC00414u && tr_hook_count < 30) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[TASKREADY] write_long @0xC00414 = 0x%08X  PC=%08X  (hit %d)\n",
+               value, pc, ++tr_hook_count);
+        fflush(stdout);
+    }
+    // Catch AddTail() to ROM disk queue at 0xC061E8 (lh_TailPred at +8 = 0xC061F0)
+    if ((address == 0xC061E8 || address == 0xC061F0 || address == 0xC061F4) && q_hook_count < 6) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[ROMDISK-Q1] write_long @%08X = 0x%08X  PC=%08X  (hit %d)\n",
+               address, value, pc, ++q_hook_count);
+        fflush(stdout);
+    }
+    // Catch writes to reply port mp_MsgList (0xC075EE+0x14..+0x1C) to detect ReplyMsg()
+    // lh_Head=0xC07602, lh_Tail=0xC07606, lh_TailPred=0xC0760A
+    if (address >= 0xC07602u && address <= 0xC0760Cu && rp_hook_count < 20) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[REPLYPORT] write_long @%08X = 0x%08X  PC=%08X  (hit %d)\n",
+               address, value, pc, ++rp_hook_count);
+        fflush(stdout);
+    }
     //ROM
     if(address>0xF80000){
         return;
     }
 
+    // Catch writes to Zorro II autoconfig space (0xE80000-0xE8FFFF)
+    // On real HW this is where KS probes for expansion boards; Omega returns 0x00 (should be 0xFF)
+    if (address >= 0xE80000u && address <= 0xE8FFFFu) {
+        static int autoconf_write_count = 0;
+        if (autoconf_write_count < 40) {
+            uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+            printf("[AUTOCONF-W] write_long @%08X = 0x%08X  PC=%08X  (hit %d)\n",
+                   address, value, pc, ++autoconf_write_count);
+            fflush(stdout);
+        }
+    }
+
 #ifdef THREADED_CPU
     waitFreeSlot(); //CPU must wait for DMA to complete;
 #endif
-    
+
     //Chipregs
     if(address>0xDFEFFF){
         address = (address - 0xDFF000) >> 1;
-        
+
                 debugChipAddress = address;    // used for debugging to identify the register being called
-    
+
         putChipReg32[address](value);
         return;
     }

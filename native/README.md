@@ -30,10 +30,13 @@ Each "iteration" is 200×(`dma_execute()` + `cpu_execute()`), matching the RP235
 Kickstart has finished drive ID mode (`df[0].idMode == 0`); the runner then polls
 `floppyInsert(0)` until the drive latches the disk.
 
-## Status (2026-09-01)
+## Status (2026-09-02)
 
 - Kickstart 1.3 boots to the "insert Workbench" screen. ✅
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
+- Kickstart 2.04 boots Workbench 2.x from ADF (`Install3.2.adf` confirmed). ✅
+  Title bar, Ram Disk volume, and disk name all render correctly (~1000 VBLs).
+- Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
 - Battery-clock reads at `0xDC0000` return junk (`<invalid>` from `date`) — the
   Gayle/RTC path is a stub; unrelated to the RP2350 port.
 - The ROM diskette-logo bitmap renders horizontally mirrored on the insert

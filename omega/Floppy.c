@@ -354,11 +354,13 @@ void floppyInsert(int drive){
         return;
     }
     
-    if( (df[drive].pra & 0x4) == 0x4){
-        df[drive].pra &= 0xFB;      // eject disk;
+    if(df[drive].hasDisk){
+        df[drive].hasDisk = 0;
+        df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk removed)
         printf("Disk ejected from df%d:\n",drive);
     }else{
-        df[drive].pra |= 0x04;      // insert disk
+        df[drive].hasDisk = 1;
+        df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk inserted)
         printf("Disk inserted in df%d:\n",drive);
     }
     
@@ -369,8 +371,10 @@ uint8_t* floppyInit(int drive){
     df[drive].index = 0;
     df[drive].cylinder = 0;
     df[drive].side = 0;
-    df[driveSelected].pra  &= 0xFB;   // no disk
-    df[driveSelected].pra  &= 0xEF;   // cylinder 0
+    df[drive].hasDisk = 0;
+    df[drive].pra  |= 0x04;   // /CHNG=1 (stable, no change at power-on)
+    df[drive].pra  &= 0xEF;   // cylinder 0 (bit4=0)
+    df[drive].pra  |= 0x20;   // drive not ready (/DKRDY=1, no disk)
 #ifdef PICO_BUILD
     // Assign MFM buffer into PSRAM; only drives 0 and 1 are supported
     static const uint32_t psram_offsets[4] = {
@@ -403,18 +407,22 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
             
         case 0x70:
             driveSelected = 0;
+            df[0].pra |= 0x04;   // /CHNG ack: SEL asserted → clear /CHNG latch
             break;
 
         case 0x68:
             driveSelected = 1;
+            df[1].pra |= 0x04;
             break;
-            
+
         case 0x58:
             driveSelected = 2;
+            df[2].pra |= 0x04;
             break;
-            
+
         case 0x38:
             driveSelected = 3;
+            df[3].pra |= 0x04;
             break;
             
         default:
@@ -426,10 +434,14 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
     //ID mode... to identify external drives...
      if(df[driveSelected].idMode>0){   // Id mode
-         //printf("DF%d ID Mode: %d\n",driveSelected,df[driveSelected].idMode); // The Disk Ready sitnal is pusled 32 times to signle a drive is present on the bus
-         df[driveSelected].pra  &= 0xDF;     //Drive ready flag signals the drive is there
+         // /DKRDY=0 (ready) signals drive is present; =1 (not ready) means no drive / empty slot
+         if(df[driveSelected].hasDisk){
+             df[driveSelected].pra  &= 0xDF;     // drive present: /DKRDY=0, gives ID 0x00000000 (3.5" DD)
+         } else {
+             df[driveSelected].pra  |= 0x20;     // no drive: /DKRDY=1, gives ID 0xFFFFFFFF (absent)
+         }
          df[driveSelected].idMode -=1;
-         CIAA.pra |= df[driveSelected].pra & 0x3C;
+         CIAA.pra = (CIAA.pra & 0xC3) | (df[driveSelected].pra & 0x3C);
          return;
      }
     
@@ -463,8 +475,11 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
         //printf(" Motor On ");
         //df[driveSelected].prb  &= 0x7F;
         
-        if(df[driveSelected].pra & 0x4){     // if disk is inserted  then
-            df[driveSelected].pra  &= 0xDF;  // Drive ready
+        if(df[driveSelected].hasDisk){
+            df[driveSelected].pra  &= 0xDF;  // Drive ready (/DKRDY=0)
+            // Leave /CHNG as-is: if 0, KS will read it and detect disk change
+        } else {
+            df[driveSelected].pra  |= 0x20;  // no disk: drive not ready (/DKRDY=1)
         }
         //floppySync=0;
     }

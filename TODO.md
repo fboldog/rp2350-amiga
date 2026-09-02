@@ -192,16 +192,27 @@ exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
         68020 needed. Only AGA-line ROM dumps (40.68) would also need an '020
         core + AGA chipset.
 
-- [~] **KS 2.0.4 boot hangs after WB2 backdrop (2026-09-01).** ROM signature `11 14`,
-      512 KB. Tested with native runner, no disk.
-      - Grey Workbench 2 backdrop renders correctly by vbl=18 (~230 active lines,
-        NTSC copper). Faint title-bar separator visible at y≈175.
-      - CPU then freezes: non-black pixel count locked at 146919 for 1267+ VBLs
-        (~42 simulated seconds). No insert-disk requester, no cursor blink.
-      - KS 2.0.4 has a ROM disk (Workbench 2.04-in-ROM); it boots from it but stalls
-        after setting up the screen. Likely waiting for a CIA timer or disk-side
-        handshake that Omega's CIA/floppy emulation never delivers.
-      - Next step: add CIA-A/B timer debug or 68k PC trace to find the spin loop.
+- [x] **KS 2.0.4 floppy boot fixed (2026-09-02).** Now boots Workbench 2.x from ADF.
+      Three root causes identified and fixed:
+      1. `omega/CIA.c` `CIAInit`: `CIAA.pra` init `0x37` → `0xF7`. Bits 6 (/FIR0)
+         and 7 (/FIR1) are joystick fire-button inputs (active-low); they must start
+         at 1 (not pressed). KS 2.04 polls bit6 at 0xFC91AA and loops forever if 0.
+      2. `omega/CIA.c` `CIAWrite` case 0: `value & 63` → `(pra & 0xC0) | (value & 0x3F)`.
+         Bits 6-7 are input-only pins; every PRA write was zeroing them, defeating fix 1.
+      3. `omega/CIA.c` ICR/IRQ logic: the interrupt-request bit (ICR bit 7) must only be
+         set when the individual event bit is enabled in `icrMask`. The old code ORed
+         the mask directly into `icr` which garbled both the status and the IR flag.
+      4. `omega/Floppy.c` idMode: empty drive slots (`hasDisk=0`) now return `/DKRDY=1`
+         during the 32-pulse ID probe → ID=0xFFFFFFFF (absent). Previously all drives
+         returned `/DKRDY=0` → ID=0x00000000 (present), causing Workbench to show
+         spurious `DF1:????` `DF2:????` `DF3:????` icons for unconnected drives.
+      5. `omega/Floppy.c` `/CHNG` acknowledge: asserting SEL (drive select low) now sets
+         `df[n].pra |= 0x04` to clear the disk-change latch, matching real hardware.
+      6. `omega/Floppy.c` `floppyInit`: initialises `hasDisk=0`, `/CHNG=1` (stable),
+         `/DKRDY=1` (not ready) for all four drive slots; drive 0's `hasDisk` is set to
+         1 and `/CHNG` asserted only when an ADF is successfully loaded.
+      Result: KS 2.04 + `Install3.2.adf` boots to the Workbench 2.x desktop in ~1000
+      VBLs. Title bar, Ram Disk, and the Install3.2 volume all render correctly.
 
 - [ ] **Slow RAM shadow**: Omega's original code has `#define NOSLOWRAM` to mirror
       chipset registers at 0xC00000. This is not implemented in `src/Memory.c`.

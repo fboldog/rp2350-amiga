@@ -43,17 +43,25 @@ void CIAInit(CIA_t* cia,uint16_t paulaMask){
     //set up CIAA ports
     if(paulaMask == 32776){
         cia->Name[0] ='A';
-        cia->pra = 55;   //Pretend the ROM memory overlay is active (Powerlight is dim and floppy drive is not ready, and disk inseted is true).
+        cia->pra = 0xF7; //ROM overlay active, /LED off, /FIR0=1, /FIR1=1 (no buttons pressed), /DKRDY=1, /TK0=1, /CHNG=1.
     }
 }
 
+static int ciab_prb_log = 0;
 void CIAWrite(CIA_t* cia,int reg,uint8_t value){
-    
+
     m68k_end_timeslice();
-    
+
+    if (cia == &CIAB && reg == 1 && ciab_prb_log < 200) {
+        uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+        printf("[CIAB.prb] 0x%02X -> 0x%02X  pra=0x%02X  PC=%08X (hit %d)\n",
+               cia->prb, value, CIAA.pra, pc, ++ciab_prb_log);
+        fflush(stdout);
+    }
+
     switch(reg){
-            
-        case 0x0:cia->pra = value & 63;break;//pra
+
+        case 0x0:cia->pra = (cia->pra & 0xC0) | (value & 0x3F);break;//pra bits6-7 are input-only (/FIR0,/FIR1), preserve them
         case 0x1://prb - Due to the floppy drive's dependance upon this register, it only flags a change if the write actually changed the value.
             /*
             if(value != cia->prb){
@@ -184,58 +192,61 @@ void CIAExecute(CIA_t* cia){
     //TimerA - Normal
     if((cia->cra & 33) == 1){
         cia->ta -=1;
-        
+
         //underflow
         if(cia->ta == -1){
             cia->ta = cia->taLatch;
-            
+
             if( (cia->cra & 8) == 8){ //in oneshot mode clear the start bit.
                  cia->cra = cia->cra & 254;
             }
-            
-            cia->icr =  cia->icr | (1 & cia->icrMask);
+
+            // Status bit always set; IR bit (7) only if mask enables it
+            cia->icr |= 1;
+            if (cia->icrMask & 1) cia->icr |= 0x80;
             taUnderflow=1;
         }
     }
-    
-    
+
+
     //TimerB - Normal
     if((cia->crb & 97) == 1){
         cia->tb -=1;
-        
+
         //underflow
         if(cia->tb == -1){
             cia->tb = cia->tbLatch;
-            
+
             if( (cia->crb & 8) == 8){ //in oneshot mode clear the start bit.
                  cia->crb = cia->crb & 254;
             }
-            
-            cia->icr =  cia->icr | (2 & cia->icrMask);
+
+            cia->icr |= 2;
+            if (cia->icrMask & 2) cia->icr |= 0x80;
         }
     }
-    
+
     //Timer B - TA Underflow
     if( (cia->crb & 97) == 65 && taUnderflow==1 ){
         cia->tb -=1;
-        
+
         //underflow
         if(cia->tb == 65535){
             cia->tb = cia->tbLatch;
-            
+
             if( (cia->crb & 8) == 8){ //in oneshot mode clear the start bit.
                  cia->crb = cia->crb & 254;
             }
-            
-            cia->icr =  cia->icr | (2 & cia->icrMask);
+
+            cia->icr |= 2;
+            if (cia->icrMask & 2) cia->icr |= 0x80;
         }
     }
-    
-    //interupt occured
-    if( cia->icr > 0 && cia->irqLatch == 0 ){
+
+    // Assert INTREQ only when IR bit (bit 7) is set by a masked event
+    if( (cia->icr & 0x80) && cia->irqLatch == 0 ){
         putChipReg16[INTREQ](cia->chipInt);
         cia->irqLatch = 1;
-        //printf("CIA %s int %d\n",cia->Name,cia->icr);
     }
     
 }
@@ -249,16 +260,18 @@ void CIATODEvent(CIA_t* cia){
     
     if(cia->todAlarm !=0){
         if(cia->todAlarm == cia->tod){
-            cia->icr =  cia->icr | (4 & cia->icrMask);
+            cia->icr |= 4;
+            if (cia->icrMask & 4) cia->icr |= 0x80;
         }
     }
 }
 
 void CIAIndex(CIA_t* cia){
-    
-    cia->icr =  cia->icr | (0x90 & cia->icrMask);
+    cia->icr |= 0x10;                          // FLG (disk index pulse)
+    if (cia->icrMask & 0x10) cia->icr |= 0x80;
 }
 
 void keyboardInt(){
-        CIAA.icr =  CIAA.icr | (0x8 & CIAA.icrMask); //raise Serial port interrupt flag on CIA A
+    CIAA.icr |= 0x08;                              // SP (serial port / keyboard)
+    if (CIAA.icrMask & 0x08) CIAA.icr |= 0x80;
 }

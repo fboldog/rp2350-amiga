@@ -38,6 +38,7 @@ typedef struct{
     uint8_t pra;
     uint8_t prb;
 
+    int hasDisk;    // 1 = disk image present, drives /DKRDY on motor-on
     int idMode;
     int index;
     int cylinder;
