@@ -60,12 +60,23 @@ drive ID mode (`df[0].idMode == 0`); the runner then polls `floppyInsert(0)`
 until the drive latches the disk. Use `""` as the disk argument to run without
 any floppy image.
 
-## Status (2026-09-02)
+## Status (2026-09-03)
 
 - Kickstart 1.3 boots to the "insert Workbench" screen. ✅
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
 - Kickstart 2.04 boots Workbench 2.x from ADF (`Install3.2.adf` confirmed). ✅
   Title bar, Ram Disk volume, and disk name all render correctly (~1000 VBLs).
+- Kickstart 2.04 no-disk boot: insert-disk screen renders correctly. ✅
+  Rainbow V-checkmark, both floppy-disk icons, and all four copyright-text lines
+  are visible. Fixed by: (a) floppy drive ID/motor-on reports `/DKRDY=0` for
+  drive 0 regardless of ADF; (b) no-disk MFM tracks pre-filled with sync word
+  so `DSKBLK` fires and trackdisk returns `TDERR_NoSecHdr`; (c) HIRES bitplane
+  fetch count corrected to the real OCS formula (`lastFetchCycle = ddfstop + 7`,
+  giving `(ddfstop − ddfstrt)/4 + 2` words/line); (d) `BPL1MOD` sign-extended
+  correctly (`(int16_t)value >> 1`).
+  Known cosmetic issues: white artefact on far-right edge; floppy-disk sprite
+  ghost on far-left edge; rendered content limited to top ≈ 55 % of the 400-line
+  framebuffer (NTSC lines 43–261 map to rows 1–218 of 400).
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
   slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the
