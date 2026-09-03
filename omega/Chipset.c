@@ -142,9 +142,8 @@ void bltbdatL(uint32_t value){  //
     chipset.bltadat = value & 65535;
 }
 
-void cop1lchL(uint32_t value){  //
+void cop1lchL(uint32_t value){
     chipset.cop1lc = value >> 1;
-    //printf("(32bit)Copper 1: %0x\n",chipset.cop1lc);
 }
 
 void cop2lchL(uint32_t value){  //
@@ -436,10 +435,9 @@ void dsksync(uint16_t value){
 }
 
 void cop1lch(uint16_t value){
-      chipset.cop1lc = (value << 15) | (chipset.cop1lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
+      chipset.cop1lc = (value << 15) | (chipset.cop1lc & 0x00007FFF);
 }
 void cop1lcl(uint16_t value){
-//    printf("(16bit)Copper 1: %0x\n",chipset.cop1lc);
         chipset.cop1lc = (value >> 1)  | (chipset.cop1lc & 0xFFFF8000);
 }
 void cop2lch(uint16_t value){
@@ -478,13 +476,18 @@ void diwstop(uint16_t value){
 
 
 void ddfstrt(uint16_t value){
+    static int ddfLog = 0;
+    if (value != chipset.ddfstrt && ddfLog < 5)
+        printf("[DDF] DDFSTRT 0x%02X -> 0x%02X (lastFetch will be 0x%02X)\n",
+               chipset.ddfstrt, value, value + 160), ddfLog++;
     chipset.ddfstrt = value;
-    //printf("Fetch Start: %02x\n",value);
 }
 
 void ddfstop(uint16_t value){
+    static int ddfStopLog = 0;
+    if (value != chipset.ddfstop && ddfStopLog < 5)
+        printf("[DDF] DDFSTOP 0x%02X -> 0x%02X\n", chipset.ddfstop, value), ddfStopLog++;
     chipset.ddfstop = value;
-    //printf("Fetch Stop: %02x\n",value);
 }
 
 void  dmacon(uint16_t value){
@@ -685,6 +688,10 @@ void bpl8ptl(uint16_t value){
 void bplcon0(uint16_t value){
     displayLineReset(); //restart drawing if the bplcon has changed. This might need to take a value as to how many lines were needed to change the mode
 
+    static int bplLog = 0;
+    if (value != chipset.bplcon0 && bplLog < 20)
+        printf("[BPLCON0] 0x%04X -> 0x%04X (planes=%d hires=%d)\n", chipset.bplcon0, value, (value>>12)&7, (value>>15)&1), bplLog++;
+
     chipset.bplcon0 = value;
 
     int planes = (value >> 12) & 7 ;
@@ -704,6 +711,8 @@ void bplcon3(uint16_t value){
 
 void bpl1mod(uint16_t value){
     chipset.bpl1mod = (int16_t)value >> 1; // signed: preserves negative modulo
+    static int modLog = 0;
+    if (modLog < 5) printf("[MOD] BPL1MOD reg=0x%04X -> chipset.bpl1mod=%d\n", value, chipset.bpl1mod), modLog++;
 }
 void bpl2mod(uint16_t value){
     chipset.bpl2mod = (int16_t)value >> 1;

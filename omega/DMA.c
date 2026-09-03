@@ -584,6 +584,7 @@ void waitFreeSlot(){
 }
 
 int lastFetchCycle;
+static int hiresCallsThisLine = 0;
 
 void dma_execute(){
     
@@ -594,8 +595,11 @@ void dma_execute(){
 
     // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
     if(chipset.bplcon0 & 0x8000){
-        // HIRES: 38 active fetches (table slots at ddfstrt+2 offset from real OCS)
-        lastFetchCycle = chipset.ddfstrt + 150;
+        // HIRES: words/line = (ddfstop - ddfstrt)/4 + 2  (real OCS formula).
+        // hiresPlane1 is 3 slots after the group start, so the last active call
+        // is at ddfstop+3.  We add +7 to also cover the plane4/2/3 prefetch of
+        // the last group (ddfstop+0..+2) while keeping hiresPlane1 at ddfstop+3.
+        lastFetchCycle = chipset.ddfstop + 7;
         DMAHires[internal.hPos]();
     }else{
         // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
@@ -612,7 +616,16 @@ void dma_execute(){
     //end of line reached! 227 colour clocks have executed
     if(internal.hPos > 0xE3){
         // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
-        
+
+        // Per-line HIRES diagnostic (first 60 visible HIRES lines ever seen)
+        static int lineLog = 0;
+        if (hiresCallsThisLine > 0 && internal.vPos >= 44 && lineLog < 10) {
+            printf("[LINE] vPos=%d bpl1pt=0x%05X calls=%d bpl1mod=%d ddfstrt=0x%02X ddfstop=0x%02X lastFC=%d\n",
+                   internal.vPos, chipset.bpl1pt, hiresCallsThisLine,
+                   chipset.bpl1mod, chipset.ddfstrt, chipset.ddfstop, lastFetchCycle);
+            lineLog++;
+        }
+        hiresCallsThisLine = 0;
 
         if(internal.vPos>=43){
             host.FBCounter = (internal.vPos - 42) * (SCREEN_W / 2);
@@ -641,7 +654,7 @@ void dma_execute(){
         if(internal.vPos > 0x106 ){ //0x106 is the propper ntsc vbl
             internal.vPos = 0;
             //chipset.vposr   = (internal.LOF | 0x1000); //0x1000 is for NTSC / 0x0000 is for PAL
-            
+
             //Reset Copper.
             putChipReg16[COPJMP1](0);
             CIATODEvent(&CIAA);
@@ -727,17 +740,21 @@ void diskCycle(void){
             
                 uint8_t b1 = floppyDataRead();
                 uint8_t b2 = floppyDataRead();
-            
+
                 uint16_t syncword = b1 << 8 | b2;
-            
+
+                static int rdLog = 0;
+                if (rdLog < 8) { printf("[RD] cyl=%d side=%d idx=%d b1=%02X b2=%02X sw=%04X dsksync=%04X\n", df[driveSelected].cylinder, df[driveSelected].side, df[driveSelected].index-2, b1, b2, syncword, chipset.dsksync); rdLog++; }
+
                 if(syncword==chipset.dsksync){
                 
                     putChipReg16[INTREQ](0x9000);   //DSKSYNC INT
                     chipset.dskbytr |= 0x1000;  // set word sync bit
                 
                     if(floppySync==0){
-                    
-                        //printf("dsklen: %04x, dskpt: %06x | Track %d | Side %d | Index %d\n",chipset.dsklen & 0x3FFF,chipset.dskpt,df[driveSelected].cylinder,df[driveSelected].side,df[driveSelected].index);
+
+                        static int syncHits = 0;
+                        if (syncHits < 5) printf("[SYNC] found cyl=%d side=%d idx=%d dsklen=%04X (hit %d)\n", df[driveSelected].cylinder, df[driveSelected].side, df[driveSelected].index-2, chipset.dsklen, ++syncHits);
                         floppySync=1;
                         return;
                     }
@@ -755,6 +772,8 @@ void diskCycle(void){
                     chipset.dsklen -= 1;
                 
                     if( (chipset.dsklen & 0x3FFF) == 0){
+                        static int dskblkHits = 0;
+                        if (dskblkHits < 5) printf("[DSKBLK] fired (hit %d) cyl=%d side=%d\n", ++dskblkHits, df[driveSelected].cylinder, df[driveSelected].side);
                         putChipReg16[INTREQ](0x8002);   //Disk block loaded INT
                         floppySync = 0;
                         return;
@@ -1038,31 +1057,31 @@ void plane3(){
 }
 
 void hiresPlane1(){
-     
+
     if(bitplaneActive()==0){
-        
+
         evenCycle(); // let the copper run
         return;
     }
-    
+
     if(host.pixels == NULL){
         return;
     }
-    
+
     chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
-    
+        hiresCallsThisLine++;
     }
-        
+
     //don't start actually rendering a display before 44 lines
     if(internal.vPos<43){
         evenCycle();
         return;
     }
-    
+
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     hiresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
     host.FBCounter += 8;
