@@ -380,8 +380,8 @@ typedef struct{
     uint16_t bplcon1;
     uint16_t bplcon2;
     uint16_t bplcon3;
-    uint16_t bpl1mod;
-    uint16_t bpl2mod;
+    int16_t bpl1mod;
+    int16_t bpl2mod;
     uint16_t reserved14;
     uint16_t reserved15;
     uint16_t bpl1dat;

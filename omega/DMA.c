@@ -594,19 +594,14 @@ void dma_execute(){
 
     // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
     if(chipset.bplcon0 & 0x8000){
-        
-        lastFetchCycle = chipset.ddfstrt+168;
-        //lastFetchCycle = chipset.ddfstop+4;
-        
+        // HIRES: 38 active fetches (table slots at ddfstrt+2 offset from real OCS)
+        lastFetchCycle = chipset.ddfstrt + 150;
         DMAHires[internal.hPos]();
     }else{
-        
-        lastFetchCycle = chipset.ddfstrt+168;   //not sure why this needs an extra 8 cycles... need to investigate
-        
+        // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
+        lastFetchCycle = chipset.ddfstrt + 159;
         DMALores[internal.hPos]();
     }
-    
-    
     eclock_execute(&chipset);   // CIA timers
 
     internal.hPos++;
@@ -619,30 +614,9 @@ void dma_execute(){
         // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
         
 
-        //************DeBugging**************
-        int hpos = internal.hPos;
-        int vpos = internal.vPos;
-        uint16_t ddfstrt = chipset.ddfstrt;
-        uint16_t ddfstop = chipset.ddfstop;
-        uint16_t diwstrt = chipset.diwstrt;
-        uint16_t diwstop = chipset.diwstop;
-        uint16_t actualDdfSyop = lastFetchCycle;
-        
-        int diff = ddfstop - ddfstrt;
-        
-        if(internal.vPos>43){
-            int vBeam = (internal.vPos-44);
-            
-            if(vBeam==0){
-                //printf("NLine");
-            }
-
-            
-            //host.FBCounter =vBeam*640;
-            //printf("");
-            
+        if(internal.vPos>=43){
+            host.FBCounter = (internal.vPos - 42) * (SCREEN_W / 2);
         }
-        //***********************************
         
         
         
@@ -677,34 +651,6 @@ void dma_execute(){
             putChipReg16[INTREQ](0x8020);
             
             host.FBCounter = 0; // restart the frambuffer pointer
-            
-            
-            //Draw sprite 0
-            if( (chipset.dmaconr & 0x220)== 0x220){
-                //Software renderer - draw sprite to the frame buffer
-                
-                
-                if(chipset.spr0pt !=0){
-                    uint16_t* pos = &internal.chipramW[chipset.spr0pt];
-                    int mod = 0;
-                    
-                    int Nx=(pos[0] & 0xFF00) >> 7;
-                    Nx |=( (pos[1] >> 8) & 1);
-                    Nx = (Nx * 2)-254;
-                    int Ny= ((pos[0] & 255))-43;
-
-
-                    for(int i=2;i<32; i +=2){
-                        int row = Ny + ((i-2)>>1);
-                        if(row >= 0 && row < 400){   // sprite row may be off-screen (KS 3.x)
-                            sprite2chunky(&((uint32_t *)host.pixels)[row*640], &internal.palette[16], Nx, pos[i], pos[i+1],16);
-                        }
-                        mod +=640*4;
-                    }
-                    
-                }
-            }
-            
             
             
             hostDisplay(); //Call the host to update the display.
@@ -1011,13 +957,11 @@ void loresPlane1(void){
     }
     
     if( (internal.bitplaneMask & 0x1)  == 0x1){
-
-    
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
     }
-    
+
     //don't start actually rendering a deiplay before 44 lines
     if(internal.vPos<44){
         evenCycle();
@@ -1121,7 +1065,7 @@ void hiresPlane1(){
     
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     hiresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
-    host.FBCounter +=8;
+    host.FBCounter += 8;
     return;
     
 
@@ -1189,11 +1133,9 @@ int copperExecute(){
             
             //Move
             internal.IR2 = (internal.IR2 <<8) | (internal.IR2 >> 8);
-            //printf("%04x Cop Move: %04x -> (%s)\n",internal.copperPC - 4,internal.IR2,regNames[internal.IR1]);
-            
             debugChipAddress = internal.IR1; //Debug what the Copper is writing to...
             debugChipValue   = internal.IR2;
-            
+
             putChipReg16[internal.IR1](internal.IR2);
             internal.copperCycle = 0;
             return 1;

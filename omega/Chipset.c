@@ -683,13 +683,12 @@ void bpl8ptl(uint16_t value){
 }
 
 void bplcon0(uint16_t value){
-    
     displayLineReset(); //restart drawing if the bplcon has changed. This might need to take a value as to how many lines were needed to change the mode
 
     chipset.bplcon0 = value;
-    
+
     int planes = (value >> 12) & 7 ;
-    
+
     internal.bitplaneMask = planeMask[planes];
 }
 
@@ -704,10 +703,10 @@ void bplcon3(uint16_t value){
 }
 
 void bpl1mod(uint16_t value){
-    chipset.bpl1mod = value >> 1; // Word aligned
+    chipset.bpl1mod = (int16_t)value >> 1; // signed: preserves negative modulo
 }
 void bpl2mod(uint16_t value){
-    chipset.bpl2mod = value >> 1;
+    chipset.bpl2mod = (int16_t)value >> 1;
 }
 void bplcon4(uint16_t value){
     //No AGA support yet
