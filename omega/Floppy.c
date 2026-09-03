@@ -434,11 +434,12 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
     //ID mode... to identify external drives...
      if(df[driveSelected].idMode>0){   // Id mode
-         // /DKRDY=0 (ready) signals drive is present; =1 (not ready) means no drive / empty slot
-         if(df[driveSelected].hasDisk){
-             df[driveSelected].pra  &= 0xDF;     // drive present: /DKRDY=0, gives ID 0x00000000 (3.5" DD)
-         } else {
-             df[driveSelected].pra  |= 0x20;     // no drive: /DKRDY=1, gives ID 0xFFFFFFFF (absent)
+         // Report drive present (/DKRDY=0) only for drives that physically exist.
+         // Drive 0 is always present (even with no ADF loaded). Drives 1-3 are only
+         // present if an ADF is loaded. Without this distinction, the ROM sees four
+         // 3.5" DD drives, times out reading all of them, then falls to ROM disk.
+         if(driveSelected == 0 || df[driveSelected].hasDisk){
+             df[driveSelected].pra  &= 0xDF;  // /DKRDY=0 → drive present, ID=0x00000000
          }
          df[driveSelected].idMode -=1;
          CIAA.pra = (CIAA.pra & 0xC3) | (df[driveSelected].pra & 0x3C);
@@ -475,11 +476,14 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
         //printf(" Motor On ");
         //df[driveSelected].prb  &= 0x7F;
         
-        if(df[driveSelected].hasDisk){
-            df[driveSelected].pra  &= 0xDF;  // Drive ready (/DKRDY=0)
-            // Leave /CHNG as-is: if 0, KS will read it and detect disk change
+        // Report drive ready (/DKRDY=0) for drives that physically exist.
+        // Drive 0 is always present; without this, KS 2.04's 200-read polling
+        // loop sees /DKRDY=1 and falls back to its internal ROM disk instead
+        // of showing the insert-disk screen when no ADF is loaded.
+        if(df[driveSelected].hasDisk || driveSelected == 0){
+            df[driveSelected].pra  &= 0xDF;  // /DKRDY=0 → drive ready
         } else {
-            df[driveSelected].pra  |= 0x20;  // no disk: drive not ready (/DKRDY=1)
+            df[driveSelected].pra  |= 0x20;  // non-existent drive → not ready
         }
         //floppySync=0;
     }

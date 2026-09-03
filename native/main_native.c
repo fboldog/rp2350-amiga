@@ -124,9 +124,25 @@ int main(int argc, char **argv) {
             printf("  DF0: %s encoded to MFM — disk in drive at boot\n", adfPath);
         }
     } else {
-        // No path or empty path = drive present, no disk
         floppyInit(0);
         printf("  DF0: drive present, no disk\n");
+    }
+
+    // When drive 0 has no disk, pre-fill every track with a sync word (0x4489)
+    // at byte 0.  Without this, diskCycle reads all-zero bytes forever, DSKBLK
+    // never fires, trackdisk.device never returns an error, and the "Please
+    // insert a Workbench disk" requester never opens.  The zero data after each
+    // sync produces invalid sector headers so trackdisk returns TDERR_NoSecHdr
+    // after its retry limit and the OS shows the insert-disk screen.
+    if (!haveDisk) {
+        uint8_t *mfm = df[0].mfmData;
+        for (int cyl = 0; cyl < 82; cyl++) {
+            for (int side = 0; side < 2; side++) {
+                int base = cyl * (12798 * 2) + side * 12798;
+                mfm[base + 0] = 0x44;
+                mfm[base + 1] = 0x89;
+            }
+        }
     }
 
     // Initialize empty drives 1-3 so pra starts with correct /CHNG=1 and
