@@ -36,7 +36,7 @@ void loadROM(){
 
 unsigned int chipReadByte(unsigned int address){
     //ROM
-    if(address>0xF80000){
+    if(address>=0xF80000){
         return low16Meg[address];
     }
     
@@ -282,7 +282,7 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
             fflush(stdout);
         }
     }
-    if(address>0xF80000){
+    if(address>=0xF80000){
         return;
     }
 
@@ -396,7 +396,7 @@ void chipWriteWord(unsigned int address,unsigned int value){
         }
     }
     //ROM
-    if(address>0xF80000){
+    if(address>=0xF80000){
         return;
     }
 
@@ -536,7 +536,7 @@ void chipWriteLong(unsigned int address,unsigned int value){
         fflush(stdout);
     }
     //ROM
-    if(address>0xF80000){
+    if(address>=0xF80000){
         return;
     }
 
@@ -611,7 +611,6 @@ void chipWriteLong(unsigned int address,unsigned int value){
     *dest = value; return;
 
 }
-
 
 
 
