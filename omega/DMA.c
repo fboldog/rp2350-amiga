@@ -586,6 +586,26 @@ void waitFreeSlot(){
 int lastFetchCycle;
 static int hiresCallsThisLine = 0;
 
+static void hiresDisplayPrefetch(void) {
+    if ((chipset.bplcon0 & 0x8000) == 0 ||
+        (chipset.dmaconr & 0x300) != 0x300 ||
+        internal.vPos < (chipset.diwstrt >> 8) ||
+        host.pixels == NULL ||
+        (host.FBCounter * 2 + 15) >= HOST_RASTER_PIXELS)
+        return;
+
+    uint16_t p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+    if (internal.bitplaneMask & 0x01) p1 = internal.chipramW[chipset.bpl1pt];
+    if (internal.bitplaneMask & 0x02) p2 = internal.chipramW[chipset.bpl2pt];
+    if (internal.bitplaneMask & 0x04) p3 = internal.chipramW[chipset.bpl3pt];
+    if (internal.bitplaneMask & 0x08) p4 = internal.chipramW[chipset.bpl4pt];
+
+    uint32_t *pixbuff = (uint32_t *)host.pixels;
+    hiresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette,
+                       p1, p2, p3, p4);
+    host.FBCounter += 8;
+}
+
 void dma_execute(){
     
     chipset.vposr   = (0x1000) | internal.vPos >> 8; //the internal.LOF might be needed, 0x1000 is for NTSC / 0x0000 is for PAL
@@ -616,6 +636,11 @@ void dma_execute(){
     //end of line reached! 227 colour clocks have executed
     if(internal.hPos > 0xE3){
         // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
+
+        // Denise still presents the next HIRES word at the right edge even
+        // though Agnus does not consume it as part of the line stride. Peek
+        // at it for display only; do not advance any bitplane pointer.
+        hiresDisplayPrefetch();
 
         // Per-line HIRES diagnostic (first 60 visible HIRES lines ever seen)
         static int lineLog = 0;

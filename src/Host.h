@@ -20,8 +20,7 @@
 #define HOST_RASTER_H       178
 #define HOST_RASTER_PIXELS  (HOST_RASTER_W * HOST_RASTER_H)
 #define HOST_VISIBLE_X0     40
-#define HOST_VISIBLE_X1     584
-#define HOST_DISPLAY_X1     596
+#define HOST_VISIBLE_X1     596
 #define HOST_FETCH_LEAD     24
 #define HOST_CONTENT_Y      44
 

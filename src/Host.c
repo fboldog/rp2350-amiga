@@ -109,16 +109,6 @@ void hostDisplay(void) {
             fb[dy * SCREEN_W + x] = pixel;
             fb[(dy + 1) * SCREEN_W + x] = pixel;
         }
-        for (int x = HOST_VISIBLE_X1; x < HOST_DISPLAY_X1; ++x) {
-            uint32_t pixel = render_fb[sy * HOST_RASTER_W +
-                                       HOST_FETCH_LEAD + HOST_VISIBLE_X1 - 1];
-            uint32_t shoulder = render_fb[sy * HOST_RASTER_W +
-                                          HOST_FETCH_LEAD + 440];
-            if (pixel != border && pixel == shoulder) {
-                fb[dy * SCREEN_W + x] = pixel;
-                fb[(dy + 1) * SCREEN_W + x] = pixel;
-            }
-        }
     }
     for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
         render_fb[i] = border;
