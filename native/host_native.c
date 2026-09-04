@@ -102,6 +102,30 @@ void hostDisplay(void) {
                 row[x] = border;
             memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         }
+
+        // This wrapped display mode uses the Amiga HIRES pixel aspect.  Map
+        // 32 beam pixels to 27 square host pixels; otherwise the picture is
+        // too wide and its right edge falls outside the framebuffer.
+        uint32_t *scaled = render_fb;
+        for (int y = HOST_CONTENT_Y; y < SCREEN_H; ++y) {
+            uint32_t *row = &fb[y * SCREEN_W];
+            for (int x = 0; x < SCREEN_W; ++x) scaled[x] = border;
+            int scaled_w = SCREEN_W * HOST_WRAP_X_NUM / HOST_WRAP_X_DEN;
+            for (int dx = 0; dx < scaled_w; ++dx) {
+                int sx = dx * HOST_WRAP_X_DEN / HOST_WRAP_X_NUM;
+                scaled[HOST_WRAP_X_OFFSET + dx] = row[sx];
+            }
+            memcpy(row, scaled, SCREEN_W * sizeof(uint32_t));
+        }
+
+        // The wrapped 3.x display window describes a 480-line viewport.  The
+        // native target presents 400 lines, centred 40 lines lower in that
+        // coordinate space, so translate it instead of clipping the bottom.
+        memmove(fb, fb + HOST_WRAP_Y_OFFSET * SCREEN_W,
+                (SCREEN_H - HOST_WRAP_Y_OFFSET) * SCREEN_W * sizeof(uint32_t));
+        for (int y = SCREEN_H - HOST_WRAP_Y_OFFSET; y < SCREEN_H; ++y)
+            for (int x = 0; x < SCREEN_W; ++x)
+                fb[y * SCREEN_W + x] = border;
     }
     for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
         render_fb[i] = border;

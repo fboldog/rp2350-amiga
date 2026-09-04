@@ -23,6 +23,10 @@
 #define HOST_VISIBLE_X1     596
 #define HOST_FETCH_LEAD     24
 #define HOST_CONTENT_Y      44
+#define HOST_WRAP_X_OFFSET  23
+#define HOST_WRAP_X_NUM     27
+#define HOST_WRAP_X_DEN     32
+#define HOST_WRAP_Y_OFFSET  40
 
 // Host state – RP2350 flavour (no SDL types here)
 typedef struct {
