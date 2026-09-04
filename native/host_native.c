@@ -71,10 +71,8 @@ void hostDisplay(void) {
     // The fetch pipeline places the next logical scanline's prefix after the
     // current line.  Rejoin such prefixes to a right-edge object, then remove
     // them from the following line's left edge.
-    for (int sy = 0;
-         (chipset.diwstop >> 8) < (chipset.diwstrt >> 8) &&
-         sy + 1 < HOST_RASTER_H;
-         ++sy) {
+    int repaired_wrapped_prefix = 0;
+    for (int sy = 0; sy + 1 < HOST_RASTER_H; ++sy) {
         int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
         if (dy < 0 || dy + 3 >= SCREEN_H)
             continue;
@@ -88,6 +86,8 @@ void hostDisplay(void) {
             prefix_start++;
         if (right < SCREEN_W / 2 || prefix_start == HOST_VISIBLE_X0 + 48)
             continue;
+        if (row[right] != next[prefix_start])
+            continue;
 
         int prefix_end = prefix_start;
         while (prefix_end < HOST_VISIBLE_X0 + 48 && next[prefix_end] != border)
@@ -98,10 +98,11 @@ void hostDisplay(void) {
             row[right + 1 + x] = next[HOST_VISIBLE_X0 + x];
             next[HOST_VISIBLE_X0 + x] = border;
         }
+        repaired_wrapped_prefix = 1;
         memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         memcpy(next + SCREEN_W, next, SCREEN_W * sizeof(uint32_t));
     }
-    if ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8)) {
+    if (repaired_wrapped_prefix) {
         for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
             int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
             if (dy < 0 || dy + 1 >= SCREEN_H)
@@ -116,8 +117,11 @@ void hostDisplay(void) {
     // Map 32 Amiga HIRES beam pixels to 27 square host pixels.  Wrapped
     // scanlines have already moved their fetch prefix to the right edge, so
     // their presentation origin differs from an ordinary display window.
-    int x_offset = ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8))
+    int x_offset = repaired_wrapped_prefix ||
+                   ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8))
                  ? HOST_WRAP_X_OFFSET : HOST_NORMAL_X_OFFSET;
+    if (x_offset == HOST_WRAP_X_OFFSET)
+        x_offset = OMEGA_VIDEO_WRAP_X_OFFSET;
     uint32_t *scaled = render_fb;
     int first_content_y = HOST_CONTENT_Y - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
     if (first_content_y < 0) first_content_y = 0;
