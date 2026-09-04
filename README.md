@@ -79,6 +79,10 @@ cmake .. -G Ninja        # PICO_BOARD defaults to waveshare_rp2350_pizero
 ninja
 ```
 
+The firmware defaults to NTSC timing. Select PAL at configure time with
+`cmake .. -G Ninja -DOMEGA_VIDEO_MODE=PAL`. The selected standard controls the
+chipset frame length and video-identification bit.
+
 Output: `build/omega-amiga.uf2`
 
 ### Flash with Kickstart ROM

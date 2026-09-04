@@ -7,11 +7,22 @@
 #
 # Runtime override (SDL2 binary only):
 #   OMEGA_HEADLESS=1  — suppress the window without recompiling
+#
+# Compile-time video standard:
+#   VIDEO=NTSC (default) or VIDEO=PAL
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT=native/omega-native
 CC=${CC:-gcc}
+
+VIDEO=${VIDEO:-NTSC}
+case "$VIDEO" in
+    NTSC|ntsc) VIDEO_NAME=NTSC; VIDEO_DEFINE=0 ;;
+    PAL|pal)   VIDEO_NAME=PAL;  VIDEO_DEFINE=1 ;;
+    *) echo "VIDEO must be NTSC or PAL" >&2; exit 2 ;;
+esac
+echo "Video standard: $VIDEO_NAME"
 
 SDL_FLAGS=""
 SDL_LIBS=""
@@ -58,7 +69,7 @@ if [ -n "$SDL_SRC" ]; then
         -Isrc -Iomega \
         -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
         -Wno-incompatible-pointer-types \
-        $SDL_FLAGS \
+        $SDL_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
         -c -o native/display_sdl.o native/display_sdl.c
     SDL_OBJ="native/display_sdl.o"
 fi
@@ -69,7 +80,7 @@ $CC -O2 -g -std=gnu11 \
     -Isrc -Iomega \
     -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
     -Wno-incompatible-pointer-types \
-    $SDL_FLAGS \
+    $SDL_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
     -o "$OUT" \
     native/main_native.c native/host_native.c native/memory_native.c \
     $SDL_OBJ \

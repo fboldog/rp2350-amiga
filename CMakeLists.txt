@@ -23,6 +23,17 @@ project(omega-amiga C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
+set(OMEGA_VIDEO_MODE "NTSC" CACHE STRING "Amiga video standard: NTSC or PAL")
+set_property(CACHE OMEGA_VIDEO_MODE PROPERTY STRINGS NTSC PAL)
+string(TOUPPER "${OMEGA_VIDEO_MODE}" OMEGA_VIDEO_MODE)
+if(OMEGA_VIDEO_MODE STREQUAL "NTSC")
+    set(OMEGA_VIDEO_STANDARD_VALUE 0)
+elseif(OMEGA_VIDEO_MODE STREQUAL "PAL")
+    set(OMEGA_VIDEO_STANDARD_VALUE 1)
+else()
+    message(FATAL_ERROR "OMEGA_VIDEO_MODE must be NTSC or PAL")
+endif()
+
 pico_sdk_init()
 
 # ── Sources ───────────────────────────────────────────────────────────────
@@ -70,6 +81,7 @@ target_compile_definitions(omega-amiga PRIVATE
     # Overclock: vreg / PLL config in main.c sets the actual clock;
     # this constant is just for documentation.
     OMEGA_SYS_KHZ=250000
+    OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
 )
 
 # ── Pico SDK libraries ────────────────────────────────────────────────────
@@ -117,3 +129,4 @@ target_compile_options(omega-amiga PRIVATE
 message(STATUS "Board:       ${PICO_BOARD}")
 message(STATUS "SDK path:    $ENV{PICO_SDK_PATH}")
 message(STATUS "Build type:  ${CMAKE_BUILD_TYPE}")
+message(STATUS "Video mode:  ${OMEGA_VIDEO_MODE}")

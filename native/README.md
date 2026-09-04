@@ -73,6 +73,21 @@ drive ID mode (`df[0].idMode == 0`); the runner then polls `floppyInsert(0)`
 until the drive latches the disk. Use `""` as the disk argument to run without
 any floppy image.
 
+The video standard is selected at compile time. NTSC is the default; build PAL
+with:
+
+```sh
+VIDEO=PAL ./native/build.sh
+```
+
+`VIDEO=NTSC` restores the default; lowercase `pal` and `ntsc` are also
+accepted. The script is compatible with the Bash 3.2 version shipped by macOS.
+
+The choice is shared by DMA frame length, the chipset video-identification bit,
+CIA vertical TOD events, and SDL pacing (59.94 Hz NTSC or 50 Hz PAL), so
+VBL-driven animations run in real time. `OMEGA_HEADLESS=1` and binaries built
+with `HEADLESS=1` remain unthrottled for fast boot and framebuffer tests.
+
 ## Status (2026-09-04)
 
 - Kickstart 1.3 boots to the "insert Workbench" screen. ✅

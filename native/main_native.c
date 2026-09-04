@@ -36,6 +36,7 @@
 #include "../omega/CIA.h"
 #include "../omega/DMA.h"
 #include "../omega/Floppy.h"
+#include "../omega/VideoStandard.h"
 #include "../omega/m68k.h"
 
 #include "../omega/Kick13.h" // const unsigned char kick13[524288]
@@ -83,6 +84,10 @@ int main(int argc, char **argv) {
     if (getenv("OMEGA_DISASM")) disass = 1;
 
     printf("Omega native runner\n");
+    printf("  video=%s  lines=%d  refresh=%.3f Hz\n",
+           OMEGA_VIDEO_NAME, OMEGA_VIDEO_FRAME_LINES,
+           (double)OMEGA_VIDEO_RATE_NUMERATOR /
+           OMEGA_VIDEO_RATE_DENOMINATOR);
     printf("  iterations=%ld  dump_every=%ld  disasm=%d\n",
            iterations, dumpEvery, disass);
 

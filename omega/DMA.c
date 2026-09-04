@@ -27,6 +27,7 @@
 #include "debug.h"
 
 #include "Floppy.h"
+#include "VideoStandard.h"
 
 
 
@@ -608,7 +609,7 @@ static void hiresDisplayPrefetch(void) {
 
 void dma_execute(){
     
-    chipset.vposr   = (0x1000) | internal.vPos >> 8; //the internal.LOF might be needed, 0x1000 is for NTSC / 0x0000 is for PAL
+    chipset.vposr   = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
     chipset.vhposr  = internal.vPos << 8;
     chipset.vhposr |= internal.hPos;
     
@@ -676,7 +677,7 @@ void dma_execute(){
         chipset.bpl8pt += chipset.bpl2mod;
         
         //VBL Time
-        if(internal.vPos > 0x106 ){ //0x106 is the propper ntsc vbl
+        if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
             internal.vPos = 0;
             //chipset.vposr   = (internal.LOF | 0x1000); //0x1000 is for NTSC / 0x0000 is for PAL
 

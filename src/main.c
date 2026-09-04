@@ -33,6 +33,7 @@
 #include "../omega/CIA.h"
 #include "../omega/DMA.h"
 #include "../omega/Floppy.h"
+#include "../omega/VideoStandard.h"
 
 // ── PAL timing ────────────────────────────────────────────────────────────
 // 313 scanlines × 227 DMA cycles/line × 2 (odd+even) ≈ 142 246 cycles/frame
@@ -91,6 +92,10 @@ int main(void) {
                          BOARD_UART_TX_PIN, BOARD_UART_RX_PIN);
     printf("\n\nOmega/RP2350 – Amiga emulator\n");
     printf("Sys clock: %lu kHz\n", (unsigned long)(clock_get_hz(clk_sys) / 1000));
+    printf("Video: %s (%d lines, %.3f Hz)\n",
+           OMEGA_VIDEO_NAME, OMEGA_VIDEO_FRAME_LINES,
+           (double)OMEGA_VIDEO_RATE_NUMERATOR /
+           OMEGA_VIDEO_RATE_DENOMINATOR);
 
     // 2. PSRAM
     psram_init();
