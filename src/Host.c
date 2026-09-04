@@ -116,8 +116,13 @@ void hostDisplay(void) {
                SCREEN_W * sizeof(uint32_t));
     }
 
-    int repaired_wrapped_prefix = 0;
-    for (int sy = 0; sy + 1 < HOST_RASTER_H; ++sy) {
+    int diw_start = chipset.diwstrt >> 8;
+    int diw_stop = chipset.diwstop >> 8;
+    int extended_stop = diw_stop + 256;
+    int repaired_wrapped_prefix = diw_stop < diw_start ||
+        (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
+         extended_stop <= OMEGA_VIDEO_FRAME_LINES);
+    for (int sy = 0; repaired_wrapped_prefix && sy + 1 < HOST_RASTER_H; ++sy) {
         int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
         if (dy < 0 || dy + 3 >= SCREEN_H)
             continue;
@@ -131,8 +136,6 @@ void hostDisplay(void) {
             prefix_start++;
         if (right < SCREEN_W / 2 || prefix_start == HOST_VISIBLE_X0 + 48)
             continue;
-        if (row[right] != next[prefix_start])
-            continue;
 
         int prefix_end = prefix_start;
         while (prefix_end < HOST_VISIBLE_X0 + 48 && next[prefix_end] != border)
@@ -143,7 +146,6 @@ void hostDisplay(void) {
             row[right + 1 + x] = next[HOST_VISIBLE_X0 + x];
             next[HOST_VISIBLE_X0 + x] = border;
         }
-        repaired_wrapped_prefix = 1;
         memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         memcpy(next + SCREEN_W, next, SCREEN_W * sizeof(uint32_t));
     }
