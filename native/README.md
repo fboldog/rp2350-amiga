@@ -96,6 +96,11 @@ shorter NTSC crop and clipping the Kickstart insert-disk screen.
 
 - Kickstart 1.3 boots to the "insert Workbench" screen. ✅
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
+  Full-width HIRES Workbench screens use a true 640-pixel raster stride rather
+  than the narrower wrapped-fetch presentation used by the Kickstart artwork.
+  PAL Copper waits that cross line 255 retain the next vertical-line bank, and
+  the 40-line upper overscan is removed before presentation. This keeps the
+  complete loading window—including its lower border—in the 640×400 output.
 - Kickstart 2.04 boots Workbench 2.x from ADF (`Install3.2.adf` confirmed). ✅
   Title bar, Ram Disk volume, and disk name all render correctly (~1000 VBLs).
 - Kickstart 2.04 no-disk boot: insert-disk screen renders correctly. ✅

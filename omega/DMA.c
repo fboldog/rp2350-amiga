@@ -586,6 +586,7 @@ void waitFreeSlot(){
 
 int lastFetchCycle;
 static int hiresCallsThisLine = 0;
+static uint32_t copperWaitPosition = 0;
 
 static void hiresDisplayPrefetch(void) {
     if ((chipset.bplcon0 & 0x8000) == 0 ||
@@ -685,6 +686,7 @@ void dma_execute(){
         //VBL Time
         if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
             internal.vPos = 0;
+            copperWaitPosition = 0;
             //chipset.vposr   = (internal.LOF | 0x1000); //0x1000 is for NTSC / 0x0000 is for PAL
 
             //Reset Copper.
@@ -1110,6 +1112,16 @@ void hiresPlane1(){
         hiresCallsThisLine++;
     }
 
+    // The full-width Workbench raster begins 40 PAL beam lines below DIWSTRT.
+    // Remove that upper overscan so all 200 useful rows, including the lower
+    // window border, fit in the host scratch framebuffer.
+    if (chipset.ddfstrt < 0x40 && hiresCallsThisLine == 1) {
+        int display_line = internal.vPos - (chipset.diwstrt >> 8) - 40;
+        if (display_line < 0)
+            return;
+        host.FBCounter = display_line * SCREEN_W;
+    }
+
     //don't start actually rendering a display before 44 lines
     if(internal.vPos<43){
         evenCycle();
@@ -1210,6 +1222,16 @@ int copperExecute(){
 
             internal.IR1 &= internal.comparisonMask; //mask the wait position
 
+            copperWaitPosition = internal.IR1;
+            // PAL Copper lists cross the 8-bit vertical comparator boundary
+            // with a wait near line 255 followed by a low-byte wait.  Keep
+            // that second wait in the next 256-line bank instead of allowing
+            // it to complete immediately at the wrap.
+            if (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
+                internal.vPos >= 255 &&
+                ((internal.IR1 >> 8) & 0xff) < (internal.vPos & 0xff))
+                copperWaitPosition += 0x10000;
+
             internal.copperCycle = 3;
             
             //Skip
@@ -1238,7 +1260,10 @@ int copperExecute(){
             */
             
             //Wait
-            if( (chipset.vhposr & internal.IR2)  >= internal.IR1){
+            uint32_t beamPosition = ((uint32_t)internal.vPos << 8) |
+                                    internal.hPos;
+            uint32_t maskedBeam = beamPosition & (0xFFFF0000u | internal.IR2);
+            if(maskedBeam >= copperWaitPosition){
                 internal.copperCycle = 0;
             }
             
