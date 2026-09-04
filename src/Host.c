@@ -100,10 +100,14 @@ void hostDisplay(void) {
     // For now, leave joy0dat alone so Workbench won't crash on NULL ptr.
 
     const uint32_t border = internal.palette[0];
+    const int diw_start = chipset.diwstrt >> 8;
+    const int viewport_y_offset =
+        (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL && diw_start < 64)
+        ? HOST_CONTENT_Y : OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
     for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
         fb[i] = border;
     for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
-        int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+        int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
         if (dy < 0 || dy + 1 >= SCREEN_H)
             continue;
         for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X1; ++x) {
@@ -116,14 +120,13 @@ void hostDisplay(void) {
                SCREEN_W * sizeof(uint32_t));
     }
 
-    int diw_start = chipset.diwstrt >> 8;
     int diw_stop = chipset.diwstop >> 8;
     int extended_stop = diw_stop + 256;
     int repaired_wrapped_prefix = diw_stop < diw_start ||
         (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
          extended_stop <= OMEGA_VIDEO_FRAME_LINES);
     for (int sy = 0; repaired_wrapped_prefix && sy + 1 < HOST_RASTER_H; ++sy) {
-        int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+        int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
         if (dy < 0 || dy + 3 >= SCREEN_H)
             continue;
         uint32_t *row = &fb[dy * SCREEN_W];
@@ -151,7 +154,7 @@ void hostDisplay(void) {
     }
     if (repaired_wrapped_prefix) {
         for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
-            int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+            int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
             if (dy < 0 || dy + 1 >= SCREEN_H)
                 continue;
             uint32_t *row = &fb[dy * SCREEN_W];
@@ -167,7 +170,7 @@ void hostDisplay(void) {
     if (x_offset == HOST_WRAP_X_OFFSET)
         x_offset = OMEGA_VIDEO_WRAP_X_OFFSET;
     uint32_t *scaled = render_fb;
-    int first_content_y = HOST_CONTENT_Y - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+    int first_content_y = HOST_CONTENT_Y - viewport_y_offset;
     if (first_content_y < 0) first_content_y = 0;
     for (int y = first_content_y; y < SCREEN_H; ++y) {
         uint32_t *row = &fb[y * SCREEN_W];

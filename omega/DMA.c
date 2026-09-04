@@ -589,6 +589,7 @@ static int hiresCallsThisLine = 0;
 
 static void hiresDisplayPrefetch(void) {
     if ((chipset.bplcon0 & 0x8000) == 0 ||
+        chipset.ddfstrt < 0x40 ||
         (chipset.dmaconr & 0x300) != 0x300 ||
         internal.vPos < (chipset.diwstrt >> 8) ||
         host.pixels == NULL ||
@@ -616,11 +617,11 @@ void dma_execute(){
 
     // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
     if(chipset.bplcon0 & 0x8000){
-        // HIRES: words/line = (ddfstop - ddfstrt)/4 + 2  (real OCS formula).
-        // hiresPlane1 is 3 slots after the group start, so the last active call
-        // is at ddfstop+3.  We add +7 to also cover the plane4/2/3 prefetch of
-        // the last group (ddfstop+0..+2) while keeping hiresPlane1 at ddfstop+3.
-        lastFetchCycle = chipset.ddfstop + 7;
+        // The standard 0x3c full-width window consumes one more word than the
+        // narrower 0x40 Kickstart-logo window.  The latter's right-edge word
+        // is supplied by hiresDisplayPrefetch() without changing its stride.
+        lastFetchCycle = chipset.ddfstop +
+                         (chipset.ddfstrt < 0x40 ? 11 : 7);
         DMAHires[internal.hPos]();
     }else{
         // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
