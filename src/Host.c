@@ -106,6 +106,30 @@ void hostDisplay(void) {
         ? HOST_CONTENT_Y : OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
     for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
         fb[i] = border;
+
+    // Full-width HIRES screens use 320 packed DMA samples per scanline.
+    // Expand those directly to 640x400; the narrower Kickstart artwork is
+    // handled by the wrapped-fetch presentation path below.
+    if (chipset.ddfstrt < 0x40 && diw_start < 64) {
+        int first_active = 0;
+        while (first_active < HOST_RASTER_H) {
+            const uint32_t *line = &render_fb[first_active * SCREEN_W];
+            int x = 0;
+            while (x < SCREEN_W && line[x] == border) ++x;
+            if (x < SCREEN_W) break;
+            ++first_active;
+        }
+        for (int y = 0; y < SCREEN_H / 2; ++y) {
+            uint32_t *dst = &fb[(y * 2) * SCREEN_W];
+            if (first_active + y < HOST_RASTER_H) {
+                const uint32_t *src = &render_fb[(first_active + y) * SCREEN_W];
+                memcpy(dst, src, SCREEN_W * sizeof(uint32_t));
+            }
+            memcpy(dst + SCREEN_W, dst, SCREEN_W * sizeof(uint32_t));
+        }
+        goto frame_ready;
+    }
+
     for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
         int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
         if (dy < 0 || dy + 1 >= SCREEN_H)
@@ -183,6 +207,7 @@ void hostDisplay(void) {
         memcpy(row, scaled, SCREEN_W * sizeof(uint32_t));
     }
 
+frame_ready:
     for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
         render_fb[i] = border;
     display_push_frame();

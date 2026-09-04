@@ -655,7 +655,12 @@ void dma_execute(){
         hiresCallsThisLine = 0;
 
         if(internal.vPos>=43){
-            host.FBCounter = (internal.vPos - 42) * (SCREEN_W / 2);
+            if (chipset.ddfstrt < 0x40) {
+                int next_line = internal.vPos - (chipset.diwstrt >> 8) + 1;
+                host.FBCounter = next_line > 0 ? next_line * SCREEN_W : 0;
+            } else {
+                host.FBCounter = (internal.vPos - 42) * (SCREEN_W / 2);
+            }
         }
         
         
@@ -1110,12 +1115,16 @@ void hiresPlane1(){
         evenCycle();
         return;
     }
-    if ((host.FBCounter * 2 + 15) >= HOST_RASTER_PIXELS)
+    int write_index = chipset.ddfstrt < 0x40
+                    ? host.FBCounter : host.FBCounter * 2;
+    if ((write_index + 15) >= HOST_RASTER_PIXELS)
         return;
 
     uint32_t* pixbuff = (uint32_t*)host.pixels;
-    hiresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
-    host.FBCounter += 8;
+    uint32_t *line = chipset.ddfstrt < 0x40
+                   ? pixbuff : &pixbuff[host.FBCounter];
+    hiresPlanar2Chunky(line, internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+    host.FBCounter += chipset.ddfstrt < 0x40 ? 16 : 8;
     return;
     
 
