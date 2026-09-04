@@ -74,9 +74,10 @@ any floppy image.
   fetch count corrected to the real OCS formula (`lastFetchCycle = ddfstop + 7`,
   giving `(ddfstop − ddfstrt)/4 + 2` words/line); (d) `BPL1MOD` sign-extended
   correctly (`(int16_t)value >> 1`).
-  Known cosmetic issues: white artefact on far-right edge; floppy-disk sprite
-  ghost on far-left edge; rendered content limited to top ≈ 55 % of the 400-line
-  framebuffer (NTSC lines 43–261 map to rows 1–218 of 400).
+  The native/RP2350 host presentation step now separates the raw DMA raster
+  from the displayed framebuffer, clips fetch-pipeline overscan, and doubles
+  visible scanlines into the 640×400 output. This removes the left-edge disk
+  ghost and the black lower half formerly caused by exposing the raw raster.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
   slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the

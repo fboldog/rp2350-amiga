@@ -986,6 +986,8 @@ void loresPlane1(void){
         evenCycle();
         return;
     }
+    if ((host.FBCounter * 2 + 31) >= HOST_RASTER_PIXELS)
+        return;
     
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     if(chipset.bplcon0 & 0x800){
@@ -1081,6 +1083,8 @@ void hiresPlane1(){
         evenCycle();
         return;
     }
+    if ((host.FBCounter * 2 + 15) >= HOST_RASTER_PIXELS)
+        return;
 
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     hiresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);

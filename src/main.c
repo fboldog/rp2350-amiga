@@ -118,11 +118,8 @@ int main(void) {
             dma_execute();
             cpu_execute();
         }
-        // hostDisplay is called by the DMA engine each VBL via the
-        // Chipset/DMA layer (see DMA.c evenCycle / VBL handler).
-        // Call it here as a fallback so the framebuffer is periodically
-        // pushed to the display even if VBL signalling is not yet wired.
-        hostDisplay();
+        // hostDisplay is called exactly once per VBL by the DMA engine.  It
+        // converts the intermediate beam raster into the 640x400 output.
     }
 
     // Unreachable

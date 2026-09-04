@@ -12,6 +12,19 @@
 #define SCREEN_W 640
 #define SCREEN_H 400
 
+// Omega's DMA renderer produces an intermediate beam raster.  Kickstart's
+// DMA fetch window contains pipeline/overscan words around the visible data.
+// The host presentation step clips that raster into a 640x400 image and
+// doubles scanlines vertically.
+#define HOST_RASTER_W       640
+#define HOST_RASTER_H       178
+#define HOST_RASTER_PIXELS  (HOST_RASTER_W * HOST_RASTER_H)
+#define HOST_VISIBLE_X0     40
+#define HOST_VISIBLE_X1     584
+#define HOST_DISPLAY_X1     596
+#define HOST_FETCH_LEAD     24
+#define HOST_CONTENT_Y      44
+
 // Host state – RP2350 flavour (no SDL types here)
 typedef struct {
     int FBCounter;  // pixel position within current scanline group

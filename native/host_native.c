@@ -19,7 +19,8 @@
 
 Host_t host;
 
-static uint32_t *fb;                    // SCREEN_W * SCREEN_H, 32-bit ARGB
+static uint32_t *fb;                    // presented SCREEN_W * SCREEN_H image
+static uint32_t *render_fb;             // intermediate DMA beam raster
 unsigned long native_frame_counter = 0; // bumped by hostDisplay()
 
 // ── Amiga key-code table (unused head-less, kept for link compatibility) ──
@@ -32,7 +33,12 @@ void toggleLEDs(void)             { }
 // ── Lifecycle ────────────────────────────────────────────────────────────
 void hostInit(void) {
     fb = calloc(SCREEN_W * SCREEN_H, sizeof(uint32_t));
-    host.pixels    = fb;
+    render_fb = calloc(HOST_RASTER_PIXELS, sizeof(uint32_t));
+    if (!fb || !render_fb) {
+        fprintf(stderr, "Host init: framebuffer allocation failed\n");
+        exit(1);
+    }
+    host.pixels    = render_fb;
     host.FBCounter = 0;
     host.vblCount  = 0;
     printf("Host init (native): framebuffer %p (%dx%d ARGB)\n",
@@ -40,6 +46,34 @@ void hostInit(void) {
 }
 
 void hostDisplay(void) {
+    const uint32_t border = internal.palette[0];
+
+    // Convert the raw DMA fetch raster to the visible display.  The first
+    // fetch words are pipeline/overscan data and must be clipped, not wrapped
+    // around to the opposite edge.
+    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
+        fb[i] = border;
+    for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
+        int dy = HOST_CONTENT_Y + sy * 2;
+        for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X1; ++x) {
+            int sx = HOST_FETCH_LEAD + x;
+            uint32_t pixel = render_fb[sy * HOST_RASTER_W + sx];
+            fb[dy * SCREEN_W + x] = pixel;
+            fb[(dy + 1) * SCREEN_W + x] = pixel;
+        }
+        for (int x = HOST_VISIBLE_X1; x < HOST_DISPLAY_X1; ++x) {
+            uint32_t pixel = render_fb[sy * HOST_RASTER_W +
+                                       HOST_FETCH_LEAD + HOST_VISIBLE_X1 - 1];
+            uint32_t shoulder = render_fb[sy * HOST_RASTER_W +
+                                          HOST_FETCH_LEAD + 440];
+            if (pixel != border && pixel == shoulder) {
+                fb[dy * SCREEN_W + x] = pixel;
+                fb[(dy + 1) * SCREEN_W + x] = pixel;
+            }
+        }
+    }
+    for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
+        render_fb[i] = border;
     native_frame_counter++;
 #ifdef HAVE_SDL2
     sdl_display_push(fb);

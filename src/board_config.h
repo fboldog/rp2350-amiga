@@ -164,12 +164,14 @@
 //  0x280000..0x47FFFF  DF0 MFM buffer  (2 MB)
 //  0x480000..0x67FFFF  DF1 MFM buffer  (2 MB)
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
-//  0x780000..0x7FFFFF  Reserved / scratch (512 KB)
+//  0x780000..0x7EFFFF  Video DMA raster scratch (640x178 ARGB32, ~445 KB)
+//  0x7F0000..0x7FFFFF  Reserved (64 KB)
 #define BOARD_MAP_CHIPRAM_OFFSET   0x000000u
 #define BOARD_MAP_SLOWRAM_OFFSET   0x200000u
 #define BOARD_MAP_DF0_OFFSET       0x280000u
 #define BOARD_MAP_DF1_OFFSET       0x480000u
 #define BOARD_MAP_FRAMEBUF_OFFSET  0x680000u
+#define BOARD_MAP_VIDEO_RASTER_OFFSET 0x780000u
 
 #define BOARD_MAP_CHIPRAM_SIZE     0x200000u   // 2 MB
 #define BOARD_MAP_SLOWRAM_SIZE     0x080000u   // 512 KB
@@ -185,6 +187,8 @@
 #if BOARD_HAS_PSRAM
 _Static_assert(BOARD_MAP_FRAMEBUF_OFFSET + 640u*400u*4u <= BOARD_PSRAM_SIZE_BYTES,
                "framebuffer overruns fitted PSRAM - shrink the map or fit more PSRAM");
+_Static_assert(BOARD_MAP_VIDEO_RASTER_OFFSET + 640u*178u*4u <= BOARD_PSRAM_SIZE_BYTES,
+               "video raster scratch buffer overruns fitted PSRAM");
 #endif
 #if BOARD_HAS_DVI && BOARD_HAS_SDCARD
 //  DVI uses GPIO 32..39; SDIO clock is GPIO38. SPI-SD (30/31/40/43) is clear of

@@ -17,7 +17,8 @@
 Host_t host;
 
 // Framebuffer lives in PSRAM
-static uint32_t *fb;    // SCREEN_W * SCREEN_H pixels (32-bit ARGB)
+static uint32_t *fb;        // presented SCREEN_W * SCREEN_H image
+static uint32_t *render_fb; // intermediate DMA beam raster
 
 // ── Amiga key-code table (same values as the SDL Host.c) ─────────────────
 static const uint8_t keyMapping[] = {
@@ -83,10 +84,12 @@ static void display_push_frame(void) {
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 void hostInit(void) {
     fb = (uint32_t *)psram_ptr(PSRAM_FRAMEBUF_OFFSET);
-    host.pixels   = fb;
+    render_fb = (uint32_t *)psram_ptr(PSRAM_VIDEO_RASTER_OFFSET);
+    host.pixels   = render_fb;
     host.FBCounter = 0;
     host.vblCount  = 0;
     memset(fb, 0, SCREEN_W * SCREEN_H * sizeof(uint32_t));
+    memset(render_fb, 0, HOST_RASTER_PIXELS * sizeof(uint32_t));
     printf("Host init: framebuffer at %p (%d×%d ARGB)\n",
            (void *)fb, SCREEN_W, SCREEN_H);
 }
@@ -95,6 +98,30 @@ void hostDisplay(void) {
     // Mouse / joystick: stub – wire up USB HID here.
     // For now, leave joy0dat alone so Workbench won't crash on NULL ptr.
 
+    const uint32_t border = internal.palette[0];
+    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
+        fb[i] = border;
+    for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
+        int dy = HOST_CONTENT_Y + sy * 2;
+        for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X1; ++x) {
+            int sx = HOST_FETCH_LEAD + x;
+            uint32_t pixel = render_fb[sy * HOST_RASTER_W + sx];
+            fb[dy * SCREEN_W + x] = pixel;
+            fb[(dy + 1) * SCREEN_W + x] = pixel;
+        }
+        for (int x = HOST_VISIBLE_X1; x < HOST_DISPLAY_X1; ++x) {
+            uint32_t pixel = render_fb[sy * HOST_RASTER_W +
+                                       HOST_FETCH_LEAD + HOST_VISIBLE_X1 - 1];
+            uint32_t shoulder = render_fb[sy * HOST_RASTER_W +
+                                          HOST_FETCH_LEAD + 440];
+            if (pixel != border && pixel == shoulder) {
+                fb[dy * SCREEN_W + x] = pixel;
+                fb[(dy + 1) * SCREEN_W + x] = pixel;
+            }
+        }
+    }
+    for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
+        render_fb[i] = border;
     display_push_frame();
 }
 
