@@ -61,8 +61,8 @@ set -x
 
 SDL_OBJ=""
 if [ -n "$SDL_SRC" ]; then
-    # display_sdl.c includes SDL2/SDL.h directly.  Compiling it without
-    # -include sdl_shim.h avoids a conflict between the shim's static-inline
+    # display_sdl.c includes SDL.h using sdl2-config's include path. Compiling
+    # it without -include sdl_shim.h avoids a conflict between the shim's static-inline
     # SDL_AtomicGet stub and SDL2's extern declaration of the same function.
     # shellcheck disable=SC2086
     $CC -O2 -g -std=gnu11 \
