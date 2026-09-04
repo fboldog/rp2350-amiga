@@ -17,7 +17,7 @@
 // The host presentation step clips that raster into a 640x400 image and
 // doubles scanlines vertically.
 #define HOST_RASTER_W       640
-#define HOST_RASTER_H       178
+#define HOST_RASTER_H       200
 #define HOST_RASTER_PIXELS  (HOST_RASTER_W * HOST_RASTER_H)
 #define HOST_VISIBLE_X0     40
 #define HOST_VISIBLE_X1     596

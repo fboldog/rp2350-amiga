@@ -9,6 +9,7 @@
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
 #include "../omega/CPU.h"
+#include "../omega/VideoStandard.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,7 +55,9 @@ void hostDisplay(void) {
     for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
         fb[i] = border;
     for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
-        int dy = HOST_CONTENT_Y + sy * 2;
+        int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+        if (dy < 0 || dy + 1 >= SCREEN_H)
+            continue;
         for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X1; ++x) {
             int sx = HOST_FETCH_LEAD + x;
             uint32_t pixel = render_fb[sy * HOST_RASTER_W + sx];
@@ -72,7 +75,10 @@ void hostDisplay(void) {
          (chipset.diwstop >> 8) < (chipset.diwstrt >> 8) &&
          sy + 1 < HOST_RASTER_H;
          ++sy) {
-        uint32_t *row = &fb[(HOST_CONTENT_Y + sy * 2) * SCREEN_W];
+        int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+        if (dy < 0 || dy + 3 >= SCREEN_H)
+            continue;
+        uint32_t *row = &fb[dy * SCREEN_W];
         uint32_t *next = row + SCREEN_W * 2;
         int right = HOST_VISIBLE_X1 - 1;
         while (right >= SCREEN_W / 2 && row[right] == border) right--;
@@ -97,7 +103,10 @@ void hostDisplay(void) {
     }
     if ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8)) {
         for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
-            uint32_t *row = &fb[(HOST_CONTENT_Y + sy * 2) * SCREEN_W];
+            int dy = HOST_CONTENT_Y + sy * 2 - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+            if (dy < 0 || dy + 1 >= SCREEN_H)
+                continue;
+            uint32_t *row = &fb[dy * SCREEN_W];
             for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X0 + 48; ++x)
                 row[x] = border;
             memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
@@ -110,7 +119,9 @@ void hostDisplay(void) {
     int x_offset = ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8))
                  ? HOST_WRAP_X_OFFSET : HOST_NORMAL_X_OFFSET;
     uint32_t *scaled = render_fb;
-    for (int y = HOST_CONTENT_Y; y < SCREEN_H; ++y) {
+    int first_content_y = HOST_CONTENT_Y - OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+    if (first_content_y < 0) first_content_y = 0;
+    for (int y = first_content_y; y < SCREEN_H; ++y) {
         uint32_t *row = &fb[y * SCREEN_W];
         for (int x = 0; x < SCREEN_W; ++x) scaled[x] = border;
         int scaled_w = SCREEN_W * HOST_ASPECT_X_NUM / HOST_ASPECT_X_DEN;
@@ -121,13 +132,6 @@ void hostDisplay(void) {
         memcpy(row, scaled, SCREEN_W * sizeof(uint32_t));
     }
 
-    // The native target presents the centred 400-line portion of the
-    // emulator's 480-line viewport.
-    memmove(fb, fb + HOST_VIEWPORT_Y_OFFSET * SCREEN_W,
-            (SCREEN_H - HOST_VIEWPORT_Y_OFFSET) * SCREEN_W * sizeof(uint32_t));
-    for (int y = SCREEN_H - HOST_VIEWPORT_Y_OFFSET; y < SCREEN_H; ++y)
-        for (int x = 0; x < SCREEN_W; ++x)
-            fb[y * SCREEN_W + x] = border;
     for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
         render_fb[i] = border;
     native_frame_counter++;

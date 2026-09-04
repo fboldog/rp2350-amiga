@@ -81,7 +81,8 @@ ninja
 
 The firmware defaults to NTSC timing. Select PAL at configure time with
 `cmake .. -G Ninja -DOMEGA_VIDEO_MODE=PAL`. The selected standard controls the
-chipset frame length and video-identification bit.
+chipset frame length, video-identification bit, and display viewport. PAL uses
+the taller 200-line intermediate raster required by its 400-line output.
 
 Output: `build/omega-amiga.uf2`
 

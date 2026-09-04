@@ -88,6 +88,10 @@ CIA vertical TOD events, and SDL pacing (59.94 Hz NTSC or 50 Hz PAL), so
 VBL-driven animations run in real time. `OMEGA_HEADLESS=1` and binaries built
 with `HEADLESS=1` remain unthrottled for fast boot and framebuffer tests.
 
+PAL uses its own 400-line viewport origin and a 200-line intermediate raster.
+This preserves the lower part of the PAL display instead of applying the
+shorter NTSC crop and clipping the Kickstart insert-disk screen.
+
 ## Status (2026-09-04)
 
 - Kickstart 1.3 boots to the "insert Workbench" screen. ✅

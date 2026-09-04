@@ -164,8 +164,8 @@
 //  0x280000..0x47FFFF  DF0 MFM buffer  (2 MB)
 //  0x480000..0x67FFFF  DF1 MFM buffer  (2 MB)
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
-//  0x780000..0x7EFFFF  Video DMA raster scratch (640x178 ARGB32, ~445 KB)
-//  0x7F0000..0x7FFFFF  Reserved (64 KB)
+//  0x780000..0x7FCFFF  Video DMA raster scratch (640x200 ARGB32, 500 KB)
+//  0x7FD000..0x7FFFFF  Reserved (12 KB)
 #define BOARD_MAP_CHIPRAM_OFFSET   0x000000u
 #define BOARD_MAP_SLOWRAM_OFFSET   0x200000u
 #define BOARD_MAP_DF0_OFFSET       0x280000u
