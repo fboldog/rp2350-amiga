@@ -107,7 +107,45 @@ void hostDisplay(void) {
             int sx = HOST_FETCH_LEAD + x;
             uint32_t pixel = render_fb[sy * HOST_RASTER_W + sx];
             fb[dy * SCREEN_W + x] = pixel;
-            fb[(dy + 1) * SCREEN_W + x] = pixel;
+        }
+
+        memcpy(&fb[(dy + 1) * SCREEN_W], &fb[dy * SCREEN_W],
+               SCREEN_W * sizeof(uint32_t));
+    }
+
+    for (int sy = 0;
+         (chipset.diwstop >> 8) < (chipset.diwstrt >> 8) &&
+         sy + 1 < HOST_RASTER_H;
+         ++sy) {
+        uint32_t *row = &fb[(HOST_CONTENT_Y + sy * 2) * SCREEN_W];
+        uint32_t *next = row + SCREEN_W * 2;
+        int right = HOST_VISIBLE_X1 - 1;
+        while (right >= SCREEN_W / 2 && row[right] == border) right--;
+        int prefix_start = HOST_VISIBLE_X0;
+        while (prefix_start < HOST_VISIBLE_X0 + 48 &&
+               next[prefix_start] == border)
+            prefix_start++;
+        if (right < SCREEN_W / 2 || prefix_start == HOST_VISIBLE_X0 + 48)
+            continue;
+
+        int prefix_end = prefix_start;
+        while (prefix_end < HOST_VISIBLE_X0 + 48 && next[prefix_end] != border)
+            prefix_end++;
+        int count = prefix_end - HOST_VISIBLE_X0;
+        if (count > SCREEN_W - right - 1) count = SCREEN_W - right - 1;
+        for (int x = 0; x < count; ++x) {
+            row[right + 1 + x] = next[HOST_VISIBLE_X0 + x];
+            next[HOST_VISIBLE_X0 + x] = border;
+        }
+        memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
+        memcpy(next + SCREEN_W, next, SCREEN_W * sizeof(uint32_t));
+    }
+    if ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8)) {
+        for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
+            uint32_t *row = &fb[(HOST_CONTENT_Y + sy * 2) * SCREEN_W];
+            for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X0 + 48; ++x)
+                row[x] = border;
+            memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         }
     }
     for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
