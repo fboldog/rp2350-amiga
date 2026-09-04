@@ -15,6 +15,7 @@ without RP2350 hardware. It does **not** exercise `src/psram.c`, `src/Memory.c`
 
 ```bash
 ./native/build.sh                       # -> native/omega-native
+HEADLESS=1 ./native/build.sh            # force PPM-only build, even with SDL2
 ```
 
 `build.sh` auto-detects SDL2 via `sdl2-config`:
@@ -27,10 +28,10 @@ mirrored automatically to fill the 512 KB window at 0xF80000–0xFFFFFF):
 
 ```bash
 # Kickstart 1.3 — insert-disk screen only (no floppy):
-./native/omega-native
+OMEGA_ROM=kick-13.rom ./native/omega-native "" 500000
 
 # Kickstart 1.3 — boot a WB 1.3 ADF to the AmigaDOS CLI:
-OMEGA_ROM=kick13.rom ./native/omega-native workbench13.adf 300000 50000 3000
+OMEGA_ROM=kick-13.rom ./native/omega-native workbench13.adf 300000 50000 3000
 #                                           ^disk.adf       ^iters ^dump ^insert-at
 
 # Kickstart 2.04 — ROM disk, no floppy (purple "Insert Workbench" backdrop):
@@ -46,6 +47,18 @@ OMEGA_ROM=kick314.rom ./native/omega-native "" 500000
 python3 native/ppm2png.py frame_final.ppm frame_final.png
 ```
 
+For deterministic screenshot checks, force a headless build and capture the
+insert-disk screen after 500,000 iterations:
+
+```bash
+HEADLESS=1 ./native/build.sh
+OMEGA_ROM=kick204.rom ./native/omega-native "" 500000 500000
+python3 native/ppm2png.py frame_final.ppm frame_final.png
+```
+
+The same command works with `kick-13.rom` and `kick314.rom`. ROMs and generated
+`frame*.ppm`/`frame*.png` files are local test assets and must not be committed.
+
 Each "iteration" is 200×(`dma_execute()` + `cpu_execute()`), matching the RP2350
 `main.c` main loop. Rough timing guide:
 
@@ -60,7 +73,7 @@ drive ID mode (`df[0].idMode == 0`); the runner then polls `floppyInsert(0)`
 until the drive latches the disk. Use `""` as the disk argument to run without
 any floppy image.
 
-## Status (2026-09-03)
+## Status (2026-09-04)
 
 - Kickstart 1.3 boots to the "insert Workbench" screen. ✅
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
@@ -76,8 +89,10 @@ any floppy image.
   correctly (`(int16_t)value >> 1`).
   The native/RP2350 host presentation step now separates the raw DMA raster
   from the displayed framebuffer, clips fetch-pipeline overscan, and doubles
-  visible scanlines into the 640×400 output. This removes the left-edge disk
-  ghost and the black lower half formerly caused by exposing the raw raster.
+  visible scanlines. It then maps the Amiga HIRES pixel aspect at 27:32 and
+  selects the centred 400-line region of the 480-line viewport. Normal and
+  vertically wrapped display windows use their appropriate horizontal origins.
+  This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
   slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the

@@ -114,8 +114,11 @@ to implement. Options:
 | VGA | pico-vga-scanvideo | Needs resistor ladder, 3 GPIO per channel |
 | SPI TFT | st7789 / ili9341 | Easy hardware, 320×240 typical |
 
-The framebuffer is always at `PSRAM_BASE + PSRAM_FRAMEBUF_OFFSET` in ARGB32 format,
-640×400 pixels (lores doubles pixels horizontally to 640, hires is native).
+The framebuffer is always at `PSRAM_BASE + PSRAM_FRAMEBUF_OFFSET` in ARGB32
+format, 640×400 pixels. The host presentation stage clips the raw DMA fetch
+raster, applies the 27:32 Amiga HIRES-to-square-pixel aspect correction, and
+selects the centred 400 lines of the emulated 480-line viewport. This behavior
+is shared with the native test runner.
 
 ## Phase 2: USB HID
 
