@@ -92,7 +92,7 @@ PAL uses its own 400-line viewport origin and a 200-line intermediate raster.
 This preserves the lower part of the PAL display instead of applying the
 shorter NTSC crop and clipping the Kickstart insert-disk screen.
 
-## Status (2026-09-04)
+## Status (2026-09-05)
 
 - Kickstart 1.3 boots to the "insert Workbench" screen. ✅
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
@@ -102,7 +102,14 @@ shorter NTSC crop and clipping the Kickstart insert-disk screen.
   the 40-line upper overscan is removed before presentation. This keeps the
   complete loading window—including its lower border—in the 640×400 output.
 - Kickstart 2.04 boots Workbench 2.x from ADF (`Install3.2.adf` confirmed). ✅
-  Title bar, Ram Disk volume, and disk name all render correctly (~1000 VBLs).
+  Its `DDFSTRT=0x3c`, `DDFSTOP=0xd4` HIRES window consumes 40 words per
+  bitplane row; the extra fetch needed by the narrower 1.3 window is applied
+  only to `0x3c–0xd0`. This prevents the row-by-row pointer drift that produced
+  diagonally offset blocks. The desktop is coherent, although its final PAL
+  viewport framing still needs refinement.
+  Byte reads outside the 32 readable custom-register byte handlers return open
+  bus instead of indexing beyond the dispatch table; this is shared by the
+  native and RP2350 memory backends.
 - Kickstart 2.04 no-disk boot: insert-disk screen renders correctly. ✅
   Rainbow V-checkmark, both floppy-disk icons, and all four copyright-text lines
   are visible. Fixed by: (a) floppy drive ID/motor-on reports `/DKRDY=0` for

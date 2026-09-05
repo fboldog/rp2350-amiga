@@ -104,6 +104,7 @@ unsigned int chipReadByte(unsigned int address) {
     if (address > 0xDFEFFFu) {
         uint32_t off = address - 0xDFF000u;
         debugChipAddress = off;
+        if (off >= 32u) return 0;
         return getChipReg8[off]();
     }
     // Gayle/IDE

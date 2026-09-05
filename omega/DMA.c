@@ -621,8 +621,9 @@ void dma_execute(){
         // The standard 0x3c full-width window consumes one more word than the
         // narrower 0x40 Kickstart-logo window.  The latter's right-edge word
         // is supplied by hiresDisplayPrefetch() without changing its stride.
-        lastFetchCycle = chipset.ddfstop +
-                         (chipset.ddfstrt < 0x40 ? 11 : 7);
+        int wb13_full_width = chipset.ddfstrt == 0x3c &&
+                              chipset.ddfstop == 0xd0;
+        lastFetchCycle = chipset.ddfstop + (wb13_full_width ? 11 : 7);
         DMAHires[internal.hPos]();
     }else{
         // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
@@ -1116,7 +1117,9 @@ void hiresPlane1(){
     // Remove that upper overscan so all 200 useful rows, including the lower
     // window border, fit in the host scratch framebuffer.
     if (chipset.ddfstrt < 0x40 && hiresCallsThisLine == 1) {
-        int display_line = internal.vPos - (chipset.diwstrt >> 8) - 40;
+        int upper_overscan = chipset.ddfstop == 0xd0 ? 40 : 14;
+        int display_line = internal.vPos - (chipset.diwstrt >> 8) -
+                           upper_overscan;
         if (display_line < 0)
             return;
         host.FBCounter = display_line * SCREEN_W;

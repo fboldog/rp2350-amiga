@@ -53,6 +53,8 @@ unsigned int chipReadByte(unsigned int address){
     if(address>0xDFEFFF){
         address = (address - 0xDFF000);
         debugChipAddress = address;
+        if (address >= 32)
+            return 0;
         return getChipReg8[address]();
     }
     
@@ -611,6 +613,5 @@ void chipWriteLong(unsigned int address,unsigned int value){
     *dest = value; return;
 
 }
-
 
 
