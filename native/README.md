@@ -151,6 +151,11 @@ been removed. `BPLCON0` writes no longer reset a host-side drawing cursor, and
 the unused `setDisplayMode()` plus random-pixel `drawBlank()` diagnostic are
 gone. Raster placement is now owned solely by the active DMA fetch paths.
 
+Always-on rendering investigation logs have also been removed from the DMA and
+custom-register hot paths. Per-line HIRES, `BPLCON0`, and modulo writes no
+longer add console I/O or timing noise during normal emulation; screenshot
+regression logs retain the runner-level information needed for failures.
+
 ## Status (2026-09-05)
 
 - Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅

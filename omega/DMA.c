@@ -655,14 +655,6 @@ void dma_execute(){
         // at it for display only; do not advance any bitplane pointer.
         hiresDisplayPrefetch();
 
-        // Per-line HIRES diagnostic (first 60 visible HIRES lines ever seen)
-        static int lineLog = 0;
-        if (hiresCallsThisLine > 0 && internal.vPos >= 44 && lineLog < 10) {
-            printf("[LINE] vPos=%d bpl1pt=0x%05X calls=%d bpl1mod=%d ddfstrt=0x%02X ddfstop=0x%02X lastFC=%d\n",
-                   internal.vPos, chipset.bpl1pt, hiresCallsThisLine,
-                   chipset.bpl1mod, chipset.ddfstrt, chipset.ddfstop, lastFetchCycle);
-            lineLog++;
-        }
         hiresCallsThisLine = 0;
         loresCallsThisLine = 0;
         
@@ -1132,11 +1124,6 @@ void hiresPlane1(){
     hiresPlanar2Chunky(line, internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
     host.rasterX += 16;
     return;
-    
-
-    
-    evenCycle();
-    
 }
 
 

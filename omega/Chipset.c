@@ -686,10 +686,6 @@ void bpl8ptl(uint16_t value){
 }
 
 void bplcon0(uint16_t value){
-    static int bplLog = 0;
-    if (value != chipset.bplcon0 && bplLog < 20)
-        printf("[BPLCON0] 0x%04X -> 0x%04X (planes=%d hires=%d)\n", chipset.bplcon0, value, (value>>12)&7, (value>>15)&1), bplLog++;
-
     chipset.bplcon0 = value;
 
     int planes = (value >> 12) & 7 ;
@@ -709,8 +705,6 @@ void bplcon3(uint16_t value){
 
 void bpl1mod(uint16_t value){
     chipset.bpl1mod = (int16_t)value >> 1; // signed: preserves negative modulo
-    static int modLog = 0;
-    if (modLog < 5) printf("[MOD] BPL1MOD reg=0x%04X -> chipset.bpl1mod=%d\n", value, chipset.bpl1mod), modLog++;
 }
 void bpl2mod(uint16_t value){
     chipset.bpl2mod = (int16_t)value >> 1;
