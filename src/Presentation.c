@@ -2,20 +2,17 @@
 
 #include "Host.h"
 #include "../omega/Chipset.h"
+#include "../omega/DisplayLayout.h"
 #include <string.h>
 
 enum {
-    FULL_WIDTH_DDF_LIMIT = 0x40,
     EARLY_DISPLAY_LINE = 64,
-    WB314_DDF_START = 0x38,
-    WB314_DDF_STOP = 0xd8,
-    WB314_ROW_ROTATION = 80,
     WRAPPED_PREFIX_PIXELS = 48,
     OCS_VERTICAL_BANK_LINES = 256,
 };
 
 static int isFullWidthDisplay(int diw_start) {
-    return chipset.ddfstrt < FULL_WIDTH_DDF_LIMIT &&
+    return omegaDdfIsFullWidth(chipset.ddfstrt) &&
            diw_start < EARLY_DISPLAY_LINE;
 }
 
@@ -45,9 +42,8 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // narrower, wrapped fetch window and still needs the pipeline repair path
     // below.
     if (isFullWidthDisplay(diw_start)) {
-        int row_rotation = chipset.ddfstrt == WB314_DDF_START &&
-                           chipset.ddfstop == WB314_DDF_STOP
-                         ? WB314_ROW_ROTATION : 0;
+        int row_rotation =
+            omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
         // This full-width LORES layout already advances two beam rows for
         // each logical picture row.  Sample those rows once before the host
         // performs its normal 2x vertical integer scaling.

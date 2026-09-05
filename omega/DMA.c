@@ -26,6 +26,7 @@
 
 #include "Floppy.h"
 #include "VideoStandard.h"
+#include "DisplayLayout.h"
 
 
 
@@ -598,7 +599,7 @@ static int displayWindowContainsLine(int vpos) {
 
 static void hiresDisplayPrefetch(void) {
     if ((chipset.bplcon0 & 0x8000) == 0 ||
-        chipset.ddfstrt < 0x40 ||
+        omegaDdfIsFullWidth(chipset.ddfstrt) ||
         (chipset.dmaconr & 0x300) != 0x300 ||
         !displayWindowContainsLine(internal.vPos) ||
         host.pixels == NULL ||
@@ -630,8 +631,8 @@ void dma_execute(){
         // The standard 0x3c full-width window consumes one more word than the
         // narrower 0x40 Kickstart-logo window.  The latter's right-edge word
         // is supplied by hiresDisplayPrefetch() without changing its stride.
-        int wb13_full_width = chipset.ddfstrt == 0x3c &&
-                              chipset.ddfstop == 0xd0;
+        int wb13_full_width =
+            omegaDdfNeedsExtraWord(chipset.ddfstrt, chipset.ddfstop);
         lastFetchCycle = chipset.ddfstop + (wb13_full_width ? 11 : 7);
         DMAHires[internal.hPos]();
     }else{
@@ -984,10 +985,10 @@ void loresPlane1(void){
     if( (internal.bitplaneMask & 0x1)  == 0x1){
         host.displayIsLores = 1;
         if (loresCallsThisLine++ == 0) {
-            int display_line = chipset.ddfstrt < 0x40
+            int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
                              ? internal.vPos - (chipset.diwstrt >> 8)
                              : internal.vPos - 43;
-            host.rasterRow = chipset.ddfstrt < 0x40
+            host.rasterRow = omegaDdfIsFullWidth(chipset.ddfstrt)
                            ? display_line * 2 : display_line;
             host.rasterX = 0;
         }
@@ -1097,15 +1098,17 @@ void hiresPlane1(){
     // The full-width Workbench raster begins 40 PAL beam lines below DIWSTRT.
     // Remove that upper overscan so all 200 useful rows, including the lower
     // window border, fit in the host scratch framebuffer.
-    if (chipset.ddfstrt < 0x40 && hiresCallsThisLine == 1) {
-        int upper_overscan = chipset.ddfstop == 0xd0 ? 40 : 14;
+    if (omegaDdfIsFullWidth(chipset.ddfstrt) && hiresCallsThisLine == 1) {
+        int upper_overscan = chipset.ddfstop == OMEGA_DDF_EXTRA_WORD_STOP
+                           ? 40 : 14;
         int display_line = internal.vPos - (chipset.diwstrt >> 8) -
                            upper_overscan;
         if (display_line < 0)
             return;
         host.rasterRow = display_line;
         host.rasterX = 0;
-    } else if (chipset.ddfstrt >= 0x40 && hiresCallsThisLine == 1) {
+    } else if (!omegaDdfIsFullWidth(chipset.ddfstrt) &&
+               hiresCallsThisLine == 1) {
         host.rasterRow = internal.vPos - 43;
         host.rasterX = 0;
     }

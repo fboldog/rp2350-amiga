@@ -172,6 +172,11 @@ scattering literal register and pixel values through the algorithm. Repeated
 full-width and wrapped-window predicates are expressed as helpers, including
 removal of a redundant wrapped-origin test.
 
+DDF layout signatures shared by DMA and presentation are defined in
+`omega/DisplayLayout.h`. Full-width fetch detection, the extra-word requester
+layout, and the rotated Workbench 3.14 layout can no longer drift between the
+two stages.
+
 The unused `sprite2chunky()` API and its duplicate host implementations have
 been removed. This does not remove working sprite support: `spriteCycle()` is
 currently an explicit stub, so sprite DMA and sprite rendering remain
