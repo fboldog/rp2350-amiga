@@ -186,6 +186,12 @@ fetch cycle and HIRES/LORES word counts. This replaces unrelated loose globals
 and provides one owner for the fetch-completion and modulo timing model. The
 current modulo behavior is intentionally unchanged at this foundation step.
 
+Scanline reset and bitplane-pointer advancement are now explicit operations on
+that boundary, and the state records whether a real plane fetch occurred. For
+compatibility, modulo is still applied at the existing host scanline boundary;
+the fetch marker allows no-fetch advancement to be measured before replacing
+it with hardware DDF-completion timing.
+
 The shared layout definitions also name the raster origin at beam line 43 and
 the first LORES render line at 44. LORES and HIRES positioning now refer to
 those meanings rather than repeating unexplained vertical literals.

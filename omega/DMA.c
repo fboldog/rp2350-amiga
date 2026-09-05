@@ -587,10 +587,28 @@ typedef struct {
     int lastCycle;
     int hiresWords;
     int loresWords;
+    int fetched;
 } BitplaneLineState;
 
 static BitplaneLineState bitplaneLine;
 static uint32_t copperWaitPosition = 0;
+
+static void resetBitplaneLine(void) {
+    bitplaneLine.hiresWords = 0;
+    bitplaneLine.loresWords = 0;
+    bitplaneLine.fetched = 0;
+}
+
+static void advanceBitplanePointers(void) {
+    chipset.bpl1pt += chipset.bpl1mod;
+    chipset.bpl3pt += chipset.bpl1mod;
+    chipset.bpl5pt += chipset.bpl1mod;
+    chipset.bpl7pt += chipset.bpl1mod;
+    chipset.bpl2pt += chipset.bpl2mod;
+    chipset.bpl4pt += chipset.bpl2mod;
+    chipset.bpl6pt += chipset.bpl2mod;
+    chipset.bpl8pt += chipset.bpl2mod;
+}
 
 static int displayWindowContainsLine(int vpos) {
     int start = chipset.diwstrt >> 8;
@@ -660,27 +678,16 @@ void dma_execute(){
         // at it for display only; do not advance any bitplane pointer.
         hiresDisplayPrefetch();
 
-        bitplaneLine.hiresWords = 0;
-        bitplaneLine.loresWords = 0;
-        
-        
-        
-        
-        
         internal.hPos = 0;
         internal.vPos +=1;
         CIATODEvent(&CIAB);
         
         
-        //Update bitplane modulo
-        chipset.bpl1pt += chipset.bpl1mod;
-        chipset.bpl3pt += chipset.bpl1mod;
-        chipset.bpl5pt += chipset.bpl1mod;
-        chipset.bpl7pt += chipset.bpl1mod;
-        chipset.bpl2pt += chipset.bpl2mod;
-        chipset.bpl4pt += chipset.bpl2mod;
-        chipset.bpl6pt += chipset.bpl2mod;
-        chipset.bpl8pt += chipset.bpl2mod;
+        // Compatibility timing: pointer modulo is still applied at the host
+        // scanline boundary. bitplaneLine.fetched records the hardware-facing
+        // distinction needed to move this to fetch completion later.
+        advanceBitplanePointers();
+        resetBitplaneLine();
         
         //VBL Time
         if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
@@ -984,6 +991,7 @@ void loresPlane1(void){
         return;
     }
     if( (internal.bitplaneMask & 0x1)  == 0x1){
+        bitplaneLine.fetched = 1;
         host.displayIsLores = 1;
         if (bitplaneLine.loresWords++ == 0) {
             int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
@@ -1088,6 +1096,7 @@ void hiresPlane1(){
     }
     chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
+        bitplaneLine.fetched = 1;
         host.displayIsLores = 0;
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
