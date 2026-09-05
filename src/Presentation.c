@@ -4,11 +4,33 @@
 #include "../omega/Chipset.h"
 #include <string.h>
 
+enum {
+    FULL_WIDTH_DDF_LIMIT = 0x40,
+    EARLY_DISPLAY_LINE = 64,
+    WB314_DDF_START = 0x38,
+    WB314_DDF_STOP = 0xd8,
+    WB314_ROW_ROTATION = 80,
+    WRAPPED_PREFIX_PIXELS = 48,
+    OCS_VERTICAL_BANK_LINES = 256,
+};
+
+static int isFullWidthDisplay(int diw_start) {
+    return chipset.ddfstrt < FULL_WIDTH_DDF_LIMIT &&
+           diw_start < EARLY_DISPLAY_LINE;
+}
+
+static int needsWrappedPrefixRepair(int diw_start, int diw_stop) {
+    return diw_stop < diw_start ||
+           (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
+            diw_stop + OCS_VERTICAL_BANK_LINES <= OMEGA_VIDEO_FRAME_LINES);
+}
+
 void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     const uint32_t border = internal.palette[0];
     const int diw_start = chipset.diwstrt >> 8;
     const int viewport_y_offset =
-        (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL && diw_start < 64)
+        (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
+         diw_start < EARLY_DISPLAY_LINE)
         ? HOST_CONTENT_Y : OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
 
     // Convert the raw DMA fetch raster to the visible display.  The first
@@ -22,9 +44,10 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // and each scanline twice vertically.  The Kickstart artwork uses a
     // narrower, wrapped fetch window and still needs the pipeline repair path
     // below.
-    if (chipset.ddfstrt < 0x40 && diw_start < 64) {
-        int row_rotation = chipset.ddfstrt == 0x38 &&
-                           chipset.ddfstop == 0xd8 ? 80 : 0;
+    if (isFullWidthDisplay(diw_start)) {
+        int row_rotation = chipset.ddfstrt == WB314_DDF_START &&
+                           chipset.ddfstop == WB314_DDF_STOP
+                         ? WB314_ROW_ROTATION : 0;
         // This full-width LORES layout already advances two beam rows for
         // each logical picture row.  Sample those rows once before the host
         // performs its normal 2x vertical integer scaling.
@@ -63,10 +86,8 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // current line.  Rejoin such prefixes to a right-edge object, then remove
     // them from the following line's left edge.
     int diw_stop = chipset.diwstop >> 8;
-    int extended_stop = diw_stop + 256;
-    int repaired_wrapped_prefix = diw_stop < diw_start ||
-        (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
-         extended_stop <= OMEGA_VIDEO_FRAME_LINES);
+    int repaired_wrapped_prefix =
+        needsWrappedPrefixRepair(diw_start, diw_stop);
     for (int sy = 0; repaired_wrapped_prefix && sy + 1 < HOST_RASTER_H; ++sy) {
         int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
         if (dy < 0 || dy + 3 >= SCREEN_H)
@@ -76,14 +97,16 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
         int right = HOST_VISIBLE_X1 - 1;
         while (right >= SCREEN_W / 2 && row[right] == border) right--;
         int prefix_start = HOST_VISIBLE_X0;
-        while (prefix_start < HOST_VISIBLE_X0 + 48 &&
+        while (prefix_start < HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS &&
                next[prefix_start] == border)
             prefix_start++;
-        if (right < SCREEN_W / 2 || prefix_start == HOST_VISIBLE_X0 + 48)
+        if (right < SCREEN_W / 2 ||
+            prefix_start == HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS)
             continue;
 
         int prefix_end = prefix_start;
-        while (prefix_end < HOST_VISIBLE_X0 + 48 && next[prefix_end] != border)
+        while (prefix_end < HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS &&
+               next[prefix_end] != border)
             prefix_end++;
         int count = prefix_end - HOST_VISIBLE_X0;
         if (count > SCREEN_W - right - 1) count = SCREEN_W - right - 1;
@@ -100,7 +123,8 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             if (dy < 0 || dy + 1 >= SCREEN_H)
                 continue;
             uint32_t *row = &fb[dy * SCREEN_W];
-            for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X0 + 48; ++x)
+            for (int x = HOST_VISIBLE_X0;
+                 x < HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS; ++x)
                 row[x] = border;
             memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         }
@@ -109,8 +133,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // Map 32 Amiga HIRES beam pixels to 27 square host pixels.  Wrapped
     // scanlines have already moved their fetch prefix to the right edge, so
     // their presentation origin differs from an ordinary display window.
-    int x_offset = repaired_wrapped_prefix ||
-                   ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8))
+    int x_offset = repaired_wrapped_prefix
                  ? HOST_WRAP_X_OFFSET : HOST_NORMAL_X_OFFSET;
     if (x_offset == HOST_WRAP_X_OFFSET)
         x_offset = OMEGA_VIDEO_WRAP_X_OFFSET;

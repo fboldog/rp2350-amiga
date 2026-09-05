@@ -166,6 +166,12 @@ and raster clearing therefore have one implementation for native and RP2350
 builds. Each host backend retains only platform-specific frame submission and
 lifecycle work.
 
+The shared presentation code names its display-layout signatures, row
+rotation, wrapped-prefix width, and OCS vertical-bank size rather than
+scattering literal register and pixel values through the algorithm. Repeated
+full-width and wrapped-window predicates are expressed as helpers, including
+removal of a redundant wrapped-origin test.
+
 The unused `sprite2chunky()` API and its duplicate host implementations have
 been removed. This does not remove working sprite support: `spriteCycle()` is
 currently an explicit stub, so sprite DMA and sprite rendering remain
