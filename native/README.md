@@ -160,6 +160,12 @@ HIRES, LORES, and HAM planar conversion now live in the shared
 `src/Planar.c`. Native and RP2350 builds link the same implementation instead
 of carrying byte-for-byte copies in their host backends.
 
+Framebuffer presentation now lives in shared `src/Presentation.c`. Clipping,
+LORES row selection, scanline expansion, wrapped-prefix repair, aspect mapping,
+and raster clearing therefore have one implementation for native and RP2350
+builds. Each host backend retains only platform-specific frame submission and
+lifecycle work.
+
 The unused `sprite2chunky()` API and its duplicate host implementations have
 been removed. This does not remove working sprite support: `spriteCycle()` is
 currently an explicit stub, so sprite DMA and sprite rendering remain
@@ -233,6 +239,7 @@ regression logs retain the runner-level information needed for failures.
 | `main_native.c`   | entry: load ROM/ADF, run loop, dump PPM |
 | `host_native.c`   | native framebuffer lifecycle, PPM inspection, and SDL frame submission |
 | `../src/Planar.c` | shared HIRES, LORES, and HAM planar-to-chunky conversion |
+| `../src/Presentation.c` | shared raster clipping, repair, scaling, and framebuffer presentation |
 | `memory_native.c` | upstream Omega `Memory.c` verbatim (`low16Meg`, `chipRead*/Write*`) |
 | `display_sdl.c`   | SDL2 window: open / push (30 fps cap) / poll / close |
 | `display_sdl.h`   | public API for `display_sdl.c` |

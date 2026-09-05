@@ -7,6 +7,7 @@
 // Serial:  printf → UART via pico_stdio_uart (configured in CMakeLists.txt).
 
 #include "Host.h"
+#include "Presentation.h"
 #include "psram.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
@@ -100,120 +101,6 @@ void hostInit(void) {
 void hostDisplay(void) {
     // Mouse / joystick: stub – wire up USB HID here.
     // For now, leave joy0dat alone so Workbench won't crash on NULL ptr.
-
-    const uint32_t border = internal.palette[0];
-    const int diw_start = chipset.diwstrt >> 8;
-    const int viewport_y_offset =
-        (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL && diw_start < 64)
-        ? HOST_CONTENT_Y : OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
-    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
-        fb[i] = border;
-
-    // Full-width HIRES screens use 320 packed DMA samples per scanline.
-    // Expand those directly to the host framebuffer; the narrower Kickstart artwork is
-    // handled by the wrapped-fetch presentation path below.
-    if (chipset.ddfstrt < 0x40 && diw_start < 64) {
-        int row_rotation = chipset.ddfstrt == 0x38 &&
-                           chipset.ddfstop == 0xd8 ? 80 : 0;
-        // This full-width LORES layout already advances two beam rows for
-        // each logical picture row.  Sample those rows once before the host
-        // performs its normal 2x vertical integer scaling.
-        int source_step = host.displayIsLores ? 2 : 1;
-        int rows = HOST_RASTER_H / source_step;
-        if (rows > SCREEN_H / 2) rows = SCREEN_H / 2;
-        for (int y = 0; y < rows; ++y) {
-            uint32_t *dst = &fb[(y * 2) * SCREEN_W];
-            const uint32_t *src = &render_fb[(y * source_step) * SCREEN_W];
-            if (row_rotation) {
-                for (int x = 0; x < SCREEN_W; ++x)
-                    dst[x] = src[(x + row_rotation) % SCREEN_W];
-            } else {
-                memcpy(dst, src, SCREEN_W * sizeof(uint32_t));
-            }
-            memcpy(dst + SCREEN_W, dst, SCREEN_W * sizeof(uint32_t));
-        }
-        goto frame_ready;
-    }
-
-    for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
-        int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
-        if (dy < 0 || dy + 1 >= SCREEN_H)
-            continue;
-        for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X1; ++x) {
-            int sx = HOST_FETCH_LEAD + x;
-            uint32_t pixel = render_fb[sy * HOST_RASTER_W + sx];
-            fb[dy * SCREEN_W + x] = pixel;
-        }
-
-        memcpy(&fb[(dy + 1) * SCREEN_W], &fb[dy * SCREEN_W],
-               SCREEN_W * sizeof(uint32_t));
-    }
-
-    int diw_stop = chipset.diwstop >> 8;
-    int extended_stop = diw_stop + 256;
-    int repaired_wrapped_prefix = diw_stop < diw_start ||
-        (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
-         extended_stop <= OMEGA_VIDEO_FRAME_LINES);
-    for (int sy = 0; repaired_wrapped_prefix && sy + 1 < HOST_RASTER_H; ++sy) {
-        int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
-        if (dy < 0 || dy + 3 >= SCREEN_H)
-            continue;
-        uint32_t *row = &fb[dy * SCREEN_W];
-        uint32_t *next = row + SCREEN_W * 2;
-        int right = HOST_VISIBLE_X1 - 1;
-        while (right >= SCREEN_W / 2 && row[right] == border) right--;
-        int prefix_start = HOST_VISIBLE_X0;
-        while (prefix_start < HOST_VISIBLE_X0 + 48 &&
-               next[prefix_start] == border)
-            prefix_start++;
-        if (right < SCREEN_W / 2 || prefix_start == HOST_VISIBLE_X0 + 48)
-            continue;
-
-        int prefix_end = prefix_start;
-        while (prefix_end < HOST_VISIBLE_X0 + 48 && next[prefix_end] != border)
-            prefix_end++;
-        int count = prefix_end - HOST_VISIBLE_X0;
-        if (count > SCREEN_W - right - 1) count = SCREEN_W - right - 1;
-        for (int x = 0; x < count; ++x) {
-            row[right + 1 + x] = next[HOST_VISIBLE_X0 + x];
-            next[HOST_VISIBLE_X0 + x] = border;
-        }
-        memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
-        memcpy(next + SCREEN_W, next, SCREEN_W * sizeof(uint32_t));
-    }
-    if (repaired_wrapped_prefix) {
-        for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
-            int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
-            if (dy < 0 || dy + 1 >= SCREEN_H)
-                continue;
-            uint32_t *row = &fb[dy * SCREEN_W];
-            for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X0 + 48; ++x)
-                row[x] = border;
-            memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
-        }
-    }
-
-    int x_offset = repaired_wrapped_prefix ||
-                   ((chipset.diwstop >> 8) < (chipset.diwstrt >> 8))
-                 ? HOST_WRAP_X_OFFSET : HOST_NORMAL_X_OFFSET;
-    if (x_offset == HOST_WRAP_X_OFFSET)
-        x_offset = OMEGA_VIDEO_WRAP_X_OFFSET;
-    uint32_t *scaled = render_fb;
-    int first_content_y = HOST_CONTENT_Y - viewport_y_offset;
-    if (first_content_y < 0) first_content_y = 0;
-    for (int y = first_content_y; y < SCREEN_H; ++y) {
-        uint32_t *row = &fb[y * SCREEN_W];
-        for (int x = 0; x < SCREEN_W; ++x) scaled[x] = border;
-        int scaled_w = SCREEN_W * HOST_ASPECT_X_NUM / HOST_ASPECT_X_DEN;
-        for (int dx = 0; dx < scaled_w; ++dx) {
-            int sx = dx * HOST_ASPECT_X_DEN / HOST_ASPECT_X_NUM;
-            scaled[x_offset + dx] = row[sx];
-        }
-        memcpy(row, scaled, SCREEN_W * sizeof(uint32_t));
-    }
-
-frame_ready:
-    for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
-        render_fb[i] = border;
+    hostPresentFrame(fb, render_fb);
     display_push_frame();
 }

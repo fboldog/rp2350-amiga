@@ -44,6 +44,7 @@ set(PLATFORM_SOURCES
     src/Memory.c
     src/Host.c
     src/Planar.c
+    src/Presentation.c
 )
 
 # Omega emulator core (platform-independent)
