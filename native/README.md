@@ -127,7 +127,11 @@ shorter NTSC crop and clipping the Kickstart insert-disk screen.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
   slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the
-  correct chipset read-register instead of raw chip RAM.)
+  correct chipset read-register instead of raw chip RAM.) Its full-width
+  `DDFSTRT=0x38`, `DDFSTOP=0xd8` desktop raster requires an 80-pixel circular
+  presentation correction; this keeps the rightmost segment on the right
+  instead of wrapping it to the left edge. The correction is shared by the
+  native and RP2350 hosts and does not affect the 1.3 or 2.04 desktop modes.
 - Battery-clock reads at `0xDC0000` return junk (`<invalid>` from `date`) — the
   Gayle/RTC path is a stub; unrelated to the RP2350 port.
 - The ROM diskette-logo bitmap renders horizontally mirrored on the insert

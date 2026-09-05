@@ -65,10 +65,17 @@ void hostDisplay(void) {
     // narrower, wrapped fetch window and still needs the pipeline repair path
     // below.
     if (chipset.ddfstrt < 0x40 && diw_start < 64) {
+        int row_rotation = chipset.ddfstrt == 0x38 &&
+                           chipset.ddfstop == 0xd8 ? 80 : 0;
         for (int y = 0; y < SCREEN_H / 2; ++y) {
             uint32_t *dst = &fb[(y * 2) * SCREEN_W];
             const uint32_t *src = &render_fb[y * SCREEN_W];
-            memcpy(dst, src, SCREEN_W * sizeof(uint32_t));
+            if (row_rotation) {
+                for (int x = 0; x < SCREEN_W; ++x)
+                    dst[x] = src[(x + row_rotation) % SCREEN_W];
+            } else {
+                memcpy(dst, src, SCREEN_W * sizeof(uint32_t));
+            }
             memcpy(dst + SCREEN_W, dst, SCREEN_W * sizeof(uint32_t));
         }
         goto frame_ready;
