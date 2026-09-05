@@ -587,7 +587,7 @@ typedef struct {
     int lastCycle;
     int hiresWords;
     int loresWords;
-    int fetched;
+    uint8_t fetchedMask;
 } BitplaneLineState;
 
 static BitplaneLineState bitplaneLine;
@@ -596,7 +596,7 @@ static uint32_t copperWaitPosition = 0;
 static void resetBitplaneLine(void) {
     bitplaneLine.hiresWords = 0;
     bitplaneLine.loresWords = 0;
-    bitplaneLine.fetched = 0;
+    bitplaneLine.fetchedMask = 0;
 }
 
 static void advanceBitplanePointers(void) {
@@ -953,7 +953,7 @@ void plane6(void){
     
     chipset.bpl6dat = 0;
     if( (internal.bitplaneMask & 0x20)  == 0x20){
-        bitplaneLine.fetched = 1;
+        bitplaneLine.fetchedMask |= 0x20;
         uint16_t* p = &internal.chipramW[chipset.bpl6pt];
         chipset.bpl6pt +=1;
         chipset.bpl6dat = *p;
@@ -973,7 +973,7 @@ void plane5(void){
     
     chipset.bpl5dat = 0;
     if( (internal.bitplaneMask & 0x10)  == 0x10){
-        bitplaneLine.fetched = 1;
+        bitplaneLine.fetchedMask |= 0x10;
         uint16_t* p = &internal.chipramW[chipset.bpl5pt];
         chipset.bpl5pt +=1;
         chipset.bpl5dat = *p;
@@ -994,7 +994,7 @@ void loresPlane1(void){
         return;
     }
     if( (internal.bitplaneMask & 0x1)  == 0x1){
-        bitplaneLine.fetched = 1;
+        bitplaneLine.fetchedMask |= 0x01;
         host.displayIsLores = 1;
         if (bitplaneLine.loresWords++ == 0) {
             int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
@@ -1038,7 +1038,7 @@ void plane4(){
     
     chipset.bpl4dat = 0;
     if( (internal.bitplaneMask & 0x8)  == 0x8){
-        bitplaneLine.fetched = 1;
+        bitplaneLine.fetchedMask |= 0x08;
         uint16_t* p = &internal.chipramW[chipset.bpl4pt];
         chipset.bpl4pt +=1;
         chipset.bpl4dat = *p;
@@ -1058,7 +1058,7 @@ void plane2(){
     
     chipset.bpl2dat = 0;
     if( (internal.bitplaneMask & 0x2)  == 0x2){
-        bitplaneLine.fetched = 1;
+        bitplaneLine.fetchedMask |= 0x02;
         uint16_t* p = &internal.chipramW[chipset.bpl2pt];
         chipset.bpl2pt +=1;
         chipset.bpl2dat = *p;
@@ -1078,7 +1078,7 @@ void plane3(){
     
     chipset.bpl3dat = 0;
     if( (internal.bitplaneMask & 0x4)  == 0x4){
-        bitplaneLine.fetched = 1;
+        bitplaneLine.fetchedMask |= 0x04;
         uint16_t* p = &internal.chipramW[chipset.bpl3pt];
         chipset.bpl3pt +=1;
         chipset.bpl3dat = *p;
@@ -1102,7 +1102,7 @@ void hiresPlane1(){
     }
     chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
-        bitplaneLine.fetched = 1;
+        bitplaneLine.fetchedMask |= 0x01;
         host.displayIsLores = 0;
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;

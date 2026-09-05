@@ -198,6 +198,11 @@ blanks the display. Fully blank lines still use compatibility modulo
 advancement because removing it currently exposes incomplete Copper pointer
 reload behavior in the 2.04 and 3.14 layouts.
 
+The scanline state stores a per-plane fetch mask rather than a single boolean.
+Partial Copper transition lines can therefore distinguish odd-plane and
+even-plane activity, which is necessary before their two modulo registers can
+be timed independently.
+
 The shared layout definitions also name the raster origin at beam line 43 and
 the first LORES render line at 44. LORES and HIRES positioning now refer to
 those meanings rather than repeating unexplained vertical literals.
