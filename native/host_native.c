@@ -208,10 +208,9 @@ unsigned long native_nonblack_pixels(void) {
 
 // ── Planar -> Chunky pixel conversion (identical to src/Host.c) ──────────
 
-void hiresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void hiresPlanar2Chunky(uint32_t *pixBuff,
                         uint16_t plane1, uint16_t plane2,
                         uint16_t plane3, uint16_t plane4) {
-    (void)palette;
     int counter = 0;
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
@@ -231,11 +230,10 @@ void hiresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
     }
 }
 
-void loresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void loresPlanar2Chunky(uint32_t *pixBuff,
                         uint16_t plane1, uint16_t plane2,
                         uint16_t plane3, uint16_t plane4,
                         uint16_t plane5, uint16_t plane6) {
-    (void)palette;
     int counter = 0;
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
@@ -264,11 +262,10 @@ void loresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
     }
 }
 
-void loresHAM2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void loresHAM2Chunky(uint32_t *pixBuff,
                      uint16_t plane1, uint16_t plane2,
                      uint16_t plane3, uint16_t plane4,
                      uint16_t plane5, uint16_t plane6) {
-    (void)palette;
     int counter = 0;
 
     for (int j = 7; j > -1; --j) {

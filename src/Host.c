@@ -220,7 +220,7 @@ frame_ready:
 
 // ── Planar → Chunky pixel conversion (unchanged from original Host.c) ─────
 
-void hiresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void hiresPlanar2Chunky(uint32_t *pixBuff,
                         uint16_t plane1, uint16_t plane2,
                         uint16_t plane3, uint16_t plane4) {
     int counter = 0;
@@ -242,7 +242,7 @@ void hiresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
     }
 }
 
-void loresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void loresPlanar2Chunky(uint32_t *pixBuff,
                         uint16_t plane1, uint16_t plane2,
                         uint16_t plane3, uint16_t plane4,
                         uint16_t plane5, uint16_t plane6) {
@@ -274,7 +274,7 @@ void loresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
     }
 }
 
-void loresHAM2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void loresHAM2Chunky(uint32_t *pixBuff,
                      uint16_t plane1, uint16_t plane2,
                      uint16_t plane3, uint16_t plane4,
                      uint16_t plane5, uint16_t plane6) {

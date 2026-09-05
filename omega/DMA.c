@@ -613,7 +613,7 @@ static void hiresDisplayPrefetch(void) {
     if (internal.bitplaneMask & 0x08) p4 = internal.chipramW[chipset.bpl4pt];
 
     uint32_t *pixbuff = (uint32_t *)host.pixels;
-    hiresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], internal.palette,
+    hiresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX],
                        p1, p2, p3, p4);
     host.rasterX += 16;
 }
@@ -1007,9 +1007,9 @@ void loresPlane1(void){
     
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     if(chipset.bplcon0 & 0x800){
-        loresHAM2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        loresHAM2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
     }else{
-        loresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        loresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
     }
     host.rasterX += 32;
     
@@ -1121,7 +1121,7 @@ void hiresPlane1(){
 
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     uint32_t *line = &pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX];
-    hiresPlanar2Chunky(line, internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+    hiresPlanar2Chunky(line, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
     host.rasterX += 16;
     return;
 }

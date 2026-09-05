@@ -53,12 +53,12 @@ typedef struct {
 extern Host_t host;
 
 // ── Pixel-conversion helpers (same signature as the SDL version) ──────────
-void hiresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void hiresPlanar2Chunky(uint32_t *pixBuff,
                         uint16_t p1, uint16_t p2, uint16_t p3, uint16_t p4);
-void loresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void loresPlanar2Chunky(uint32_t *pixBuff,
                         uint16_t p1, uint16_t p2, uint16_t p3, uint16_t p4,
                         uint16_t p5, uint16_t p6);
-void loresHAM2Chunky(uint32_t *pixBuff, uint32_t *palette,
+void loresHAM2Chunky(uint32_t *pixBuff,
                      uint16_t p1, uint16_t p2, uint16_t p3, uint16_t p4,
                      uint16_t p5, uint16_t p6);
 void sprite2chunky(uint32_t *pixBuff, uint32_t *palette, int x,

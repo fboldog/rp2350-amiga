@@ -151,6 +151,11 @@ been removed. `BPLCON0` writes no longer reset a host-side drawing cursor, and
 the unused `setDisplayMode()` plus random-pixel `drawBlank()` diagnostic are
 gone. Raster placement is now owned solely by the active DMA fetch paths.
 
+Planar-to-chunky conversion APIs take only their destination and bitplane
+words. The former palette argument was unused because conversion reads the
+live chipset palette, so removing it keeps the interface consistent with the
+actual data dependency.
+
 Always-on rendering investigation logs have also been removed from the DMA and
 custom-register hot paths. Per-line HIRES, `BPLCON0`, and modulo writes no
 longer add console I/O or timing noise during normal emulation; screenshot
