@@ -7,17 +7,24 @@
 
 #pragma once
 #include <stdint.h>
+#include "../omega/VideoStandard.h"
 
 // Screen dimensions that the Omega DMA engine renders into
 #define SCREEN_W 640
+#ifdef PICO_BUILD
+// The RP2350's 8 MB PSRAM map reserves a fixed 1 MB ARGB framebuffer.
 #define SCREEN_H 400
+#define HOST_RASTER_H 200
+#else
+#define SCREEN_H OMEGA_VIDEO_NATIVE_HEIGHT
+#define HOST_RASTER_H (SCREEN_H / 2)
+#endif
 
 // Omega's DMA renderer produces an intermediate beam raster.  Kickstart's
 // DMA fetch window contains pipeline/overscan words around the visible data.
 // The host presentation step clips that raster into a 640x400 image and
 // doubles scanlines vertically.
 #define HOST_RASTER_W       640
-#define HOST_RASTER_H       200
 #define HOST_RASTER_PIXELS  (HOST_RASTER_W * HOST_RASTER_H)
 #define HOST_VISIBLE_X0     40
 #define HOST_VISIBLE_X1     596

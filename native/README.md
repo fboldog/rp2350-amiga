@@ -19,7 +19,8 @@ HEADLESS=1 ./native/build.sh            # force PPM-only build, even with SDL2
 ```
 
 `build.sh` auto-detects SDL2 via `sdl2-config`:
-- **SDL2 present** — a live 1280×800 window (2× nearest-neighbour) opens automatically.
+- **SDL2 present** — a live integer-scaled 2× window opens automatically:
+  1280×800 for NTSC or 1280×1024 for PAL.
   Press **Esc** or close the window to stop early; the final PPM is still written.
 - **SDL2 absent** — headless PPM-only build (install `sdl2` / `libsdl2-dev` for the window).
 
@@ -87,6 +88,12 @@ The choice is shared by DMA frame length, the chipset video-identification bit,
 CIA vertical TOD events, and SDL pacing (59.94 Hz NTSC or 50 Hz PAL), so
 VBL-driven animations run in real time. `OMEGA_HEADLESS=1` and binaries built
 with `HEADLESS=1` remain unthrottled for fast boot and framebuffer tests.
+
+The native framebuffer follows the selected standard: 640×400 for NTSC and
+640×512 for PAL. SDL creates a fixed 2× window and uses nearest-neighbour
+integer scaling, so pixels are never resized by a fractional ratio. PPM dumps
+use the same selected framebuffer dimensions. The RP2350 framebuffer remains
+640×400 because its fixed 8 MB PSRAM map reserves 1 MB for ARGB display output.
 
 PAL uses its own 400-line viewport origin and a 200-line intermediate raster.
 This preserves the lower part of the PAL display instead of applying the

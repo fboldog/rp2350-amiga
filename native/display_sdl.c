@@ -19,10 +19,12 @@ void sdl_display_open(int w, int h) {
     win = SDL_CreateWindow("Omega Amiga",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         w * 2, h * 2,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+        SDL_WINDOW_SHOWN);
     if (!win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return; }
     ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (!ren) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return; }
+    SDL_RenderSetLogicalSize(ren, w, h);
+    SDL_RenderSetIntegerScale(ren, SDL_TRUE);
     tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
                             SDL_TEXTUREACCESS_STREAMING, w, h);
     if (!tex) { fprintf(stderr, "SDL_CreateTexture: %s\n", SDL_GetError()); return; }
