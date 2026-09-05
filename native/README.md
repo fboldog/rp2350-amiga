@@ -156,6 +156,12 @@ words. The former palette argument was unused because conversion reads the
 live chipset palette, so removing it keeps the interface consistent with the
 actual data dependency.
 
+The unused `sprite2chunky()` API and its duplicate host implementations have
+been removed. This does not remove working sprite support: `spriteCycle()` is
+currently an explicit stub, so sprite DMA and sprite rendering remain
+unimplemented. Implementing the sprite fetch/state machine is still required
+before a shared sprite converter should be introduced again.
+
 Always-on rendering investigation logs have also been removed from the DMA and
 custom-register hot paths. Per-line HIRES, `BPLCON0`, and modulo writes no
 longer add console I/O or timing noise during normal emulation; screenshot

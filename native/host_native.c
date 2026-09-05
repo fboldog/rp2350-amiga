@@ -324,29 +324,3 @@ void loresHAM2Chunky(uint32_t *pixBuff,
         }
     }
 }
-
-void sprite2chunky(uint32_t *pixBuff, uint32_t *palette, int x,
-                   uint16_t plane1, uint16_t plane2, int delta) {
-    int counter = x;
-    for (int j = 7; j > -1; --j) {
-        uint32_t c1 =  (plane1 >> j) & 1;
-        c1 |= (((plane2 >> j) & 1) << 1);
-        int k = j + 8;
-        uint32_t c2 =  (plane1 >> k) & 1;
-        c2 |= (((plane2 >> k) & 1) << 1);
-
-        if (c1 > 0 && counter >= 0 && counter < SCREEN_W)
-            pixBuff[counter] = palette[c1];
-        if (c2 > 0 && (counter + delta) >= 0 && (counter + delta) < SCREEN_W)
-            pixBuff[counter + delta] = palette[c2];
-        counter++;
-
-        if (delta == 16) {
-            if (c1 > 0 && counter >= 0 && counter < SCREEN_W)
-                pixBuff[counter] = palette[c1];
-            if (c2 > 0 && (counter + delta) >= 0 && (counter + delta) < SCREEN_W)
-                pixBuff[counter + delta] = palette[c2];
-            counter++;
-        }
-    }
-}

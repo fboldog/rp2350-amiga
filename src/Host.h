@@ -61,9 +61,6 @@ void loresPlanar2Chunky(uint32_t *pixBuff,
 void loresHAM2Chunky(uint32_t *pixBuff,
                      uint16_t p1, uint16_t p2, uint16_t p3, uint16_t p4,
                      uint16_t p5, uint16_t p6);
-void sprite2chunky(uint32_t *pixBuff, uint32_t *palette, int x,
-                   uint16_t p1, uint16_t p2, int delta);
-
 // ── Keyboard / mouse ──────────────────────────────────────────────────────
 void pressKey(uint16_t keyCode);
 void releaseKey(uint16_t keyCode);
