@@ -192,6 +192,12 @@ compatibility, modulo is still applied at the existing host scanline boundary;
 the fetch marker allows no-fetch advancement to be measured before replacing
 it with hardware DDF-completion timing.
 
+Fetch tracking covers every enabled plane, not only plane 1. This captures
+partial Copper transition lines where higher planes fetch before `BPLCON0`
+blanks the display. Fully blank lines still use compatibility modulo
+advancement because removing it currently exposes incomplete Copper pointer
+reload behavior in the 2.04 and 3.14 layouts.
+
 The shared layout definitions also name the raster origin at beam line 43 and
 the first LORES render line at 44. LORES and HIRES positioning now refer to
 those meanings rather than repeating unexplained vertical literals.

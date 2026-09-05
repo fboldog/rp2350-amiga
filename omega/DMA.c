@@ -683,9 +683,10 @@ void dma_execute(){
         CIATODEvent(&CIAB);
         
         
-        // Compatibility timing: pointer modulo is still applied at the host
-        // scanline boundary. bitplaneLine.fetched records the hardware-facing
-        // distinction needed to move this to fetch completion later.
+        // Compatibility timing remains at the scanline boundary. The fetch
+        // state now records every enabled plane, including transition lines
+        // where Copper blanks BPLCON0 before the plane-1 slot. Fully blank
+        // lines still advance until Copper pointer reload is modelled fully.
         advanceBitplanePointers();
         resetBitplaneLine();
         
@@ -952,6 +953,7 @@ void plane6(void){
     
     chipset.bpl6dat = 0;
     if( (internal.bitplaneMask & 0x20)  == 0x20){
+        bitplaneLine.fetched = 1;
         uint16_t* p = &internal.chipramW[chipset.bpl6pt];
         chipset.bpl6pt +=1;
         chipset.bpl6dat = *p;
@@ -971,6 +973,7 @@ void plane5(void){
     
     chipset.bpl5dat = 0;
     if( (internal.bitplaneMask & 0x10)  == 0x10){
+        bitplaneLine.fetched = 1;
         uint16_t* p = &internal.chipramW[chipset.bpl5pt];
         chipset.bpl5pt +=1;
         chipset.bpl5dat = *p;
@@ -1035,6 +1038,7 @@ void plane4(){
     
     chipset.bpl4dat = 0;
     if( (internal.bitplaneMask & 0x8)  == 0x8){
+        bitplaneLine.fetched = 1;
         uint16_t* p = &internal.chipramW[chipset.bpl4pt];
         chipset.bpl4pt +=1;
         chipset.bpl4dat = *p;
@@ -1054,6 +1058,7 @@ void plane2(){
     
     chipset.bpl2dat = 0;
     if( (internal.bitplaneMask & 0x2)  == 0x2){
+        bitplaneLine.fetched = 1;
         uint16_t* p = &internal.chipramW[chipset.bpl2pt];
         chipset.bpl2pt +=1;
         chipset.bpl2dat = *p;
@@ -1073,6 +1078,7 @@ void plane3(){
     
     chipset.bpl3dat = 0;
     if( (internal.bitplaneMask & 0x4)  == 0x4){
+        bitplaneLine.fetched = 1;
         uint16_t* p = &internal.chipramW[chipset.bpl3pt];
         chipset.bpl3pt +=1;
         chipset.bpl3dat = *p;
