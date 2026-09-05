@@ -986,7 +986,7 @@ void loresPlane1(void){
         if (loresCallsThisLine++ == 0) {
             int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
                              ? internal.vPos - (chipset.diwstrt >> 8)
-                             : internal.vPos - 43;
+                             : internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
             host.rasterRow = omegaDdfIsFullWidth(chipset.ddfstrt)
                            ? display_line * 2 : display_line;
             host.rasterX = 0;
@@ -996,8 +996,7 @@ void loresPlane1(void){
         chipset.bpl1dat = *p;
     }
 
-    //don't start actually rendering a deiplay before 44 lines
-    if(internal.vPos<44){
+    if (internal.vPos < OMEGA_LORES_FIRST_RENDER_LINE) {
         evenCycle();
         return;
     }
@@ -1108,12 +1107,11 @@ void hiresPlane1(){
         host.rasterX = 0;
     } else if (!omegaDdfIsFullWidth(chipset.ddfstrt) &&
                hiresCallsThisLine == 1) {
-        host.rasterRow = internal.vPos - 43;
+        host.rasterRow = internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
         host.rasterX = 0;
     }
 
-    //don't start actually rendering a display before 44 lines
-    if(internal.vPos<43){
+    if (internal.vPos < OMEGA_DISPLAY_RASTER_ORIGIN) {
         evenCycle();
         return;
     }

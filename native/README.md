@@ -181,6 +181,10 @@ The same layout header also names the normal and extra-word HIRES fetch tails,
 the LORES fetch span, and the two upper-overscan offsets. DMA no longer embeds
 those timing and placement values directly in its control flow.
 
+The shared layout definitions also name the raster origin at beam line 43 and
+the first LORES render line at 44. LORES and HIRES positioning now refer to
+those meanings rather than repeating unexplained vertical literals.
+
 The unused `sprite2chunky()` API and its duplicate host implementations have
 been removed. This does not remove working sprite support: `spriteCycle()` is
 currently an explicit stub, so sprite DMA and sprite rendering remain
