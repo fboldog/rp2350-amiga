@@ -177,6 +177,10 @@ DDF layout signatures shared by DMA and presentation are defined in
 layout, and the rotated Workbench 3.14 layout can no longer drift between the
 two stages.
 
+The same layout header also names the normal and extra-word HIRES fetch tails,
+the LORES fetch span, and the two upper-overscan offsets. DMA no longer embeds
+those timing and placement values directly in its control flow.
+
 The unused `sprite2chunky()` API and its duplicate host implementations have
 been removed. This does not remove working sprite support: `spriteCycle()` is
 currently an explicit stub, so sprite DMA and sprite rendering remain

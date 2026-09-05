@@ -9,6 +9,11 @@ enum {
     OMEGA_DDF_ROTATED_START = 0x38,
     OMEGA_DDF_ROTATED_STOP = 0xd8,
     OMEGA_DDF_ROTATED_PIXELS = 80,
+    OMEGA_DDF_NORMAL_FETCH_TAIL = 7,
+    OMEGA_DDF_EXTRA_FETCH_TAIL = 11,
+    OMEGA_DDF_LORES_FETCH_SPAN = 159,
+    OMEGA_DDF_NORMAL_UPPER_OVERSCAN = 14,
+    OMEGA_DDF_EXTRA_UPPER_OVERSCAN = 40,
 };
 
 static inline int omegaDdfIsFullWidth(uint16_t start) {
@@ -24,4 +29,15 @@ static inline int omegaDdfRowRotation(uint16_t start, uint16_t stop) {
     return start == OMEGA_DDF_ROTATED_START &&
            stop == OMEGA_DDF_ROTATED_STOP
          ? OMEGA_DDF_ROTATED_PIXELS : 0;
+}
+
+static inline int omegaDdfHiresFetchTail(uint16_t start, uint16_t stop) {
+    return omegaDdfNeedsExtraWord(start, stop)
+         ? OMEGA_DDF_EXTRA_FETCH_TAIL : OMEGA_DDF_NORMAL_FETCH_TAIL;
+}
+
+static inline int omegaDdfUpperOverscan(uint16_t stop) {
+    return stop == OMEGA_DDF_EXTRA_WORD_STOP
+         ? OMEGA_DDF_EXTRA_UPPER_OVERSCAN
+         : OMEGA_DDF_NORMAL_UPPER_OVERSCAN;
 }

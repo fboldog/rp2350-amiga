@@ -631,13 +631,12 @@ void dma_execute(){
         // The standard 0x3c full-width window consumes one more word than the
         // narrower 0x40 Kickstart-logo window.  The latter's right-edge word
         // is supplied by hiresDisplayPrefetch() without changing its stride.
-        int wb13_full_width =
-            omegaDdfNeedsExtraWord(chipset.ddfstrt, chipset.ddfstop);
-        lastFetchCycle = chipset.ddfstop + (wb13_full_width ? 11 : 7);
+        lastFetchCycle = chipset.ddfstop +
+            omegaDdfHiresFetchTail(chipset.ddfstrt, chipset.ddfstop);
         DMAHires[internal.hPos]();
     }else{
         // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
-        lastFetchCycle = chipset.ddfstrt + 159;
+        lastFetchCycle = chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
         DMALores[internal.hPos]();
     }
     eclock_execute(&chipset);   // CIA timers
@@ -1099,8 +1098,8 @@ void hiresPlane1(){
     // Remove that upper overscan so all 200 useful rows, including the lower
     // window border, fit in the host scratch framebuffer.
     if (omegaDdfIsFullWidth(chipset.ddfstrt) && hiresCallsThisLine == 1) {
-        int upper_overscan = chipset.ddfstop == OMEGA_DDF_EXTRA_WORD_STOP
-                           ? 40 : 14;
+        int upper_overscan =
+            omegaDdfUpperOverscan(chipset.ddfstop);
         int display_line = internal.vPos - (chipset.diwstrt >> 8) -
                            upper_overscan;
         if (display_line < 0)
