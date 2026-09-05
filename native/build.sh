@@ -10,6 +10,9 @@
 #
 # Compile-time video standard:
 #   VIDEO=NTSC (default) or VIDEO=PAL
+#
+# Screenshot regression build:
+#   REGRESSION=1     — force headless output and suppress diagnostic dumps
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,6 +26,13 @@ case "$VIDEO" in
     *) echo "VIDEO must be NTSC or PAL" >&2; exit 2 ;;
 esac
 echo "Video standard: $VIDEO_NAME"
+
+REGRESSION_FLAGS=""
+if [ "${REGRESSION:-0}" = "1" ]; then
+    HEADLESS=1
+    REGRESSION_FLAGS="-DOMEGA_SCREENSHOT_REGRESSION=1"
+    echo "REGRESSION=1 — deterministic headless screenshot build"
+fi
 
 SDL_FLAGS=""
 SDL_LIBS=""
@@ -69,7 +79,7 @@ if [ -n "$SDL_SRC" ]; then
         -Isrc -Iomega \
         -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
         -Wno-incompatible-pointer-types \
-        $SDL_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
+        $SDL_FLAGS $REGRESSION_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
         -c -o native/display_sdl.o native/display_sdl.c
     SDL_OBJ="native/display_sdl.o"
 fi
@@ -80,7 +90,7 @@ $CC -O2 -g -std=gnu11 \
     -Isrc -Iomega \
     -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
     -Wno-incompatible-pointer-types \
-    $SDL_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
+    $SDL_FLAGS $REGRESSION_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
     -o "$OUT" \
     native/main_native.c native/host_native.c native/memory_native.c \
     $SDL_OBJ \

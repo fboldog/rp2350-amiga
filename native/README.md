@@ -60,6 +60,37 @@ python3 native/ppm2png.py frame_final.ppm frame_final.png
 The same command works with `kick-13.rom` and `kick314.rom`. ROMs and generated
 `frame*.ppm`/`frame*.png` files are local test assets and must not be committed.
 
+### Screenshot regression suite
+
+`REGRESSION=1` is a native compile-time build mode. It forces a headless build
+and removes the large interactive boot-state diagnostics so framebuffer tests
+are deterministic and concise:
+
+```sh
+REGRESSION=1 VIDEO=PAL ./native/build.sh
+```
+
+The regression runner builds in that mode, boots the three ROM-only screens and
+the three Workbench/installer cases, then compares exact final-frame PPM hashes:
+
+```sh
+VIDEO=PAL  ./native/regression.sh
+VIDEO=NTSC ./native/regression.sh
+```
+
+It requires the locally supplied ROM and ADF files named in the examples above.
+Each run prints a unique temporary directory containing its PPMs and logs for
+manual review. If an intentional rendering change has been reviewed in both
+modes, update one baseline set at a time with:
+
+```sh
+UPDATE_BASELINES=1 VIDEO=PAL ./native/regression.sh
+```
+
+Never update baselines merely to make a failing test pass; inspect the generated
+images first. Reference PNGs remain manual visual references because their
+canvas sizes and capture sources are not uniform.
+
 Each "iteration" is 200×(`dma_execute()` + `cpu_execute()`), matching the RP2350
 `main.c` main loop. Rough timing guide:
 

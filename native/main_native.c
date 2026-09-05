@@ -192,6 +192,9 @@ int main(int argc, char **argv) {
             }
         }
 
+        // The detailed boot-state sampler is useful interactively, but makes
+        // automated screenshot regression logs enormous and needlessly slow.
+#ifndef OMEGA_SCREENSHOT_REGRESSION
         // PC sampler: after screen is up, print once then stop
         if (native_frame_counter > 20 && (it % 4000) == 0) {
             uint32_t pc  = m68k_get_reg(NULL, M68K_REG_PC);
@@ -534,6 +537,7 @@ int main(int argc, char **argv) {
             #undef RD32
             fflush(stdout);
         }
+#endif
 
         if (dumpEvery > 0 && (it % dumpEvery) == 0) {
             char name[64];
