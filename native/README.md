@@ -156,6 +156,10 @@ words. The former palette argument was unused because conversion reads the
 live chipset palette, so removing it keeps the interface consistent with the
 actual data dependency.
 
+HIRES, LORES, and HAM planar conversion now live in the shared
+`src/Planar.c`. Native and RP2350 builds link the same implementation instead
+of carrying byte-for-byte copies in their host backends.
+
 The unused `sprite2chunky()` API and its duplicate host implementations have
 been removed. This does not remove working sprite support: `spriteCycle()` is
 currently an explicit stub, so sprite DMA and sprite rendering remain
@@ -227,7 +231,8 @@ regression logs retain the runner-level information needed for failures.
 | File | Role |
 |---|---|
 | `main_native.c`   | entry: load ROM/ADF, run loop, dump PPM |
-| `host_native.c`   | `Host` layer; planar→chunky identical to `src/Host.c`; calls `sdl_display_push` each VBL |
+| `host_native.c`   | native framebuffer lifecycle, PPM inspection, and SDL frame submission |
+| `../src/Planar.c` | shared HIRES, LORES, and HAM planar-to-chunky conversion |
 | `memory_native.c` | upstream Omega `Memory.c` verbatim (`low16Meg`, `chipRead*/Write*`) |
 | `display_sdl.c`   | SDL2 window: open / push (30 fps cap) / poll / close |
 | `display_sdl.h`   | public API for `display_sdl.c` |
