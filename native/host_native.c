@@ -40,7 +40,8 @@ void hostInit(void) {
         exit(1);
     }
     host.pixels    = render_fb;
-    host.FBCounter = 0;
+    host.rasterRow = 0;
+    host.rasterX   = 0;
     host.vblCount  = 0;
     host.displayIsLores = 0;
     printf("Host init (native): framebuffer %p (%dx%d ARGB)\n",
@@ -211,7 +212,7 @@ void hiresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
                         uint16_t plane1, uint16_t plane2,
                         uint16_t plane3, uint16_t plane4) {
     (void)palette;
-    int counter = host.FBCounter;
+    int counter = 0;
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
         c1 |= (((plane2 >> j) & 1) << 1);
@@ -235,7 +236,7 @@ void loresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
                         uint16_t plane3, uint16_t plane4,
                         uint16_t plane5, uint16_t plane6) {
     (void)palette;
-    int counter = host.FBCounter;
+    int counter = 0;
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
         c1 |= (((plane2 >> j) & 1) << 1);
@@ -268,7 +269,7 @@ void loresHAM2Chunky(uint32_t *pixBuff, uint32_t *palette,
                      uint16_t plane3, uint16_t plane4,
                      uint16_t plane5, uint16_t plane6) {
     (void)palette;
-    int counter = host.FBCounter;
+    int counter = 0;
 
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
@@ -297,7 +298,7 @@ void loresHAM2Chunky(uint32_t *pixBuff, uint32_t *palette,
         }
     }
 
-    counter = host.FBCounter;
+    counter = 0;
     for (int j = 7; j > -1; --j) {
         int k = j + 8;
         uint32_t c2 =  (plane1 >> k) & 1;

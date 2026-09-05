@@ -41,7 +41,8 @@
 
 // Host state – RP2350 flavour (no SDL types here)
 typedef struct {
-    int FBCounter;  // pixel position within current scanline group
+    int rasterRow;  // destination row in the intermediate DMA raster
+    int rasterX;    // destination pixel within rasterRow
     int vblCount;   // vertical blank counter
     int displayIsLores; // mode used by the most recently rendered bitplane row
 

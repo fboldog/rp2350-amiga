@@ -586,15 +586,26 @@ void waitFreeSlot(){
 
 int lastFetchCycle;
 static int hiresCallsThisLine = 0;
+static int loresCallsThisLine = 0;
 static uint32_t copperWaitPosition = 0;
+
+static int displayWindowContainsLine(int vpos) {
+    int start = chipset.diwstrt >> 8;
+    // On OCS the missing ninth comparator bits are fixed: VSTART8 is zero and
+    // VSTOP8 is one. Thus the common DIWSTOP=$f4xx means line $1f4, not $0f4.
+    // ECS/AGA DIWHIGH programmability is outside this OCS chipset model.
+    int stop = 0x100 | (chipset.diwstop >> 8);
+    return vpos >= start && vpos < stop;
+}
 
 static void hiresDisplayPrefetch(void) {
     if ((chipset.bplcon0 & 0x8000) == 0 ||
         chipset.ddfstrt < 0x40 ||
         (chipset.dmaconr & 0x300) != 0x300 ||
-        internal.vPos < (chipset.diwstrt >> 8) ||
+        !displayWindowContainsLine(internal.vPos) ||
         host.pixels == NULL ||
-        (host.FBCounter * 2 + 15) >= HOST_RASTER_PIXELS)
+        host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
+        host.rasterX < 0 || host.rasterX + 15 >= HOST_RASTER_W)
         return;
 
     uint16_t p1 = 0, p2 = 0, p3 = 0, p4 = 0;
@@ -604,9 +615,9 @@ static void hiresDisplayPrefetch(void) {
     if (internal.bitplaneMask & 0x08) p4 = internal.chipramW[chipset.bpl4pt];
 
     uint32_t *pixbuff = (uint32_t *)host.pixels;
-    hiresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette,
+    hiresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], internal.palette,
                        p1, p2, p3, p4);
-    host.FBCounter += 8;
+    host.rasterX += 16;
 }
 
 void dma_execute(){
@@ -655,15 +666,7 @@ void dma_execute(){
             lineLog++;
         }
         hiresCallsThisLine = 0;
-
-        if(internal.vPos>=43){
-            if (chipset.ddfstrt < 0x40) {
-                int next_line = internal.vPos - (chipset.diwstrt >> 8) + 1;
-                host.FBCounter = next_line > 0 ? next_line * SCREEN_W : 0;
-            } else {
-                host.FBCounter = (internal.vPos - 42) * (SCREEN_W / 2);
-            }
-        }
+        loresCallsThisLine = 0;
         
         
         
@@ -698,7 +701,8 @@ void dma_execute(){
             //need to generate a vbl int
             putChipReg16[INTREQ](0x8020);
             
-            host.FBCounter = 0; // restart the frambuffer pointer
+            host.rasterRow = 0;
+            host.rasterX = 0;
             
             
             hostDisplay(); //Call the host to update the display.
@@ -709,21 +713,12 @@ void dma_execute(){
 
 
 void displayLineReset(){
-    
-    host.FBCounter -= (host.FBCounter%320);
-    
-    
-    //int temp = (host.FBCounter / 640);
-    //temp = (temp) * 640;
-    //host.FBCounter= temp;
+    host.rasterX -= host.rasterX % 320;
 }
 
 void setDisplayMode(int mode){
-    
-    int temp = host.FBCounter / 640;
-    temp = (temp) * 640;
-    host.FBCounter= temp;
-    
+    (void)mode;
+    host.rasterX = 0;
 }
 
 
@@ -928,6 +923,12 @@ void spriteCycle(void){
 
 
 int bitplaneActive(){
+    // BPLCON0 with zero planes is display blanking, not a LORES DMA fetch.
+    // Letting it enter the LORES table overwrites the remembered frame mode
+    // at the end of a HIRES Workbench field and makes presentation skip every
+    // second rendered row.
+    if (internal.bitplaneMask == 0)
+        return 0;
     
     //check if DMA is on, if not let the Copper and Blitter run.
     if((chipset.dmaconr & 0x300) != 0x300){
@@ -946,15 +947,8 @@ int bitplaneActive(){
         return 0;
     }
     
-    //too early vertical position let the Copper and Blitter run
-    if(internal.vPos<(chipset.diwstrt>>8)){
+    if (!displayWindowContainsLine(internal.vPos))
         return 0;
-    }
-    
-    // vpos not working...
-    if(internal.vPos> ((chipset.diwstop>>8)| 256)){
-       // return 0;
-    }
     
     return 1;
 }
@@ -1009,9 +1003,16 @@ void loresPlane1(void){
     if(host.pixels == NULL){
         return;
     }
-    host.displayIsLores = 1;
-    
     if( (internal.bitplaneMask & 0x1)  == 0x1){
+        host.displayIsLores = 1;
+        if (loresCallsThisLine++ == 0) {
+            int display_line = chipset.ddfstrt < 0x40
+                             ? internal.vPos - (chipset.diwstrt >> 8)
+                             : internal.vPos - 43;
+            host.rasterRow = chipset.ddfstrt < 0x40
+                           ? display_line * 2 : display_line;
+            host.rasterX = 0;
+        }
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
@@ -1022,16 +1023,17 @@ void loresPlane1(void){
         evenCycle();
         return;
     }
-    if ((host.FBCounter * 2 + 31) >= HOST_RASTER_PIXELS)
+    if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
+        host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W)
         return;
     
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     if(chipset.bplcon0 & 0x800){
-        loresHAM2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        loresHAM2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
     }else{
-        loresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        loresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
     }
-    host.FBCounter +=16;
+    host.rasterX += 32;
     
 }
 
@@ -1105,10 +1107,9 @@ void hiresPlane1(){
     if(host.pixels == NULL){
         return;
     }
-    host.displayIsLores = 0;
-
     chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
+        host.displayIsLores = 0;
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
@@ -1124,7 +1125,11 @@ void hiresPlane1(){
                            upper_overscan;
         if (display_line < 0)
             return;
-        host.FBCounter = display_line * SCREEN_W;
+        host.rasterRow = display_line;
+        host.rasterX = 0;
+    } else if (chipset.ddfstrt >= 0x40 && hiresCallsThisLine == 1) {
+        host.rasterRow = internal.vPos - 43;
+        host.rasterX = 0;
     }
 
     //don't start actually rendering a display before 44 lines
@@ -1132,16 +1137,14 @@ void hiresPlane1(){
         evenCycle();
         return;
     }
-    int write_index = chipset.ddfstrt < 0x40
-                    ? host.FBCounter : host.FBCounter * 2;
-    if ((write_index + 15) >= HOST_RASTER_PIXELS)
+    if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
+        host.rasterX < 0 || host.rasterX + 15 >= HOST_RASTER_W)
         return;
 
     uint32_t* pixbuff = (uint32_t*)host.pixels;
-    uint32_t *line = chipset.ddfstrt < 0x40
-                   ? pixbuff : &pixbuff[host.FBCounter];
+    uint32_t *line = &pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX];
     hiresPlanar2Chunky(line, internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
-    host.FBCounter += chipset.ddfstrt < 0x40 ? 16 : 8;
+    host.rasterX += 16;
     return;
     
 
@@ -1165,10 +1168,10 @@ void drawBlank(){
     }
     
     for(int i=0;i<16;++i){
-        //pixbuff[host.FBCounter+i]=internal.palette[0];
-        pixbuff[host.FBCounter+i]=rand()%4294967296;
+        //pixbuff[host.rasterX+i]=internal.palette[0];
+        pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX+i]=rand()%4294967296;
     }
-    host.FBCounter +=16;
+    host.rasterX +=16;
     
 }
 

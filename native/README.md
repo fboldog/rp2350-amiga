@@ -135,6 +135,17 @@ hand and lower disk artwork. HIRES displays continue to consume half-height
 logical rows. The RP2350 keeps its fixed 200-row intermediate raster because of
 the existing PSRAM layout.
 
+DMA tracks its intermediate destination with separate raster-row and X
+coordinates. The planar-to-chunky helpers write relative to the destination
+pointer supplied by DMA instead of sharing the old overloaded `FBCounter` for
+both line and pixel offsets. Display-window vertical tests also decode the OCS
+fixed ninth bits (`VSTART8=0`, `VSTOP8=1`) in one place.
+
+Only an actual bitplane fetch selects the frame's LORES or HIRES presentation
+mode. During display blanking, `BPLCON0` contains zero planes; its cleared HIRES
+bit must not be interpreted as a LORES screen. Doing so made full-width HIRES
+Workbench output sample alternating raster rows and appear at half height.
+
 ## Status (2026-09-05)
 
 - Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
@@ -142,6 +153,11 @@ the existing PSRAM layout.
   active display is LORES or HIRES. Full-width LORES output is deinterlaced
   before 2× presentation, so the requester has continuous scanlines, correct
   vertical scale, and its complete lower half.
+- Loaded Workbench screens retain their full vertical height. ✅
+  Zero-plane blanking no longer changes the remembered display resolution, so
+  HIRES frames are not mistakenly passed through the LORES alternating-row
+  presentation path. This applies to Workbench 1.3, 2.04, and 3.14 while
+  leaving their insert-disk requester output unchanged.
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
   Full-width HIRES Workbench screens use a true 640-pixel raster stride rather
   than the narrower wrapped-fetch presentation used by the Kickstart artwork.

@@ -87,7 +87,8 @@ void hostInit(void) {
     fb = (uint32_t *)psram_ptr(PSRAM_FRAMEBUF_OFFSET);
     render_fb = (uint32_t *)psram_ptr(PSRAM_VIDEO_RASTER_OFFSET);
     host.pixels   = render_fb;
-    host.FBCounter = 0;
+    host.rasterRow = 0;
+    host.rasterX   = 0;
     host.vblCount  = 0;
     host.displayIsLores = 0;
     memset(fb, 0, SCREEN_W * SCREEN_H * sizeof(uint32_t));
@@ -109,7 +110,7 @@ void hostDisplay(void) {
         fb[i] = border;
 
     // Full-width HIRES screens use 320 packed DMA samples per scanline.
-    // Expand those directly to 640x400; the narrower Kickstart artwork is
+    // Expand those directly to the host framebuffer; the narrower Kickstart artwork is
     // handled by the wrapped-fetch presentation path below.
     if (chipset.ddfstrt < 0x40 && diw_start < 64) {
         int row_rotation = chipset.ddfstrt == 0x38 &&
@@ -222,7 +223,7 @@ frame_ready:
 void hiresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
                         uint16_t plane1, uint16_t plane2,
                         uint16_t plane3, uint16_t plane4) {
-    int counter = host.FBCounter;
+    int counter = 0;
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
         c1 |= (((plane2 >> j) & 1) << 1);
@@ -245,7 +246,7 @@ void loresPlanar2Chunky(uint32_t *pixBuff, uint32_t *palette,
                         uint16_t plane1, uint16_t plane2,
                         uint16_t plane3, uint16_t plane4,
                         uint16_t plane5, uint16_t plane6) {
-    int counter = host.FBCounter;
+    int counter = 0;
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
         c1 |= (((plane2 >> j) & 1) << 1);
@@ -277,7 +278,7 @@ void loresHAM2Chunky(uint32_t *pixBuff, uint32_t *palette,
                      uint16_t plane1, uint16_t plane2,
                      uint16_t plane3, uint16_t plane4,
                      uint16_t plane5, uint16_t plane6) {
-    int counter = host.FBCounter;
+    int counter = 0;
 
     for (int j = 7; j > -1; --j) {
         uint32_t c1 =  (plane1 >> j) & 1;
@@ -306,7 +307,7 @@ void loresHAM2Chunky(uint32_t *pixBuff, uint32_t *palette,
         }
     }
 
-    counter = host.FBCounter;
+    counter = 0;
     for (int j = 7; j > -1; --j) {
         int k = j + 8;
         uint32_t c2 =  (plane1 >> k) & 1;
