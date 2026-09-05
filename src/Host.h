@@ -17,7 +17,10 @@
 #define HOST_RASTER_H 200
 #else
 #define SCREEN_H OMEGA_VIDEO_NATIVE_HEIGHT
-#define HOST_RASTER_H (SCREEN_H / 2)
+// Native LORES DMA can occupy every PAL/NTSC beam row before presentation
+// deinterlaces it.  Keep the complete field so artwork near the bottom is
+// not truncated; HIRES presentation still consumes only SCREEN_H / 2 rows.
+#define HOST_RASTER_H SCREEN_H
 #endif
 
 // Omega's DMA renderer produces an intermediate beam raster.  Kickstart's
@@ -40,6 +43,7 @@
 typedef struct {
     int FBCounter;  // pixel position within current scanline group
     int vblCount;   // vertical blank counter
+    int displayIsLores; // mode used by the most recently rendered bitplane row
 
     // Pointer to the 32-bit ARGB framebuffer in PSRAM
     void *pixels;

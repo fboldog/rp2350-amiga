@@ -89,6 +89,7 @@ void hostInit(void) {
     host.pixels   = render_fb;
     host.FBCounter = 0;
     host.vblCount  = 0;
+    host.displayIsLores = 0;
     memset(fb, 0, SCREEN_W * SCREEN_H * sizeof(uint32_t));
     memset(render_fb, 0, HOST_RASTER_PIXELS * sizeof(uint32_t));
     printf("Host init: framebuffer at %p (%d×%d ARGB)\n",
@@ -113,9 +114,15 @@ void hostDisplay(void) {
     if (chipset.ddfstrt < 0x40 && diw_start < 64) {
         int row_rotation = chipset.ddfstrt == 0x38 &&
                            chipset.ddfstop == 0xd8 ? 80 : 0;
-        for (int y = 0; y < SCREEN_H / 2; ++y) {
+        // This full-width LORES layout already advances two beam rows for
+        // each logical picture row.  Sample those rows once before the host
+        // performs its normal 2x vertical integer scaling.
+        int source_step = host.displayIsLores ? 2 : 1;
+        int rows = HOST_RASTER_H / source_step;
+        if (rows > SCREEN_H / 2) rows = SCREEN_H / 2;
+        for (int y = 0; y < rows; ++y) {
             uint32_t *dst = &fb[(y * 2) * SCREEN_W];
-            const uint32_t *src = &render_fb[y * SCREEN_W];
+            const uint32_t *src = &render_fb[(y * source_step) * SCREEN_W];
             if (row_rotation) {
                 for (int x = 0; x < SCREEN_W; ++x)
                     dst[x] = src[(x + row_rotation) % SCREEN_W];

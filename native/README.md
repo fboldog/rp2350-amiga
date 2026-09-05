@@ -95,13 +95,22 @@ integer scaling, so pixels are never resized by a fractional ratio. PPM dumps
 use the same selected framebuffer dimensions. The RP2350 framebuffer remains
 640×400 because its fixed 8 MB PSRAM map reserves 1 MB for ARGB display output.
 
-PAL uses its own 400-line viewport origin and a 200-line intermediate raster.
-This preserves the lower part of the PAL display instead of applying the
-shorter NTSC crop and clipping the Kickstart insert-disk screen.
+PAL uses its own viewport origin and a full-height native intermediate raster.
+The full beam-row raster is required by full-width LORES copper displays such
+as the Kickstart 1.3 insert-disk requester: its logical picture rows occupy
+alternating beam rows. Presentation samples those rows once and then applies
+the normal 2× integer scale, avoiding both empty scanlines and truncation of the
+hand and lower disk artwork. HIRES displays continue to consume half-height
+logical rows. The RP2350 keeps its fixed 200-row intermediate raster because of
+the existing PSRAM layout.
 
 ## Status (2026-09-05)
 
-- Kickstart 1.3 boots to the "insert Workbench" screen. ✅
+- Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
+  The native host records the full PAL/NTSC beam field and tracks whether the
+  active display is LORES or HIRES. Full-width LORES output is deinterlaced
+  before 2× presentation, so the requester has continuous scanlines, correct
+  vertical scale, and its complete lower half.
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
   Full-width HIRES Workbench screens use a true 640-pixel raster stride rather
   than the narrower wrapped-fetch presentation used by the Kickstart artwork.

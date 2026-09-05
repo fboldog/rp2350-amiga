@@ -1009,6 +1009,7 @@ void loresPlane1(void){
     if(host.pixels == NULL){
         return;
     }
+    host.displayIsLores = 1;
     
     if( (internal.bitplaneMask & 0x1)  == 0x1){
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
@@ -1104,6 +1105,7 @@ void hiresPlane1(){
     if(host.pixels == NULL){
         return;
     }
+    host.displayIsLores = 0;
 
     chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
