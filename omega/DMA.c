@@ -583,9 +583,13 @@ void waitFreeSlot(){
 #endif
 }
 
-int lastFetchCycle;
-static int hiresCallsThisLine = 0;
-static int loresCallsThisLine = 0;
+typedef struct {
+    int lastCycle;
+    int hiresWords;
+    int loresWords;
+} BitplaneLineState;
+
+static BitplaneLineState bitplaneLine;
 static uint32_t copperWaitPosition = 0;
 
 static int displayWindowContainsLine(int vpos) {
@@ -631,12 +635,13 @@ void dma_execute(){
         // The standard 0x3c full-width window consumes one more word than the
         // narrower 0x40 Kickstart-logo window.  The latter's right-edge word
         // is supplied by hiresDisplayPrefetch() without changing its stride.
-        lastFetchCycle = chipset.ddfstop +
+        bitplaneLine.lastCycle = chipset.ddfstop +
             omegaDdfHiresFetchTail(chipset.ddfstrt, chipset.ddfstop);
         DMAHires[internal.hPos]();
     }else{
         // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
-        lastFetchCycle = chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
+        bitplaneLine.lastCycle =
+            chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
         DMALores[internal.hPos]();
     }
     eclock_execute(&chipset);   // CIA timers
@@ -655,8 +660,8 @@ void dma_execute(){
         // at it for display only; do not advance any bitplane pointer.
         hiresDisplayPrefetch();
 
-        hiresCallsThisLine = 0;
-        loresCallsThisLine = 0;
+        bitplaneLine.hiresWords = 0;
+        bitplaneLine.loresWords = 0;
         
         
         
@@ -919,10 +924,7 @@ int bitplaneActive(){
         return 0;
     }
  
-    //too late horisonal position let the Copper and Blitter run... why + 16?
-    
-    if(internal.hPos>lastFetchCycle){// 0xd7+16 (chipset.ddfstop+16)){     //not sure why the ddfstop sometimes have wrong values.
-    //if(internal.hPos>(chipset.ddfstop+4)){
+    if (internal.hPos > bitplaneLine.lastCycle) {
         return 0;
     }
     
@@ -983,7 +985,7 @@ void loresPlane1(void){
     }
     if( (internal.bitplaneMask & 0x1)  == 0x1){
         host.displayIsLores = 1;
-        if (loresCallsThisLine++ == 0) {
+        if (bitplaneLine.loresWords++ == 0) {
             int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
                              ? internal.vPos - (chipset.diwstrt >> 8)
                              : internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
@@ -1090,13 +1092,14 @@ void hiresPlane1(){
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
-        hiresCallsThisLine++;
+        bitplaneLine.hiresWords++;
     }
 
     // The full-width Workbench raster begins 40 PAL beam lines below DIWSTRT.
     // Remove that upper overscan so all 200 useful rows, including the lower
     // window border, fit in the host scratch framebuffer.
-    if (omegaDdfIsFullWidth(chipset.ddfstrt) && hiresCallsThisLine == 1) {
+    if (omegaDdfIsFullWidth(chipset.ddfstrt) &&
+        bitplaneLine.hiresWords == 1) {
         int upper_overscan =
             omegaDdfUpperOverscan(chipset.ddfstop);
         int display_line = internal.vPos - (chipset.diwstrt >> 8) -
@@ -1106,7 +1109,7 @@ void hiresPlane1(){
         host.rasterRow = display_line;
         host.rasterX = 0;
     } else if (!omegaDdfIsFullWidth(chipset.ddfstrt) &&
-               hiresCallsThisLine == 1) {
+               bitplaneLine.hiresWords == 1) {
         host.rasterRow = internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
         host.rasterX = 0;
     }

@@ -181,6 +181,11 @@ The same layout header also names the normal and extra-word HIRES fetch tails,
 the LORES fetch span, and the two upper-overscan offsets. DMA no longer embeds
 those timing and placement values directly in its control flow.
 
+Bitplane DMA now has an explicit per-scanline state object for the terminal
+fetch cycle and HIRES/LORES word counts. This replaces unrelated loose globals
+and provides one owner for the fetch-completion and modulo timing model. The
+current modulo behavior is intentionally unchanged at this foundation step.
+
 The shared layout definitions also name the raster origin at beam line 43 and
 the first LORES render line at 44. LORES and HIRES positioning now refer to
 those meanings rather than repeating unexplained vertical literals.
