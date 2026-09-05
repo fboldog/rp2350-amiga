@@ -686,8 +686,6 @@ void bpl8ptl(uint16_t value){
 }
 
 void bplcon0(uint16_t value){
-    displayLineReset(); //restart drawing if the bplcon has changed. This might need to take a value as to how many lines were needed to change the mode
-
     static int bplLog = 0;
     if (value != chipset.bplcon0 && bplLog < 20)
         printf("[BPLCON0] 0x%04X -> 0x%04X (planes=%d hires=%d)\n", chipset.bplcon0, value, (value>>12)&7, (value>>15)&1), bplLog++;

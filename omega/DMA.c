@@ -12,8 +12,6 @@
 //  Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed
 //  with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#include <stdlib.h>   // rand()
-
 #include "DMA.h"
 #include "Memory.h"
 #include "Chipset.h"
@@ -712,17 +710,6 @@ void dma_execute(){
 }
 
 
-void displayLineReset(){
-    host.rasterX -= host.rasterX % 320;
-}
-
-void setDisplayMode(int mode){
-    (void)mode;
-    host.rasterX = 0;
-}
-
-
-
 void evenCycle(void){
 
     
@@ -996,7 +983,6 @@ void loresPlane1(void){
     
     
     if(bitplaneActive()==0){
-        //drawBlank();
         return;
     }
     
@@ -1155,25 +1141,6 @@ void hiresPlane1(){
 
 
 
-
-
-
-
-void drawBlank(){
-    
-    uint32_t* pixbuff = (uint32_t*)host.pixels;
-    
-    if(pixbuff==NULL || internal.vPos<44){
-        return;
-    }
-    
-    for(int i=0;i<16;++i){
-        //pixbuff[host.rasterX+i]=internal.palette[0];
-        pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX+i]=rand()%4294967296;
-    }
-    host.rasterX +=16;
-    
-}
 
 
 

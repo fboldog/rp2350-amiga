@@ -46,11 +46,6 @@ void plane5(void);
 void loresPlane1(void);
 void hiresPlane1(void);
 
-void drawBlank();
-
-void displayLineReset(void);
-void setDisplayMode(int); // 0 = lores, 1 = highres
-
 int blitterCopyCycle();
 int blitterLineCycle();
 

@@ -146,6 +146,11 @@ mode. During display blanking, `BPLCON0` contains zero planes; its cleared HIRES
 bit must not be interpreted as a LORES screen. Doing so made full-width HIRES
 Workbench output sample alternating raster rows and appear at half height.
 
+Legacy framebuffer-position helpers from the former `FBCounter` design have
+been removed. `BPLCON0` writes no longer reset a host-side drawing cursor, and
+the unused `setDisplayMode()` plus random-pixel `drawBlank()` diagnostic are
+gone. Raster placement is now owned solely by the active DMA fetch paths.
+
 ## Status (2026-09-05)
 
 - Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
