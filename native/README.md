@@ -241,7 +241,9 @@ Narrow-window prefix reconstruction remains necessary for wrapped DIW/DDF
 layouts: removing it visibly moves the 3.1.4 requester’s right-edge graphics
 to the left side of the following row. The condition is based on display
 geometry rather than Kickstart identity; code comments use the same generic
-terminology.
+terminology. The current selector is nevertheless indirect: a vertical
+256-line DIW-bank crossing enables horizontal fetch-row reconstruction. This
+coupling is named explicitly until it can be replaced by raw-raster metadata.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to

@@ -16,7 +16,7 @@ static int isFullWidthDisplay(int diw_start) {
            diw_start < EARLY_DISPLAY_LINE;
 }
 
-static int needsWrappedPrefixRepair(int diw_start, int diw_stop) {
+static int displayWindowCrossesVerticalBank(int diw_start, int diw_stop) {
     return diw_stop < diw_start ||
            (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
             diw_stop + OCS_VERTICAL_BANK_LINES <= OMEGA_VIDEO_FRAME_LINES);
@@ -81,9 +81,10 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // current line.  Rejoin such prefixes to a right-edge object, then remove
     // them from the following line's left edge.
     int diw_stop = chipset.diwstop >> 8;
-    int repaired_wrapped_prefix =
-        needsWrappedPrefixRepair(diw_start, diw_stop);
-    for (int sy = 0; repaired_wrapped_prefix && sy + 1 < HOST_RASTER_H; ++sy) {
+    int reconstruct_wrapped_fetch_rows =
+        displayWindowCrossesVerticalBank(diw_start, diw_stop);
+    for (int sy = 0;
+         reconstruct_wrapped_fetch_rows && sy + 1 < HOST_RASTER_H; ++sy) {
         int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
         if (dy < 0 || dy + 3 >= SCREEN_H)
             continue;
@@ -112,7 +113,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
         memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         memcpy(next + SCREEN_W, next, SCREEN_W * sizeof(uint32_t));
     }
-    if (repaired_wrapped_prefix) {
+    if (reconstruct_wrapped_fetch_rows) {
         for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
             int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
             if (dy < 0 || dy + 1 >= SCREEN_H)
@@ -128,7 +129,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // Map 32 Amiga HIRES beam pixels to 27 square host pixels.  Wrapped
     // scanlines have already moved their fetch prefix to the right edge, so
     // their presentation origin differs from an ordinary display window.
-    int x_offset = repaired_wrapped_prefix
+    int x_offset = reconstruct_wrapped_fetch_rows
                  ? HOST_WRAP_X_OFFSET : HOST_NORMAL_X_OFFSET;
     if (x_offset == HOST_WRAP_X_OFFSET)
         x_offset = OMEGA_VIDEO_WRAP_X_OFFSET;
