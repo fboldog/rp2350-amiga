@@ -293,6 +293,11 @@ per-plane and compatibility rules.
 The shared layout definitions also name the raster origin at beam line 43 and
 the first LORES render line at 44. LORES and HIRES positioning now refer to
 those meanings rather than repeating unexplained vertical literals.
+Their scanline destinations are initialized at every plane-1 DMA slot even
+when plane 1 is disabled. LORES also clears its plane-1 data latch before an
+optional fetch, matching HIRES, while full-width negative upper-overscan lines
+reject every word. Together these prevent transition frames from combining
+fresh higher planes with stale plane-1 data or raster coordinates.
 
 The unused `sprite2chunky()` API and its duplicate host implementations have
 been removed. This does not remove working sprite support: `spriteCycle()` is
@@ -313,8 +318,8 @@ separate `native_frame_counter` state.
 
 The rendering/DMA cleanup checklist is complete. Remaining compatibility
 behavior is documented where it is implemented: content-aware wrapped-prefix
-reconstruction, no-fetch bitplane modulo advancement, and the known transient
-2.04 animation flash. Sprite DMA and sprite rendering remain unimplemented.
+reconstruction and no-fetch bitplane modulo advancement. Sprite DMA and sprite
+rendering remain unimplemented.
 
 - Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
   The native host records the full PAL/NTSC beam field and tracks whether the
@@ -366,9 +371,9 @@ same helper fills the translated wrapped row's trailing border, leaving that
 operation entirely segment-based. All presentation paths also use one shared
   scanline-duplication helper for their 2× vertical output.
   This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
-  A brief top-line square flash can still occur when the 2.04 disk animation
-  starts; this transient fetch-data issue is deferred and is not hidden by
-  presentation code.
+  The former top-line square flash during the 2.04 disk animation was caused by
+  a stale LORES plane-1 latch and destination row; both are now refreshed at
+  the DMA slot independently of the enabled-plane mask.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
   slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the

@@ -1068,17 +1068,18 @@ void loresPlane1(void){
     if(host.pixels == NULL){
         return;
     }
+    if (bitplaneLine.loresWords++ == 0) {
+        int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
+                         ? internal.vPos - (chipset.diwstrt >> 8)
+                         : internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
+        host.rasterRow = omegaDdfIsFullWidth(chipset.ddfstrt)
+                       ? display_line * 2 : display_line;
+        host.rasterX = 0;
+    }
+    chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
         markBitplaneFetched(1);
         host.displayIsLores = 1;
-        if (bitplaneLine.loresWords++ == 0) {
-            int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
-                             ? internal.vPos - (chipset.diwstrt >> 8)
-                             : internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
-            host.rasterRow = omegaDdfIsFullWidth(chipset.ddfstrt)
-                           ? display_line * 2 : display_line;
-            host.rasterX = 0;
-        }
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
@@ -1176,27 +1177,28 @@ void hiresPlane1(){
         return;
     }
     chipset.bpl1dat = 0;
+    bitplaneLine.hiresWords++;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
         markBitplaneFetched(1);
         host.displayIsLores = 0;
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
-        bitplaneLine.hiresWords++;
     }
 
     // The full-width raster begins 40 PAL beam lines below DIWSTRT. Remove
     // that upper overscan so all 200 useful rows fit in the host framebuffer.
-    if (omegaDdfIsFullWidth(chipset.ddfstrt) &&
-        bitplaneLine.hiresWords == 1) {
+    if (omegaDdfIsFullWidth(chipset.ddfstrt)) {
         int upper_overscan =
             omegaDdfUpperOverscan(chipset.ddfstop);
         int display_line = internal.vPos - (chipset.diwstrt >> 8) -
                            upper_overscan;
         if (display_line < 0)
             return;
-        host.rasterRow = display_line;
-        host.rasterX = 0;
+        if (bitplaneLine.hiresWords == 1) {
+            host.rasterRow = display_line;
+            host.rasterX = 0;
+        }
     } else if (!omegaDdfIsFullWidth(chipset.ddfstrt) &&
                bitplaneLine.hiresWords == 1) {
         host.rasterRow = internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
