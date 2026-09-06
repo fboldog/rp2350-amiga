@@ -647,14 +647,12 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
 }
 
 static void advanceBitplanePointers(void) {
-    enum { ODD_PLANES = 0x55, EVEN_PLANES = 0xaa };
     uint8_t fetched = bitplaneLine.fetchedMask;
 
-    // A blank line retains compatibility advancement unless every active
-    // plane in a modulo group was explicitly reloaded before its fetch window.
-    // Partial lines advance only groups that actually took part in DMA.
+    // A blank line retains compatibility advancement except for an active
+    // plane explicitly reloaded before its fetch window. Partial lines advance
+    // only the individual planes that actually took part in DMA.
     if (fetched == 0) {
-        uint8_t activePlanes = bitplaneLine.enabledMask;
         uint8_t reloadedBeforeFetch = 0;
 
         for (unsigned plane = 0; plane < 8; plane++) {
@@ -663,15 +661,7 @@ static void advanceBitplanePointers(void) {
                 reloadedBeforeFetch |= (uint8_t)(1u << plane);
         }
 
-        fetched = ODD_PLANES | EVEN_PLANES;
-        uint8_t activeOddPlanes = activePlanes & ODD_PLANES;
-        uint8_t activeEvenPlanes = activePlanes & EVEN_PLANES;
-        if (activeOddPlanes != 0 &&
-            (reloadedBeforeFetch & activeOddPlanes) == activeOddPlanes)
-            fetched &= (uint8_t)~ODD_PLANES;
-        if (activeEvenPlanes != 0 &&
-            (reloadedBeforeFetch & activeEvenPlanes) == activeEvenPlanes)
-            fetched &= (uint8_t)~EVEN_PLANES;
+        fetched = (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
     }
 
     if (fetched & 0x01)
