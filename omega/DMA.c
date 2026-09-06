@@ -594,7 +594,6 @@ typedef struct {
     uint32_t pointerAtFetchCompletion[4];
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
-    uint8_t pointerReloadMask;
     uint8_t pointerReloadBeforeFetchMask;
 } BitplaneLineState;
 
@@ -611,7 +610,6 @@ static void resetBitplaneLine(void) {
     bitplaneLine.fetchWindowComplete = 0;
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
-    bitplaneLine.pointerReloadMask = 0;
     bitplaneLine.pointerReloadBeforeFetchMask = 0;
     for (unsigned plane = 0; plane < 4; plane++)
         bitplaneLine.pointerAtFetchCompletion[plane] = 0;
@@ -625,14 +623,15 @@ static void markBitplaneFetched(unsigned plane) {
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
     if (plane >= 1 && plane <= 8) {
         uint8_t planeMask = (uint8_t)(1u << (plane - 1));
-        int wasReloaded = (bitplaneLine.pointerReloadMask & planeMask) != 0;
+        int wasReloaded = ((bitplaneLine.pointerHighWriteMask &
+                            bitplaneLine.pointerLowWriteMask) & planeMask) != 0;
         if (highWord)
             bitplaneLine.pointerHighWriteMask |= planeMask;
         else
             bitplaneLine.pointerLowWriteMask |= planeMask;
-        bitplaneLine.pointerReloadMask = bitplaneLine.pointerHighWriteMask &
-                                         bitplaneLine.pointerLowWriteMask;
-        if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask) &&
+        int isReloaded = ((bitplaneLine.pointerHighWriteMask &
+                           bitplaneLine.pointerLowWriteMask) & planeMask) != 0;
+        if (!wasReloaded && isReloaded &&
             internal.hPos < chipset.ddfstrt)
             bitplaneLine.pointerReloadBeforeFetchMask |= planeMask;
     }

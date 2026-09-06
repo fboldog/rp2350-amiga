@@ -237,11 +237,9 @@ Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
 correlate pointer reloads with the planes that fetched before blank-line
 compatibility advancement is removed. High- and low-word writes are recorded
-separately, so a complete pointer reload can be distinguished from an update
-to only half of a pointer. A per-plane reload mask records when both words
-were written during the same scanline; this remains observational until it is
-used to narrow the blank-line compatibility path. Only completions before DDF
-affect that policy, so they are retained in a bitmask rather than a per-plane
+separately, so completeness is derived directly from their intersection rather
+than stored in a redundant third mask. Only completions before DDF affect the
+blank-line policy, so they are retained in one bitmask rather than a per-plane
 phase array; unused during/after classifications were removed. Cross-scanline
 reload diagnostics were also tested and removed after they proved the fallback
 dependency was unrelated to pending complete reloads.
