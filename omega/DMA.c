@@ -614,6 +614,9 @@ typedef struct {
 
 static BitplaneLineState bitplaneLine;
 static uint8_t lastFetchedMask;
+static uint8_t pointerHighWrittenSinceFetch;
+static uint8_t pointerLowWrittenSinceFetch;
+static uint8_t pointerReloadedSinceFetch;
 static uint32_t copperWaitPosition = 0;
 
 static void resetBitplaneLine(void) {
@@ -648,6 +651,9 @@ static void markBitplaneFetched(unsigned plane) {
         bitplaneLine.lastOddFetchCycle = (uint8_t)internal.hPos;
     else
         bitplaneLine.lastEvenFetchCycle = (uint8_t)internal.hPos;
+    pointerHighWrittenSinceFetch &= (uint8_t)~planeMask;
+    pointerLowWrittenSinceFetch &= (uint8_t)~planeMask;
+    pointerReloadedSinceFetch &= (uint8_t)~planeMask;
 }
 
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
@@ -658,6 +664,12 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
             bitplaneLine.pointerHighWriteMask |= planeMask;
         else
             bitplaneLine.pointerLowWriteMask |= planeMask;
+        if (highWord)
+            pointerHighWrittenSinceFetch |= planeMask;
+        else
+            pointerLowWrittenSinceFetch |= planeMask;
+        pointerReloadedSinceFetch = pointerHighWrittenSinceFetch &
+                                    pointerLowWrittenSinceFetch;
         bitplaneLine.pointerReloadMask = bitplaneLine.pointerHighWriteMask &
                                          bitplaneLine.pointerLowWriteMask;
         if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask)) {
@@ -703,24 +715,17 @@ static void advanceBitplanePointers(void) {
         return;
     }
 
-    // A blank line retains compatibility advancement except for an active
-    // plane explicitly reloaded before its fetch window. Partial lines advance
-    // only the individual planes that actually took part in DMA.
-    if (fetched == 0) {
-        uint8_t reloadedBeforeFetch = 0;
-
-        for (unsigned plane = 0; plane < 8; plane++) {
-            if (bitplaneLine.pointerReloadPhase[plane] ==
-                BITPLANE_RELOAD_BEFORE_FETCH)
-                reloadedBeforeFetch |= (uint8_t)(1u << plane);
-        }
-
-        fetched = bitplaneLine.fetchEligibleMask != 0
-            ? bitplaneLine.fetchEligibleMask
-            : lastFetchedMask;
-        fetched &= (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
+    uint8_t reloadedBeforeFetch = 0;
+    for (unsigned plane = 0; plane < 8; plane++) {
+        if (bitplaneLine.pointerReloadPhase[plane] ==
+            BITPLANE_RELOAD_BEFORE_FETCH)
+            reloadedBeforeFetch |= (uint8_t)(1u << plane);
     }
 
+    fetched = bitplaneLine.fetchEligibleMask != 0
+        ? bitplaneLine.fetchEligibleMask
+        : lastFetchedMask;
+    fetched &= (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
     applyBitplaneModulo(fetched);
 }
 
@@ -830,9 +835,6 @@ void dma_execute(){
         internal.vPos +=1;
         CIATODEvent(&CIAB);
         
-        
-        // Compatibility timing remains at the scanline boundary. Per-plane
-        // tracking still limits partial-line modulo to groups that fetched.
         advanceBitplanePointers();
         resetBitplaneLine();
         
