@@ -120,8 +120,8 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             // raster's left origin to keep the complete logical row visible.
             memmove(row, row + HOST_VISIBLE_X0,
                     (SCREEN_W - HOST_VISIBLE_X0) * sizeof(uint32_t));
-            for (int x = SCREEN_W - HOST_VISIBLE_X0; x < SCREEN_W; ++x)
-                row[x] = border;
+            fillPixels(row + SCREEN_W - HOST_VISIBLE_X0,
+                       HOST_VISIBLE_X0, border);
             memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         }
     }
