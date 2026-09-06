@@ -673,7 +673,7 @@ static void advanceBitplanePointers(void) {
 
         fetched = bitplaneLine.fetchEligibleMask != 0
             ? bitplaneLine.fetchEligibleMask
-            : (lastFetchedMask != 0 ? lastFetchedMask : 0xff);
+            : lastFetchedMask;
         fetched &= (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
     }
 

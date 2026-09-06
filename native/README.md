@@ -211,8 +211,8 @@ as a per-plane fetch-eligible mask, distinct from both merely enabled planes
 and planes for which a DMA word was observed. On an otherwise eligible line
 where no fetch occurs, fallback advancement is limited to that eligible set;
 fully ineligible lines reuse the most recently fetched plane set. The legacy
-all-plane fallback is therefore limited to startup before the first observed
-bitplane fetch.
+all-plane startup fallback has been removed, so no pointer receives speculative
+modulo advancement before the first observed bitplane fetch.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
