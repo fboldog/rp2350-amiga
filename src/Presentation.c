@@ -10,6 +10,11 @@ enum {
     WRAPPED_PREFIX_PIXELS = 48,
 };
 
+static void fillPixels(uint32_t *pixels, int count, uint32_t color) {
+    for (int i = 0; i < count; ++i)
+        pixels[i] = color;
+}
+
 void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     const uint32_t border = internal.palette[0];
     const int diw_start = omegaDiwVerticalStart(chipset.diwstrt);
@@ -21,8 +26,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // Convert the raw DMA fetch raster to the visible display.  The first
     // fetch words are pipeline/overscan data and must be clipped, not wrapped
     // around to the opposite edge.
-    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
-        fb[i] = border;
+    fillPixels(fb, SCREEN_W * SCREEN_H, border);
 
     // A full-width HIRES fetch is stored by the DMA renderer as 320 packed
     // samples per scanline. Present each sample twice horizontally and each
@@ -51,7 +55,8 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             }
             memcpy(dst + SCREEN_W, dst, SCREEN_W * sizeof(uint32_t));
         }
-        goto frame_ready;
+        fillPixels(render_fb, HOST_RASTER_PIXELS, border);
+        return;
     }
 
     for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
@@ -121,7 +126,5 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
         }
     }
 
-frame_ready:
-    for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
-        render_fb[i] = border;
+    fillPixels(render_fb, HOST_RASTER_PIXELS, border);
 }

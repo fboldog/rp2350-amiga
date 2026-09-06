@@ -348,6 +348,8 @@ Prefix clearing and centering are performed together per logical scanline,
 avoiding a redundant traversal of the complete framebuffer. The normal narrow
 raster span is contiguous and is copied as one bounded row segment rather than
 through a per-pixel loop.
+Presentation paths clear their intermediate raster explicitly through a shared
+fill helper; the former label-and-`goto` cleanup exit is no longer needed.
   This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
