@@ -737,7 +737,8 @@ static int displayWindowContainsLine(int vpos) {
 }
 
 static void hiresDisplayPrefetch(void) {
-    if ((chipset.bplcon0 & 0x8000) == 0 ||
+    if (!bitplaneLine.fetchWindowComplete ||
+        (chipset.bplcon0 & 0x8000) == 0 ||
         omegaDdfIsFullWidth(chipset.ddfstrt) ||
         (chipset.dmaconr & 0x300) != 0x300 ||
         !displayWindowContainsLine(internal.vPos) ||
@@ -747,10 +748,14 @@ static void hiresDisplayPrefetch(void) {
         return;
 
     uint16_t p1 = 0, p2 = 0, p3 = 0, p4 = 0;
-    if (internal.bitplaneMask & 0x01) p1 = internal.chipramW[chipset.bpl1pt];
-    if (internal.bitplaneMask & 0x02) p2 = internal.chipramW[chipset.bpl2pt];
-    if (internal.bitplaneMask & 0x04) p3 = internal.chipramW[chipset.bpl3pt];
-    if (internal.bitplaneMask & 0x08) p4 = internal.chipramW[chipset.bpl4pt];
+    if (internal.bitplaneMask & 0x01)
+        p1 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[0]];
+    if (internal.bitplaneMask & 0x02)
+        p2 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[1]];
+    if (internal.bitplaneMask & 0x04)
+        p3 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[2]];
+    if (internal.bitplaneMask & 0x08)
+        p4 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[3]];
 
     uint32_t *pixbuff = (uint32_t *)host.pixels;
     hiresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX],
