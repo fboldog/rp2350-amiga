@@ -597,6 +597,7 @@ typedef struct {
     uint8_t dmaEnabled;
     uint8_t displayWindowActive;
     uint8_t enabledMask;
+    uint8_t fetchEligibleMask;
     uint8_t fetchedMask;
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
@@ -614,6 +615,7 @@ static void resetBitplaneLine(void) {
     bitplaneLine.dmaEnabled = 0;
     bitplaneLine.displayWindowActive = 0;
     bitplaneLine.enabledMask = 0;
+    bitplaneLine.fetchEligibleMask = 0;
     bitplaneLine.fetchedMask = 0;
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
@@ -727,11 +729,16 @@ void dma_execute(){
     chipset.vposr   = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
     chipset.vhposr  = internal.vPos << 8;
     chipset.vhposr |= internal.hPos;
-    if ((chipset.dmaconr & 0x300) == 0x300)
+    uint8_t enabledPlanes = enabledBitplaneMask();
+    int dmaEnabled = (chipset.dmaconr & 0x300) == 0x300;
+    int displayWindowActive = displayWindowContainsLine(internal.vPos);
+    if (dmaEnabled)
         bitplaneLine.dmaEnabled = 1;
-    if (displayWindowContainsLine(internal.vPos))
+    if (displayWindowActive)
         bitplaneLine.displayWindowActive = 1;
-    bitplaneLine.enabledMask |= enabledBitplaneMask();
+    bitplaneLine.enabledMask |= enabledPlanes;
+    if (dmaEnabled && displayWindowActive)
+        bitplaneLine.fetchEligibleMask |= enabledPlanes;
     
 
     // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350

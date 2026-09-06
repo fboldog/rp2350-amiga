@@ -206,7 +206,9 @@ point during the line, separately from planes that actually fetched, so
 Copper mode changes are not reduced to the final `BPLCON0` value. Scanline
 state also records bitplane-DMA enablement and display-window activity
 independently, allowing a no-fetch line to be classified before the remaining
-compatibility advancement is narrowed further.
+compatibility advancement is narrowed further. Their conjunction is retained
+as a per-plane fetch-eligible mask, distinct from both merely enabled planes
+and planes for which a DMA word was observed.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
