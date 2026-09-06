@@ -175,7 +175,9 @@ removal of a redundant wrapped-origin test.
 DDF layout signatures shared by DMA and presentation are defined in
 `omega/DisplayLayout.h`. Full-width fetch detection, the extra-word requester
 layout, and the rotated Workbench 3.14 layout can no longer drift between the
-two stages.
+two stages. Full-width presentation now follows DDF geometry alone; the former
+additional dependency on an early DIW vertical start was redundant and has
+been removed.
 
 The same layout header also names the normal and extra-word HIRES fetch tails,
 the LORES fetch span, and the two upper-overscan offsets. DMA no longer embeds
