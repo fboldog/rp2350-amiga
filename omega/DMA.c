@@ -599,6 +599,7 @@ typedef struct {
     uint8_t enabledMask;
     uint8_t fetchEligibleMask;
     uint8_t fetchedMask;
+    uint8_t lastFetchCycle[8];
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
     uint8_t pointerReloadMask;
@@ -622,9 +623,16 @@ static void resetBitplaneLine(void) {
     bitplaneLine.pointerLowWriteMask = 0;
     bitplaneLine.pointerReloadMask = 0;
     for (unsigned plane = 0; plane < 8; plane++) {
+        bitplaneLine.lastFetchCycle[plane] = 0xff;
         bitplaneLine.pointerReloadCycle[plane] = 0xff;
         bitplaneLine.pointerReloadPhase[plane] = BITPLANE_RELOAD_NONE;
     }
+}
+
+static void markBitplaneFetched(unsigned plane) {
+    uint8_t planeMask = (uint8_t)(1u << (plane - 1));
+    bitplaneLine.fetchedMask |= planeMask;
+    bitplaneLine.lastFetchCycle[plane - 1] = (uint8_t)internal.hPos;
 }
 
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
@@ -1052,7 +1060,7 @@ void plane6(void){
     
     chipset.bpl6dat = 0;
     if( (internal.bitplaneMask & 0x20)  == 0x20){
-        bitplaneLine.fetchedMask |= 0x20;
+        markBitplaneFetched(6);
         uint16_t* p = &internal.chipramW[chipset.bpl6pt];
         chipset.bpl6pt +=1;
         chipset.bpl6dat = *p;
@@ -1072,7 +1080,7 @@ void plane5(void){
     
     chipset.bpl5dat = 0;
     if( (internal.bitplaneMask & 0x10)  == 0x10){
-        bitplaneLine.fetchedMask |= 0x10;
+        markBitplaneFetched(5);
         uint16_t* p = &internal.chipramW[chipset.bpl5pt];
         chipset.bpl5pt +=1;
         chipset.bpl5dat = *p;
@@ -1093,7 +1101,7 @@ void loresPlane1(void){
         return;
     }
     if( (internal.bitplaneMask & 0x1)  == 0x1){
-        bitplaneLine.fetchedMask |= 0x01;
+        markBitplaneFetched(1);
         host.displayIsLores = 1;
         if (bitplaneLine.loresWords++ == 0) {
             int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
@@ -1137,7 +1145,7 @@ void plane4(){
     
     chipset.bpl4dat = 0;
     if( (internal.bitplaneMask & 0x8)  == 0x8){
-        bitplaneLine.fetchedMask |= 0x08;
+        markBitplaneFetched(4);
         uint16_t* p = &internal.chipramW[chipset.bpl4pt];
         chipset.bpl4pt +=1;
         chipset.bpl4dat = *p;
@@ -1157,7 +1165,7 @@ void plane2(){
     
     chipset.bpl2dat = 0;
     if( (internal.bitplaneMask & 0x2)  == 0x2){
-        bitplaneLine.fetchedMask |= 0x02;
+        markBitplaneFetched(2);
         uint16_t* p = &internal.chipramW[chipset.bpl2pt];
         chipset.bpl2pt +=1;
         chipset.bpl2dat = *p;
@@ -1177,7 +1185,7 @@ void plane3(){
     
     chipset.bpl3dat = 0;
     if( (internal.bitplaneMask & 0x4)  == 0x4){
-        bitplaneLine.fetchedMask |= 0x04;
+        markBitplaneFetched(3);
         uint16_t* p = &internal.chipramW[chipset.bpl3pt];
         chipset.bpl3pt +=1;
         chipset.bpl3dat = *p;
@@ -1201,7 +1209,7 @@ void hiresPlane1(){
     }
     chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
-        bitplaneLine.fetchedMask |= 0x01;
+        markBitplaneFetched(1);
         host.displayIsLores = 0;
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;

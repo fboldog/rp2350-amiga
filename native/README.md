@@ -208,7 +208,9 @@ state also records bitplane-DMA enablement and display-window activity
 independently, allowing a no-fetch line to be classified before the remaining
 compatibility advancement is narrowed further. Their conjunction is retained
 as a per-plane fetch-eligible mask, distinct from both merely enabled planes
-and planes for which a DMA word was observed. On an otherwise eligible line
+and planes for which a DMA word was observed. Real fetch marking is shared by
+all implemented OCS plane paths and records the final fetch cycle for each
+plane. On an otherwise eligible line
 where no fetch occurs, fallback advancement is limited to that eligible set;
 fully ineligible lines reuse the most recently fetched plane set. The legacy
 all-plane startup fallback has been removed, so no pointer receives speculative
