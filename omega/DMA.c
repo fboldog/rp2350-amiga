@@ -583,13 +583,6 @@ void waitFreeSlot(){
 #endif
 }
 
-typedef enum {
-    BITPLANE_RELOAD_NONE,
-    BITPLANE_RELOAD_BEFORE_FETCH,
-    BITPLANE_RELOAD_DURING_FETCH,
-    BITPLANE_RELOAD_AFTER_FETCH
-} BitplaneReloadPhase;
-
 typedef struct {
     int lastCycle;
     int hiresWords;
@@ -602,7 +595,7 @@ typedef struct {
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
     uint8_t pointerReloadMask;
-    uint8_t pointerReloadPhase[8];
+    uint8_t pointerReloadBeforeFetchMask;
 } BitplaneLineState;
 
 static BitplaneLineState bitplaneLine;
@@ -619,9 +612,7 @@ static void resetBitplaneLine(void) {
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
     bitplaneLine.pointerReloadMask = 0;
-    for (unsigned plane = 0; plane < 8; plane++) {
-        bitplaneLine.pointerReloadPhase[plane] = BITPLANE_RELOAD_NONE;
-    }
+    bitplaneLine.pointerReloadBeforeFetchMask = 0;
     for (unsigned plane = 0; plane < 4; plane++)
         bitplaneLine.pointerAtFetchCompletion[plane] = 0;
 }
@@ -641,17 +632,9 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
             bitplaneLine.pointerLowWriteMask |= planeMask;
         bitplaneLine.pointerReloadMask = bitplaneLine.pointerHighWriteMask &
                                          bitplaneLine.pointerLowWriteMask;
-        if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask)) {
-            if (internal.hPos < chipset.ddfstrt)
-                bitplaneLine.pointerReloadPhase[plane - 1] =
-                    BITPLANE_RELOAD_BEFORE_FETCH;
-            else if (internal.hPos <= bitplaneLine.lastCycle)
-                bitplaneLine.pointerReloadPhase[plane - 1] =
-                    BITPLANE_RELOAD_DURING_FETCH;
-            else
-                bitplaneLine.pointerReloadPhase[plane - 1] =
-                    BITPLANE_RELOAD_AFTER_FETCH;
-        }
+        if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask) &&
+            internal.hPos < chipset.ddfstrt)
+            bitplaneLine.pointerReloadBeforeFetchMask |= planeMask;
     }
 }
 
@@ -682,17 +665,11 @@ static void advanceBitplanePointers(void) {
         return;
     }
 
-    uint8_t reloadedBeforeFetch = 0;
-    for (unsigned plane = 0; plane < 8; plane++) {
-        if (bitplaneLine.pointerReloadPhase[plane] ==
-            BITPLANE_RELOAD_BEFORE_FETCH)
-            reloadedBeforeFetch |= (uint8_t)(1u << plane);
-    }
-
     fetched = bitplaneLine.fetchEligibleMask != 0
         ? bitplaneLine.fetchEligibleMask
         : lastFetchedMask;
-    fetched &= (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
+    fetched &= (uint8_t)~(bitplaneLine.pointerReloadBeforeFetchMask &
+                          bitplaneLine.enabledMask);
     applyBitplaneModulo(fetched);
 }
 
