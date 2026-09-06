@@ -705,6 +705,9 @@ void bplcon0(uint16_t value){
     chipset.bplcon0 = value;
 
     int planes = (value >> 12) & 7 ;
+    int maximumPlanes = (value & 0x8000) ? 4 : 6;
+    if (planes > maximumPlanes)
+        planes = maximumPlanes;
 
     internal.bitplaneMask = planeMask[planes];
 }

@@ -738,8 +738,7 @@ static void advanceBitplanePointers(void) {
 }
 
 static uint8_t enabledBitplaneMask(void) {
-    uint8_t fetchCapacity = (chipset.bplcon0 & 0x8000) ? 0x0f : 0x3f;
-    return (uint8_t)internal.bitplaneMask & fetchCapacity;
+    return (uint8_t)internal.bitplaneMask;
 }
 
 static int displayWindowContainsLine(int vpos) {

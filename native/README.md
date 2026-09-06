@@ -217,9 +217,10 @@ fully ineligible lines reuse the most recently fetched plane set. The legacy
 all-plane startup fallback has been removed, so no pointer receives speculative
 modulo advancement before the first observed bitplane fetch.
 
-Fetch eligibility uses the chipset's decoded plane mask and caps it to the
-implemented OCS DMA capacity: four planes in HIRES and six in LORES. It no
-longer independently decodes raw `BPLCON0` bits into unsupported plane sets.
+The `BPLCON0` decoder caps its plane count to the implemented OCS DMA
+capacity—four planes in HIRES and six in LORES—so every consumer sees one
+supported mask. Fetch eligibility uses that decoded mask directly instead of
+independently interpreting raw register bits.
 
 The final DDF cycle explicitly snapshots the completed per-plane fetch mask.
 This provides a stable completion hook for relocating modulo timing later,
