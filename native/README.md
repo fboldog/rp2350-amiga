@@ -225,9 +225,10 @@ separating the fetched line from any later Copper pointer writes. The
 narrow-DDF right-edge prefetch now reads these captured pointers instead of
 live end-of-line values, preventing late Copper writes from changing a line
 whose fetch window already completed. Modulo for planes that really fetched is
-now applied at this DDF-completion boundary; an applied mask prevents the
-scanline boundary from advancing those pointers twice. No-fetch compatibility
-advancement remains an end-of-line operation.
+now applied exclusively at this DDF-completion boundary. The former
+end-of-line safety application and its double-advance mask have been removed;
+no-fetch compatibility advancement is the only modulo operation that remains
+at the scanline boundary.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
