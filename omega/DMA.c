@@ -654,13 +654,10 @@ static void advanceBitplanePointers(void) {
     // plane in a modulo group was explicitly reloaded before its fetch window.
     // Partial lines advance only groups that actually took part in DMA.
     if (fetched == 0) {
-        unsigned planeCount = (chipset.bplcon0 >> 12) & 7;
-        uint8_t activePlanes = planeCount == 0
-            ? 0
-            : (uint8_t)((1u << planeCount) - 1u);
+        uint8_t activePlanes = bitplaneLine.enabledMask;
         uint8_t reloadedBeforeFetch = 0;
 
-        for (unsigned plane = 0; plane < planeCount; plane++) {
+        for (unsigned plane = 0; plane < 8; plane++) {
             if (bitplaneLine.pointerReloadPhase[plane] ==
                 BITPLANE_RELOAD_BEFORE_FETCH)
                 reloadedBeforeFetch |= (uint8_t)(1u << plane);
