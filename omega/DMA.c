@@ -607,6 +607,7 @@ typedef struct {
 } BitplaneLineState;
 
 static BitplaneLineState bitplaneLine;
+static uint8_t lastFetchedMask;
 static uint32_t copperWaitPosition = 0;
 
 static void resetBitplaneLine(void) {
@@ -655,6 +656,9 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
 static void advanceBitplanePointers(void) {
     uint8_t fetched = bitplaneLine.fetchedMask;
 
+    if (fetched != 0)
+        lastFetchedMask = fetched;
+
     // A blank line retains compatibility advancement except for an active
     // plane explicitly reloaded before its fetch window. Partial lines advance
     // only the individual planes that actually took part in DMA.
@@ -669,7 +673,7 @@ static void advanceBitplanePointers(void) {
 
         fetched = bitplaneLine.fetchEligibleMask != 0
             ? bitplaneLine.fetchEligibleMask
-            : 0xff;
+            : (lastFetchedMask != 0 ? lastFetchedMask : 0xff);
         fetched &= (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
     }
 
