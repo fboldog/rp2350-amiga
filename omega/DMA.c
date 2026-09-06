@@ -601,6 +601,7 @@ typedef struct {
     uint8_t fetchedMask;
     uint8_t completedFetchMask;
     uint8_t fetchWindowComplete;
+    uint8_t moduloAppliedMask;
     uint8_t lastFetchCycle[8];
     uint32_t pointerAtFetchCompletion[4];
     uint8_t lastOddFetchCycle;
@@ -626,6 +627,7 @@ static void resetBitplaneLine(void) {
     bitplaneLine.fetchedMask = 0;
     bitplaneLine.completedFetchMask = 0;
     bitplaneLine.fetchWindowComplete = 0;
+    bitplaneLine.moduloAppliedMask = 0;
     bitplaneLine.lastOddFetchCycle = 0xff;
     bitplaneLine.lastEvenFetchCycle = 0xff;
     bitplaneLine.pointerHighWriteMask = 0;
@@ -698,8 +700,11 @@ static void applyBitplaneModulo(uint8_t planes) {
 static void advanceBitplanePointers(void) {
     uint8_t fetched = bitplaneLine.fetchedMask;
 
-    if (fetched != 0)
+    if (fetched != 0) {
         lastFetchedMask = fetched;
+        applyBitplaneModulo(fetched & (uint8_t)~bitplaneLine.moduloAppliedMask);
+        return;
+    }
 
     // A blank line retains compatibility advancement except for an active
     // plane explicitly reloaded before its fetch window. Partial lines advance
@@ -802,6 +807,12 @@ void dma_execute(){
         bitplaneLine.pointerAtFetchCompletion[1] = chipset.bpl2pt;
         bitplaneLine.pointerAtFetchCompletion[2] = chipset.bpl3pt;
         bitplaneLine.pointerAtFetchCompletion[3] = chipset.bpl4pt;
+        if (bitplaneLine.completedFetchMask != 0) {
+            lastFetchedMask = bitplaneLine.completedFetchMask;
+            applyBitplaneModulo(bitplaneLine.completedFetchMask);
+            bitplaneLine.moduloAppliedMask |=
+                bitplaneLine.completedFetchMask;
+        }
     }
 
     eclock_execute(&chipset);   // CIA timers

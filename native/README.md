@@ -224,7 +224,10 @@ corresponding HIRES pointers for planes 1–4 are captured at the same boundary,
 separating the fetched line from any later Copper pointer writes. The
 narrow-DDF right-edge prefetch now reads these captured pointers instead of
 live end-of-line values, preventing late Copper writes from changing a line
-whose fetch window already completed.
+whose fetch window already completed. Modulo for planes that really fetched is
+now applied at this DDF-completion boundary; an applied mask prevents the
+scanline boundary from advancing those pointers twice. No-fetch compatibility
+advancement remains an end-of-line operation.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
