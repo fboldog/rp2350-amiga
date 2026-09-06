@@ -45,8 +45,11 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             uint32_t *dst = &fb[(y * 2) * SCREEN_W];
             const uint32_t *src = &render_fb[(y * source_step) * SCREEN_W];
             if (row_rotation) {
-                for (int x = 0; x < SCREEN_W; ++x)
-                    dst[x] = src[(x + row_rotation) % SCREEN_W];
+                int body = SCREEN_W - row_rotation;
+                memcpy(dst, src + row_rotation,
+                       body * sizeof(uint32_t));
+                memcpy(dst + body, src,
+                       row_rotation * sizeof(uint32_t));
             } else {
                 memcpy(dst, src, SCREEN_W * sizeof(uint32_t));
             }

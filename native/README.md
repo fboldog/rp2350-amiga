@@ -181,7 +181,9 @@ been removed.
 
 The same layout header also names the normal and extra-word HIRES fetch tails,
 the LORES fetch span, and the two upper-overscan offsets. DMA no longer embeds
-those timing and placement values directly in its control flow.
+those timing and placement values directly in its control flow. Full-width
+row rotation is expressed as two contiguous segments rather than a per-pixel
+modulo loop.
 
 Bitplane DMA now has an explicit per-scanline state object for the terminal
 fetch cycle and HIRES/LORES word counts. This replaces unrelated loose globals
