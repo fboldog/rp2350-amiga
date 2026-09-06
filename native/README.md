@@ -210,7 +210,9 @@ compatibility advancement is removed. High- and low-word writes are recorded
 separately, so a complete pointer reload can be distinguished from an update
 to only half of a pointer. A per-plane reload mask records when both words
 were written during the same scanline; this remains observational until it is
-used to narrow the blank-line compatibility path.
+used to narrow the blank-line compatibility path. The horizontal beam cycle
+of the first complete reload is also retained, allowing later logic to relate
+the reload to the DDF fetch window instead of treating every reload equally.
 
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
 groups that actually fetched. Fully blank lines retain compatibility
