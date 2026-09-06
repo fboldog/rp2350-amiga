@@ -309,7 +309,12 @@ The unused host-side `vblCount` member and its native/RP2350 initializations
 have been removed. Native frame counting remains in the native runner's
 separate `native_frame_counter` state.
 
-## Status (2026-09-05)
+## Status (2026-09-06)
+
+The rendering/DMA cleanup checklist is complete. Remaining compatibility
+behavior is documented where it is implemented: content-aware wrapped-prefix
+reconstruction, no-fetch bitplane modulo advancement, and the known transient
+2.04 animation flash. Sprite DMA and sprite rendering remain unimplemented.
 
 - Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
   The native host records the full PAL/NTSC beam field and tracks whether the
