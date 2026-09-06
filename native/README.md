@@ -344,6 +344,9 @@ regression logs retain the runner-level information needed for failures.
   presentation correction; this keeps the rightmost segment on the right
   instead of wrapping it to the left edge. The correction is shared by the
   native and RP2350 hosts and does not affect the 1.3 or 2.04 desktop modes.
+  DMA associates those leading pipeline words with the preceding logical row,
+  so the rotated right edge no longer has a one-scanline seam or requires
+  presentation to join neighboring rows.
 - Battery-clock reads at `0xDC0000` return junk (`<invalid>` from `date`) — the
   Gayle/RTC path is a stub; unrelated to the RP2350 port.
 - The ROM diskette-logo bitmap renders horizontally mirrored on the insert

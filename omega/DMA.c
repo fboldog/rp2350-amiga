@@ -1211,8 +1211,21 @@ void hiresPlane1(){
         host.rasterX < 0 || host.rasterX + 15 >= HOST_RASTER_W)
         return;
 
+    int raster_row = host.rasterRow;
+    int row_rotation =
+        omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
+    // The leading words in this layout are the pipeline suffix of the
+    // preceding logical scanline. Keep that association in the raw raster.
+    if (row_rotation && host.rasterX < row_rotation) {
+        if (raster_row == 0) {
+            host.rasterX += 16;
+            return;
+        }
+        raster_row--;
+    }
+
     uint32_t* pixbuff = (uint32_t*)host.pixels;
-    uint32_t *line = &pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX];
+    uint32_t *line = &pixbuff[raster_row * HOST_RASTER_W + host.rasterX];
     hiresPlanar2Chunky(line, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
     host.rasterX += 16;
     return;
