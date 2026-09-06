@@ -161,10 +161,10 @@ HIRES, LORES, and HAM planar conversion now live in the shared
 of carrying byte-for-byte copies in their host backends.
 
 Framebuffer presentation now lives in shared `src/Presentation.c`. Clipping,
-LORES row selection, scanline expansion, wrapped-prefix repair, aspect mapping,
-and raster clearing therefore have one implementation for native and RP2350
-builds. Each host backend retains only platform-specific frame submission and
-lifecycle work.
+LORES row selection, scanline expansion, wrapped-prefix repair, wrapped-row
+centering, and raster clearing therefore have one implementation for native
+and RP2350 builds. Each host backend retains only platform-specific frame
+submission and lifecycle work.
 
 The shared presentation code names its display-layout signatures, row
 rotation, wrapped-prefix width, and OCS vertical-bank size rather than
@@ -332,9 +332,11 @@ regression logs retain the runner-level information needed for failures.
   correctly (`(int16_t)value >> 1`).
   The native/RP2350 host presentation step now separates the raw DMA raster
   from the displayed framebuffer, clips fetch-pipeline overscan, and doubles
-  visible scanlines. It then maps the Amiga HIRES pixel aspect at 27:32 and
-  selects the centred 400-line region of the 480-line viewport. Normal and
-  vertically wrapped display windows use their appropriate horizontal origins.
+  visible scanlines. Narrow HIRES screens retain their native horizontal pixels
+  rather than passing through the former lossy 27:32 reduction, which had
+  compressed complete requester artwork and discarded columns from text.
+  Vertically wrapped fetch rows discard their raw 40-pixel left origin after
+  prefix reconstruction, keeping the complete logical row centred on-screen.
   This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset

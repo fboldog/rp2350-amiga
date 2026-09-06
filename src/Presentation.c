@@ -116,27 +116,17 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
                 row[x] = border;
             memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         }
-    }
 
-    // Map 32 Amiga HIRES beam pixels to 27 square host pixels.  Wrapped
-    // scanlines have already moved their fetch prefix to the right edge, so
-    // their presentation origin differs from an ordinary display window.
-    int x_offset = reconstruct_wrapped_fetch_rows
-                 ? HOST_WRAP_X_OFFSET : HOST_NORMAL_X_OFFSET;
-    if (x_offset == HOST_WRAP_X_OFFSET)
-        x_offset = OMEGA_VIDEO_WRAP_X_OFFSET;
-    uint32_t *scaled = render_fb;
-    int first_content_y = HOST_CONTENT_Y - viewport_y_offset;
-    if (first_content_y < 0) first_content_y = 0;
-    for (int y = first_content_y; y < SCREEN_H; ++y) {
-        uint32_t *row = &fb[y * SCREEN_W];
-        for (int x = 0; x < SCREEN_W; ++x) scaled[x] = border;
-        int scaled_w = SCREEN_W * HOST_ASPECT_X_NUM / HOST_ASPECT_X_DEN;
-        for (int dx = 0; dx < scaled_w; ++dx) {
-            int sx = dx * HOST_ASPECT_X_DEN / HOST_ASPECT_X_NUM;
-            scaled[x_offset + dx] = row[sx];
+        // Prefix reconstruction works in raw fetch coordinates. Once the
+        // pipeline prefix is moved to the right edge, remove the visible
+        // raster's left origin so the complete logical row remains on-screen.
+        for (int y = 0; y < SCREEN_H; ++y) {
+            uint32_t *row = &fb[y * SCREEN_W];
+            memmove(row, row + HOST_VISIBLE_X0,
+                    (SCREEN_W - HOST_VISIBLE_X0) * sizeof(uint32_t));
+            for (int x = SCREEN_W - HOST_VISIBLE_X0; x < SCREEN_W; ++x)
+                row[x] = border;
         }
-        memcpy(row, scaled, SCREEN_W * sizeof(uint32_t));
     }
 
 frame_ready:
