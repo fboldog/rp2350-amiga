@@ -765,6 +765,10 @@ void dma_execute(){
         // at it for display only; do not advance any bitplane pointer.
         hiresDisplayPrefetch();
 
+        if (bitplaneLine.fetchedMask != 0 && host.rasterRow >= 0 &&
+            host.rasterRow < HOST_RASTER_H)
+            host.rasterLineWidth[host.rasterRow] = (uint16_t)host.rasterX;
+
         internal.hPos = 0;
         internal.vPos +=1;
         CIATODEvent(&CIAB);

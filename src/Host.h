@@ -45,6 +45,7 @@ typedef struct {
     int rasterX;    // destination pixel within rasterRow
     int vblCount;   // vertical blank counter
     int displayIsLores; // mode used by the most recently rendered bitplane row
+    uint16_t rasterLineWidth[HOST_RASTER_H];
 
     // Pointer to the 32-bit ARGB framebuffer in PSRAM
     void *pixels;

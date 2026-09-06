@@ -244,6 +244,9 @@ geometry rather than Kickstart identity; code comments use the same generic
 terminology. The current selector is nevertheless indirect: a vertical
 256-line DIW-bank crossing enables horizontal fetch-row reconstruction. This
 coupling is named explicitly until it can be replaced by raw-raster metadata.
+The DMA renderer now records the produced pixel width of every fetched raster
+row before presentation and clears those widths with the raw frame. This is
+initially observational state for replacing the indirect selector safely.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to

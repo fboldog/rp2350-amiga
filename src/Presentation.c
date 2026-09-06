@@ -150,4 +150,5 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
 frame_ready:
     for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
         render_fb[i] = border;
+    memset(host.rasterLineWidth, 0, sizeof(host.rasterLineWidth));
 }
