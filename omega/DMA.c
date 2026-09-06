@@ -617,6 +617,7 @@ static uint8_t lastFetchedMask;
 static uint8_t pointerHighWrittenSinceFetch;
 static uint8_t pointerLowWrittenSinceFetch;
 static uint8_t pointerReloadedSinceFetch;
+static uint32_t pointerReloadPosition[8];
 static uint32_t copperWaitPosition = 0;
 
 static void resetBitplaneLine(void) {
@@ -654,12 +655,15 @@ static void markBitplaneFetched(unsigned plane) {
     pointerHighWrittenSinceFetch &= (uint8_t)~planeMask;
     pointerLowWrittenSinceFetch &= (uint8_t)~planeMask;
     pointerReloadedSinceFetch &= (uint8_t)~planeMask;
+    pointerReloadPosition[plane - 1] = UINT32_MAX;
 }
 
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
     if (plane >= 1 && plane <= 8) {
         uint8_t planeMask = (uint8_t)(1u << (plane - 1));
         int wasReloaded = (bitplaneLine.pointerReloadMask & planeMask) != 0;
+        int wasReloadedSinceFetch =
+            (pointerReloadedSinceFetch & planeMask) != 0;
         if (highWord)
             bitplaneLine.pointerHighWriteMask |= planeMask;
         else
@@ -670,6 +674,10 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
             pointerLowWrittenSinceFetch |= planeMask;
         pointerReloadedSinceFetch = pointerHighWrittenSinceFetch &
                                     pointerLowWrittenSinceFetch;
+        if (!wasReloadedSinceFetch &&
+            (pointerReloadedSinceFetch & planeMask))
+            pointerReloadPosition[plane - 1] =
+                ((uint32_t)internal.vPos << 8) | (uint8_t)internal.hPos;
         bitplaneLine.pointerReloadMask = bitplaneLine.pointerHighWriteMask &
                                          bitplaneLine.pointerLowWriteMask;
         if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask)) {

@@ -244,6 +244,9 @@ Each completion is classified as occurring before, during, or after the active
 DDF interval for its scanline. Separate persistent high/low masks survive
 scanline reset, recognizing pointer reloads whose two word writes straddle a
 line boundary; that history clears only when the corresponding plane fetches.
+The beam position of the first complete persistent reload is retained until
+that fetch, allowing blank-line fallback use to be correlated with the reload
+that preceded it.
 
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
 members that actually fetched, so an unfetched sibling pointer no longer
