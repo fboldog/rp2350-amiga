@@ -631,74 +631,74 @@ void aud3dat(uint16_t value){
 
 void bpl1pth(uint16_t value){
     chipset.bpl1pt = (value << 15) | (chipset.bpl1pt & 0x00007FFF); //this is only shifted by 15 because all bitplane addresses are word aligend
-    dmaBitplanePointerWrite(1);
+    dmaBitplanePointerWrite(1, 1);
 }
 void bpl1ptl(uint16_t value){
     chipset.bpl1pt = (value >> 1)  | (chipset.bpl1pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(1);
+    dmaBitplanePointerWrite(1, 0);
 }
 
 void bpl2pth(uint16_t value){
     chipset.bpl2pt = (value << 15) | (chipset.bpl2pt & 0x00007FFF);
-    dmaBitplanePointerWrite(2);
+    dmaBitplanePointerWrite(2, 1);
 }
 void bpl2ptl(uint16_t value){
     chipset.bpl2pt = (value >> 1)  | (chipset.bpl2pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(2);
+    dmaBitplanePointerWrite(2, 0);
 }
 
 void bpl3pth(uint16_t value){
     chipset.bpl3pt = (value << 15) | (chipset.bpl3pt & 0x00007FFF);
-    dmaBitplanePointerWrite(3);
+    dmaBitplanePointerWrite(3, 1);
 }
 void bpl3ptl(uint16_t value){
     chipset.bpl3pt = (value >> 1)  | (chipset.bpl3pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(3);
+    dmaBitplanePointerWrite(3, 0);
 }
 
 void bpl4pth(uint16_t value){
     chipset.bpl4pt = (value << 15) | (chipset.bpl4pt & 0x00007FFF);
-    dmaBitplanePointerWrite(4);
+    dmaBitplanePointerWrite(4, 1);
 }
 void bpl4ptl(uint16_t value){
     chipset.bpl4pt = (value >> 1)  | (chipset.bpl4pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(4);
+    dmaBitplanePointerWrite(4, 0);
 }
 
 void bpl5pth(uint16_t value){
     chipset.bpl5pt = (value << 15) | (chipset.bpl5pt & 0x00007FFF);
-    dmaBitplanePointerWrite(5);
+    dmaBitplanePointerWrite(5, 1);
 }
 void bpl5ptl(uint16_t value){
     chipset.bpl5pt = (value >> 1)  | (chipset.bpl5pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(5);
+    dmaBitplanePointerWrite(5, 0);
 }
 
 void bpl6pth(uint16_t value){
     chipset.bpl6pt = (value << 15) | (chipset.bpl6pt & 0x00007FFF);
-    dmaBitplanePointerWrite(6);
+    dmaBitplanePointerWrite(6, 1);
 }
 void bpl6ptl(uint16_t value){
     chipset.bpl6pt = (value >> 1)  | (chipset.bpl6pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(6);
+    dmaBitplanePointerWrite(6, 0);
 }
 
 void bpl7pth(uint16_t value){
     chipset.bpl7pt = (value << 15) | (chipset.bpl7pt & 0x00007FFF);
-    dmaBitplanePointerWrite(7);
+    dmaBitplanePointerWrite(7, 1);
 }
 void bpl7ptl(uint16_t value){
     chipset.bpl7pt = (value >> 1)  | (chipset.bpl7pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(7);
+    dmaBitplanePointerWrite(7, 0);
 }
 
 void bpl8pth(uint16_t value){
     chipset.bpl8pt = (value << 15) | (chipset.bpl8pt & 0x00007FFF);
-    dmaBitplanePointerWrite(8);
+    dmaBitplanePointerWrite(8, 1);
 }
 void bpl8ptl(uint16_t value){
     chipset.bpl8pt = (value >> 1)  | (chipset.bpl8pt & 0xFFFF8000);
-    dmaBitplanePointerWrite(8);
+    dmaBitplanePointerWrite(8, 0);
 }
 
 void bplcon0(uint16_t value){

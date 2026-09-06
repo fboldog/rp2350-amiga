@@ -588,7 +588,8 @@ typedef struct {
     int hiresWords;
     int loresWords;
     uint8_t fetchedMask;
-    uint8_t pointerWriteMask;
+    uint8_t pointerHighWriteMask;
+    uint8_t pointerLowWriteMask;
 } BitplaneLineState;
 
 static BitplaneLineState bitplaneLine;
@@ -598,12 +599,18 @@ static void resetBitplaneLine(void) {
     bitplaneLine.hiresWords = 0;
     bitplaneLine.loresWords = 0;
     bitplaneLine.fetchedMask = 0;
-    bitplaneLine.pointerWriteMask = 0;
+    bitplaneLine.pointerHighWriteMask = 0;
+    bitplaneLine.pointerLowWriteMask = 0;
 }
 
-void dmaBitplanePointerWrite(unsigned plane) {
-    if (plane >= 1 && plane <= 8)
-        bitplaneLine.pointerWriteMask |= (uint8_t)(1u << (plane - 1));
+void dmaBitplanePointerWrite(unsigned plane, int highWord) {
+    if (plane >= 1 && plane <= 8) {
+        uint8_t planeMask = (uint8_t)(1u << (plane - 1));
+        if (highWord)
+            bitplaneLine.pointerHighWriteMask |= planeMask;
+        else
+            bitplaneLine.pointerLowWriteMask |= planeMask;
+    }
 }
 
 static void advanceBitplanePointers(void) {

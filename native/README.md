@@ -206,7 +206,9 @@ be timed independently.
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
 correlate pointer reloads with the planes that fetched before blank-line
-compatibility advancement is removed.
+compatibility advancement is removed. High- and low-word writes are recorded
+separately, so a complete pointer reload can be distinguished from an update
+to only half of a pointer.
 
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
 groups that actually fetched. Fully blank lines retain compatibility

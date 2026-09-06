@@ -18,7 +18,7 @@
 #include <stdio.h>
 
 void dma_execute();
-void dmaBitplanePointerWrite(unsigned plane);
+void dmaBitplanePointerWrite(unsigned plane, int highWord);
 int copperExecute();
 int blitterExecute();
 
