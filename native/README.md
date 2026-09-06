@@ -203,6 +203,11 @@ Partial Copper transition lines can therefore distinguish odd-plane and
 even-plane activity, which is necessary before their two modulo registers can
 be timed independently.
 
+Bitplane pointer register writes are tracked per plane and per scanline. Both
+CPU and Copper writes pass through the same register handlers, allowing DMA to
+correlate pointer reloads with the planes that fetched before blank-line
+compatibility advancement is removed.
+
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
 groups that actually fetched. Fully blank lines retain compatibility
 advancement at the scanline boundary. Applying modulo at the emulated terminal
