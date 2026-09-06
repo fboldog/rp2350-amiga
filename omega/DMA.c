@@ -669,6 +669,25 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
     }
 }
 
+static void applyBitplaneModulo(uint8_t planes) {
+    if (planes & 0x01)
+        chipset.bpl1pt += chipset.bpl1mod;
+    if (planes & 0x02)
+        chipset.bpl2pt += chipset.bpl2mod;
+    if (planes & 0x04)
+        chipset.bpl3pt += chipset.bpl1mod;
+    if (planes & 0x08)
+        chipset.bpl4pt += chipset.bpl2mod;
+    if (planes & 0x10)
+        chipset.bpl5pt += chipset.bpl1mod;
+    if (planes & 0x20)
+        chipset.bpl6pt += chipset.bpl2mod;
+    if (planes & 0x40)
+        chipset.bpl7pt += chipset.bpl1mod;
+    if (planes & 0x80)
+        chipset.bpl8pt += chipset.bpl2mod;
+}
+
 static void advanceBitplanePointers(void) {
     uint8_t fetched = bitplaneLine.fetchedMask;
 
@@ -693,22 +712,7 @@ static void advanceBitplanePointers(void) {
         fetched &= (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
     }
 
-    if (fetched & 0x01)
-        chipset.bpl1pt += chipset.bpl1mod;
-    if (fetched & 0x02)
-        chipset.bpl2pt += chipset.bpl2mod;
-    if (fetched & 0x04)
-        chipset.bpl3pt += chipset.bpl1mod;
-    if (fetched & 0x08)
-        chipset.bpl4pt += chipset.bpl2mod;
-    if (fetched & 0x10)
-        chipset.bpl5pt += chipset.bpl1mod;
-    if (fetched & 0x20)
-        chipset.bpl6pt += chipset.bpl2mod;
-    if (fetched & 0x40)
-        chipset.bpl7pt += chipset.bpl1mod;
-    if (fetched & 0x80)
-        chipset.bpl8pt += chipset.bpl2mod;
+    applyBitplaneModulo(fetched);
 }
 
 static uint8_t enabledBitplaneMask(void) {

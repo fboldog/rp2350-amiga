@@ -244,6 +244,9 @@ pre-fetch reload suppresses fallback advancement only for that active plane;
 unrelated pointers in the same modulo group are unaffected. Applying modulo
 at the emulated terminal fetch slot was tested and rejected for now because it
 shifted the extra right-edge fetch used by the Kickstart 2.04 requester.
+Modulo policy selection and pointer mutation are now separate internal steps,
+so a future timing change can relocate application without duplicating the
+per-plane and compatibility rules.
 
 The shared layout definitions also name the raster origin at beam line 43 and
 the first LORES render line at 44. LORES and HIRES positioning now refer to
