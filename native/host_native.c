@@ -43,7 +43,6 @@ void hostInit(void) {
     host.pixels    = render_fb;
     host.rasterRow = 0;
     host.rasterX   = 0;
-    host.vblCount  = 0;
     host.displayIsLores = 0;
     printf("Host init (native): framebuffer %p (%dx%d ARGB)\n",
            (void *)fb, SCREEN_W, SCREEN_H);

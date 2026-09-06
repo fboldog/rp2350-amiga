@@ -38,7 +38,6 @@
 typedef struct {
     int rasterRow;  // destination row in the intermediate DMA raster
     int rasterX;    // destination pixel within rasterRow
-    int vblCount;   // vertical blank counter
     int displayIsLores; // mode used by the most recently rendered bitplane row
 
     // Pointer to the 32-bit ARGB framebuffer in PSRAM

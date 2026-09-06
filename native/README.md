@@ -305,6 +305,10 @@ custom-register hot paths. Per-line HIRES, `BPLCON0`, and modulo writes no
 longer add console I/O or timing noise during normal emulation; screenshot
 regression logs retain the runner-level information needed for failures.
 
+The unused host-side `vblCount` member and its native/RP2350 initializations
+have been removed. Native frame counting remains in the native runner's
+separate `native_frame_counter` state.
+
 ## Status (2026-09-05)
 
 - Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
@@ -355,8 +359,11 @@ Presentation paths clear their intermediate raster explicitly through a shared
 fill helper; the former label-and-`goto` cleanup exit is no longer needed. The
 same helper fills the translated wrapped row's trailing border, leaving that
 operation entirely segment-based. All presentation paths also use one shared
-scanline-duplication helper for their 2× vertical output.
+  scanline-duplication helper for their 2× vertical output.
   This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
+  A brief top-line square flash can still occur when the 2.04 disk animation
+  starts; this transient fetch-data issue is deferred and is not hidden by
+  presentation code.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
   slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the

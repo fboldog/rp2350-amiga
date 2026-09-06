@@ -90,7 +90,6 @@ void hostInit(void) {
     host.pixels   = render_fb;
     host.rasterRow = 0;
     host.rasterX   = 0;
-    host.vblCount  = 0;
     host.displayIsLores = 0;
     memset(fb, 0, SCREEN_W * SCREEN_H * sizeof(uint32_t));
     memset(render_fb, 0, HOST_RASTER_PIXELS * sizeof(uint32_t));

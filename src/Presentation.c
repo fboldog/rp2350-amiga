@@ -54,10 +54,9 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // around to the opposite edge.
     fillPixels(fb, SCREEN_W * SCREEN_H, border);
 
-    // A full-width HIRES fetch is stored by the DMA renderer as 320 packed
-    // samples per scanline. Present each sample twice horizontally and each
-    // scanline twice vertically. Narrow wrapped fetch windows use the pipeline
-    // reconstruction path below.
+    // Full-width fetches already occupy a native 640-pixel raster row. Present
+    // each logical scanline twice vertically. Narrow wrapped fetch windows use
+    // the pipeline reconstruction path below.
     if (omegaDdfIsFullWidth(chipset.ddfstrt)) {
         int row_rotation =
             omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
