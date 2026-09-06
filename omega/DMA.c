@@ -583,6 +583,13 @@ void waitFreeSlot(){
 #endif
 }
 
+typedef enum {
+    BITPLANE_RELOAD_NONE,
+    BITPLANE_RELOAD_BEFORE_FETCH,
+    BITPLANE_RELOAD_DURING_FETCH,
+    BITPLANE_RELOAD_AFTER_FETCH
+} BitplaneReloadPhase;
+
 typedef struct {
     int lastCycle;
     int hiresWords;
@@ -592,6 +599,7 @@ typedef struct {
     uint8_t pointerLowWriteMask;
     uint8_t pointerReloadMask;
     uint8_t pointerReloadCycle[8];
+    uint8_t pointerReloadPhase[8];
 } BitplaneLineState;
 
 static BitplaneLineState bitplaneLine;
@@ -604,8 +612,10 @@ static void resetBitplaneLine(void) {
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
     bitplaneLine.pointerReloadMask = 0;
-    for (unsigned plane = 0; plane < 8; plane++)
+    for (unsigned plane = 0; plane < 8; plane++) {
         bitplaneLine.pointerReloadCycle[plane] = 0xff;
+        bitplaneLine.pointerReloadPhase[plane] = BITPLANE_RELOAD_NONE;
+    }
 }
 
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
@@ -618,9 +628,19 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
             bitplaneLine.pointerLowWriteMask |= planeMask;
         bitplaneLine.pointerReloadMask = bitplaneLine.pointerHighWriteMask &
                                          bitplaneLine.pointerLowWriteMask;
-        if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask))
+        if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask)) {
             bitplaneLine.pointerReloadCycle[plane - 1] =
                 (uint8_t)internal.hPos;
+            if (internal.hPos < chipset.ddfstrt)
+                bitplaneLine.pointerReloadPhase[plane - 1] =
+                    BITPLANE_RELOAD_BEFORE_FETCH;
+            else if (internal.hPos <= bitplaneLine.lastCycle)
+                bitplaneLine.pointerReloadPhase[plane - 1] =
+                    BITPLANE_RELOAD_DURING_FETCH;
+            else
+                bitplaneLine.pointerReloadPhase[plane - 1] =
+                    BITPLANE_RELOAD_AFTER_FETCH;
+        }
     }
 }
 

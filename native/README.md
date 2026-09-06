@@ -213,6 +213,8 @@ were written during the same scanline; this remains observational until it is
 used to narrow the blank-line compatibility path. The horizontal beam cycle
 of the first complete reload is also retained, allowing later logic to relate
 the reload to the DDF fetch window instead of treating every reload equally.
+Each completion is classified as occurring before, during, or after the active
+DDF interval for its scanline.
 
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
 groups that actually fetched. Fully blank lines retain compatibility
