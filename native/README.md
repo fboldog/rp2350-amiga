@@ -220,6 +220,10 @@ capacity—four planes in HIRES and six in LORES—so every consumer sees one
 supported mask. Fetch eligibility uses that decoded mask directly instead of
 independently interpreting raw register bits.
 
+Zero-plane `BPLCON0` no longer requires an early return in `bitplaneActive()`.
+The former Workbench-specific guard became redundant after display mode state
+was separated from blanking and has been removed without changing output.
+
 The final DDF cycle explicitly snapshots the completed per-plane fetch mask.
 This provides a stable completion hook for relocating modulo timing later,
 without yet changing the scanline-boundary application used by rendering. The

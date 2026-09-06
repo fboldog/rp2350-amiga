@@ -997,13 +997,6 @@ void spriteCycle(void){
 
 
 int bitplaneActive(){
-    // BPLCON0 with zero planes is display blanking, not a LORES DMA fetch.
-    // Letting it enter the LORES table overwrites the remembered frame mode
-    // at the end of a HIRES Workbench field and makes presentation skip every
-    // second rendered row.
-    if (internal.bitplaneMask == 0)
-        return 0;
-    
     //check if DMA is on, if not let the Copper and Blitter run.
     if((chipset.dmaconr & 0x300) != 0x300){
         return 0;
