@@ -219,7 +219,9 @@ modulo advancement before the first observed bitplane fetch.
 
 The final DDF cycle explicitly snapshots the completed per-plane fetch mask.
 This provides a stable completion hook for relocating modulo timing later,
-without yet changing the scanline-boundary application used by rendering.
+without yet changing the scanline-boundary application used by rendering. The
+corresponding HIRES pointers for planes 1–4 are captured at the same boundary,
+separating the fetched line from any later Copper pointer writes.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to

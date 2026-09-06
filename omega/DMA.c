@@ -602,6 +602,7 @@ typedef struct {
     uint8_t completedFetchMask;
     uint8_t fetchWindowComplete;
     uint8_t lastFetchCycle[8];
+    uint32_t pointerAtFetchCompletion[4];
     uint8_t lastOddFetchCycle;
     uint8_t lastEvenFetchCycle;
     uint8_t pointerHighWriteMask;
@@ -635,6 +636,8 @@ static void resetBitplaneLine(void) {
         bitplaneLine.pointerReloadCycle[plane] = 0xff;
         bitplaneLine.pointerReloadPhase[plane] = BITPLANE_RELOAD_NONE;
     }
+    for (unsigned plane = 0; plane < 4; plane++)
+        bitplaneLine.pointerAtFetchCompletion[plane] = 0;
 }
 
 static void markBitplaneFetched(unsigned plane) {
@@ -790,6 +793,10 @@ void dma_execute(){
     if (internal.hPos == bitplaneLine.lastCycle) {
         bitplaneLine.completedFetchMask = bitplaneLine.fetchedMask;
         bitplaneLine.fetchWindowComplete = 1;
+        bitplaneLine.pointerAtFetchCompletion[0] = chipset.bpl1pt;
+        bitplaneLine.pointerAtFetchCompletion[1] = chipset.bpl2pt;
+        bitplaneLine.pointerAtFetchCompletion[2] = chipset.bpl3pt;
+        bitplaneLine.pointerAtFetchCompletion[3] = chipset.bpl4pt;
     }
 
     eclock_execute(&chipset);   // CIA timers
