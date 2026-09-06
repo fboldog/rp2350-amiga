@@ -59,11 +59,10 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
         int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
         if (dy < 0 || dy + 1 >= SCREEN_H)
             continue;
-        for (int x = HOST_VISIBLE_X0; x < HOST_VISIBLE_X1; ++x) {
-            int sx = HOST_FETCH_LEAD + x;
-            uint32_t pixel = render_fb[sy * HOST_RASTER_W + sx];
-            fb[dy * SCREEN_W + x] = pixel;
-        }
+        memcpy(&fb[dy * SCREEN_W + HOST_VISIBLE_X0],
+               &render_fb[sy * HOST_RASTER_W + HOST_FETCH_LEAD +
+                          HOST_VISIBLE_X0],
+               (HOST_VISIBLE_X1 - HOST_VISIBLE_X0) * sizeof(uint32_t));
 
         memcpy(&fb[(dy + 1) * SCREEN_W], &fb[dy * SCREEN_W],
                SCREEN_W * sizeof(uint32_t));

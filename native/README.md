@@ -340,7 +340,9 @@ regression logs retain the runner-level information needed for failures.
 Vertically wrapped fetch rows discard their raw 40-pixel left origin after
 prefix reconstruction, keeping the complete logical row centred on-screen.
 Prefix clearing and centering are performed together per logical scanline,
-avoiding a redundant traversal of the complete framebuffer.
+avoiding a redundant traversal of the complete framebuffer. The normal narrow
+raster span is contiguous and is copied as one bounded row segment rather than
+through a per-pixel loop.
   This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
