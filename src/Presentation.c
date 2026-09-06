@@ -10,10 +10,6 @@ enum {
     WRAPPED_PREFIX_PIXELS = 48,
 };
 
-static int isFullWidthDisplay(void) {
-    return omegaDdfIsFullWidth(chipset.ddfstrt);
-}
-
 void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     const uint32_t border = internal.palette[0];
     const int diw_start = omegaDiwVerticalStart(chipset.diwstrt);
@@ -32,7 +28,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // samples per scanline. Present each sample twice horizontally and each
     // scanline twice vertically. Narrow wrapped fetch windows use the pipeline
     // reconstruction path below.
-    if (isFullWidthDisplay()) {
+    if (omegaDdfIsFullWidth(chipset.ddfstrt)) {
         int row_rotation =
             omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
         // This full-width LORES layout already advances two beam rows for

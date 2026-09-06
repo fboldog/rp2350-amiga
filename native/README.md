@@ -179,7 +179,8 @@ DDF layout signatures shared by DMA and presentation are defined in
 layout, and the rotated Workbench 3.14 layout can no longer drift between the
 two stages. Full-width presentation now follows DDF geometry alone; the former
 additional dependency on an early DIW vertical start was redundant and has
-been removed.
+been removed. Presentation calls the shared DDF predicate directly instead of
+wrapping it in another local screen-shape helper.
 
 The same layout header also names the normal and extra-word HIRES fetch tails,
 the LORES fetch span, and the two upper-overscan offsets. DMA no longer embeds
