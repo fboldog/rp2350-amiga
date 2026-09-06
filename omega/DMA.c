@@ -600,6 +600,8 @@ typedef struct {
     uint8_t fetchEligibleMask;
     uint8_t fetchedMask;
     uint8_t lastFetchCycle[8];
+    uint8_t lastOddFetchCycle;
+    uint8_t lastEvenFetchCycle;
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
     uint8_t pointerReloadMask;
@@ -619,6 +621,8 @@ static void resetBitplaneLine(void) {
     bitplaneLine.enabledMask = 0;
     bitplaneLine.fetchEligibleMask = 0;
     bitplaneLine.fetchedMask = 0;
+    bitplaneLine.lastOddFetchCycle = 0xff;
+    bitplaneLine.lastEvenFetchCycle = 0xff;
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
     bitplaneLine.pointerReloadMask = 0;
@@ -633,6 +637,10 @@ static void markBitplaneFetched(unsigned plane) {
     uint8_t planeMask = (uint8_t)(1u << (plane - 1));
     bitplaneLine.fetchedMask |= planeMask;
     bitplaneLine.lastFetchCycle[plane - 1] = (uint8_t)internal.hPos;
+    if (plane & 1)
+        bitplaneLine.lastOddFetchCycle = (uint8_t)internal.hPos;
+    else
+        bitplaneLine.lastEvenFetchCycle = (uint8_t)internal.hPos;
 }
 
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
