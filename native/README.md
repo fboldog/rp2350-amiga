@@ -217,6 +217,10 @@ fully ineligible lines reuse the most recently fetched plane set. The legacy
 all-plane startup fallback has been removed, so no pointer receives speculative
 modulo advancement before the first observed bitplane fetch.
 
+The final DDF cycle explicitly snapshots the completed per-plane fetch mask.
+This provides a stable completion hook for relocating modulo timing later,
+without yet changing the scanline-boundary application used by rendering.
+
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
 correlate pointer reloads with the planes that fetched before blank-line
