@@ -594,6 +594,7 @@ typedef struct {
     int lastCycle;
     int hiresWords;
     int loresWords;
+    uint8_t enabledMask;
     uint8_t fetchedMask;
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
@@ -608,6 +609,7 @@ static uint32_t copperWaitPosition = 0;
 static void resetBitplaneLine(void) {
     bitplaneLine.hiresWords = 0;
     bitplaneLine.loresWords = 0;
+    bitplaneLine.enabledMask = 0;
     bitplaneLine.fetchedMask = 0;
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
@@ -689,6 +691,11 @@ static void advanceBitplanePointers(void) {
     }
 }
 
+static uint8_t enabledBitplaneMask(void) {
+    unsigned planeCount = (chipset.bplcon0 >> 12) & 7;
+    return planeCount == 0 ? 0 : (uint8_t)((1u << planeCount) - 1u);
+}
+
 static int displayWindowContainsLine(int vpos) {
     int start = chipset.diwstrt >> 8;
     // On OCS the missing ninth comparator bits are fixed: VSTART8 is zero and
@@ -725,6 +732,7 @@ void dma_execute(){
     chipset.vposr   = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
     chipset.vhposr  = internal.vPos << 8;
     chipset.vhposr |= internal.hPos;
+    bitplaneLine.enabledMask |= enabledBitplaneMask();
     
 
     // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
