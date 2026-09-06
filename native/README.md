@@ -238,7 +238,8 @@ CPU and Copper writes pass through the same register handlers, allowing DMA to
 correlate pointer reloads with the planes that fetched before blank-line
 compatibility advancement is removed. High- and low-word writes are recorded
 separately, so completeness is derived directly from their intersection rather
-than stored in a redundant third mask. Only completions before DDF affect the
+than stored in a redundant third mask or transition state. Repeated complete
+writes are idempotent. Only completions before DDF affect the
 blank-line policy, so they are retained in one bitmask rather than a per-plane
 phase array; unused during/after classifications were removed. Cross-scanline
 reload diagnostics were also tested and removed after they proved the fallback

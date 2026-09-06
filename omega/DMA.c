@@ -623,15 +623,12 @@ static void markBitplaneFetched(unsigned plane) {
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
     if (plane >= 1 && plane <= 8) {
         uint8_t planeMask = (uint8_t)(1u << (plane - 1));
-        int wasReloaded = ((bitplaneLine.pointerHighWriteMask &
-                            bitplaneLine.pointerLowWriteMask) & planeMask) != 0;
         if (highWord)
             bitplaneLine.pointerHighWriteMask |= planeMask;
         else
             bitplaneLine.pointerLowWriteMask |= planeMask;
-        int isReloaded = ((bitplaneLine.pointerHighWriteMask &
-                           bitplaneLine.pointerLowWriteMask) & planeMask) != 0;
-        if (!wasReloaded && isReloaded &&
+        if ((bitplaneLine.pointerHighWriteMask &
+             bitplaneLine.pointerLowWriteMask & planeMask) != 0 &&
             internal.hPos < chipset.ddfstrt)
             bitplaneLine.pointerReloadBeforeFetchMask |= planeMask;
     }
