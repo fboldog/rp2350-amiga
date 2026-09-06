@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "VideoStandard.h"
 
 enum {
     OMEGA_DDF_FULL_WIDTH_LIMIT = 0x40,
@@ -28,6 +29,16 @@ static inline int omegaDiwVerticalStart(uint16_t diwstrt) {
 
 static inline int omegaDiwVerticalStop(uint16_t diwstop) {
     return 0x100 | (diwstop >> 8);
+}
+
+static inline int omegaDiwCrossesVerticalBank(uint16_t diwstrt,
+                                               uint16_t diwstop) {
+    int start = omegaDiwVerticalStart(diwstrt);
+    int stopLow = diwstop >> 8;
+    int stop = omegaDiwVerticalStop(diwstop);
+    return stopLow < start ||
+           (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
+            stop <= OMEGA_VIDEO_FRAME_LINES);
 }
 
 static inline int omegaDdfNeedsExtraWord(uint16_t start, uint16_t stop) {

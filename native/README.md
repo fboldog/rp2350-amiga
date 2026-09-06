@@ -246,7 +246,9 @@ terminology. The current selector is nevertheless indirect: a vertical
 coupling is named explicitly. Raw raster-row width was tested as an alternative
 selector, but both 2.04 and 3.1.4 requesters produce 145 rows of 624 pixels, so
 the insufficient diagnostic state was removed. DMA and presentation now share
-the OCS ninth-bit decoding of DIW vertical start and stop values.
+the OCS ninth-bit decoding of DIW vertical start and stop values. Vertical-bank
+crossing detection also lives in that shared layout layer; presentation no
+longer interprets raw DIW values to select requester reconstruction.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to

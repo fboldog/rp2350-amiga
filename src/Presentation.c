@@ -15,13 +15,6 @@ static int isFullWidthDisplay(int diw_start) {
            diw_start < EARLY_DISPLAY_LINE;
 }
 
-static int displayWindowCrossesVerticalBank(int diw_start, int diw_stop) {
-    int decoded_stop = omegaDiwVerticalStop(chipset.diwstop);
-    return diw_stop < diw_start ||
-           (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
-            decoded_stop <= OMEGA_VIDEO_FRAME_LINES);
-}
-
 void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     const uint32_t border = internal.palette[0];
     const int diw_start = omegaDiwVerticalStart(chipset.diwstrt);
@@ -80,9 +73,8 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     // The fetch pipeline places the next logical scanline's prefix after the
     // current line.  Rejoin such prefixes to a right-edge object, then remove
     // them from the following line's left edge.
-    int diw_stop = chipset.diwstop >> 8;
     int reconstruct_wrapped_fetch_rows =
-        displayWindowCrossesVerticalBank(diw_start, diw_stop);
+        omegaDiwCrossesVerticalBank(chipset.diwstrt, chipset.diwstop);
     for (int sy = 0;
          reconstruct_wrapped_fetch_rows && sy + 1 < HOST_RASTER_H; ++sy) {
         int dy = HOST_CONTENT_Y + sy * 2 - viewport_y_offset;
