@@ -674,11 +674,11 @@ static uint8_t enabledBitplaneMask(void) {
 }
 
 static int displayWindowContainsLine(int vpos) {
-    int start = chipset.diwstrt >> 8;
+    int start = omegaDiwVerticalStart(chipset.diwstrt);
     // On OCS the missing ninth comparator bits are fixed: VSTART8 is zero and
     // VSTOP8 is one. Thus the common DIWSTOP=$f4xx means line $1f4, not $0f4.
     // ECS/AGA DIWHIGH programmability is outside this OCS chipset model.
-    int stop = 0x100 | (chipset.diwstop >> 8);
+    int stop = omegaDiwVerticalStop(chipset.diwstop);
     return vpos >= start && vpos < stop;
 }
 
@@ -764,10 +764,6 @@ void dma_execute(){
         // though Agnus does not consume it as part of the line stride. Peek
         // at it for display only; do not advance any bitplane pointer.
         hiresDisplayPrefetch();
-
-        if (bitplaneLine.fetchedMask != 0 && host.rasterRow >= 0 &&
-            host.rasterRow < HOST_RASTER_H)
-            host.rasterLineWidth[host.rasterRow] = (uint16_t)host.rasterX;
 
         internal.hPos = 0;
         internal.vPos +=1;

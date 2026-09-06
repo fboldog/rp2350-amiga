@@ -22,6 +22,14 @@ static inline int omegaDdfIsFullWidth(uint16_t start) {
     return start < OMEGA_DDF_FULL_WIDTH_LIMIT;
 }
 
+static inline int omegaDiwVerticalStart(uint16_t diwstrt) {
+    return diwstrt >> 8;
+}
+
+static inline int omegaDiwVerticalStop(uint16_t diwstop) {
+    return 0x100 | (diwstop >> 8);
+}
+
 static inline int omegaDdfNeedsExtraWord(uint16_t start, uint16_t stop) {
     return start == OMEGA_DDF_EXTRA_WORD_START &&
            stop == OMEGA_DDF_EXTRA_WORD_STOP;

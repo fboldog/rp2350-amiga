@@ -8,7 +8,6 @@
 enum {
     EARLY_DISPLAY_LINE = 64,
     WRAPPED_PREFIX_PIXELS = 48,
-    OCS_VERTICAL_BANK_LINES = 256,
 };
 
 static int isFullWidthDisplay(int diw_start) {
@@ -17,14 +16,15 @@ static int isFullWidthDisplay(int diw_start) {
 }
 
 static int displayWindowCrossesVerticalBank(int diw_start, int diw_stop) {
+    int decoded_stop = omegaDiwVerticalStop(chipset.diwstop);
     return diw_stop < diw_start ||
            (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
-            diw_stop + OCS_VERTICAL_BANK_LINES <= OMEGA_VIDEO_FRAME_LINES);
+            decoded_stop <= OMEGA_VIDEO_FRAME_LINES);
 }
 
 void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     const uint32_t border = internal.palette[0];
-    const int diw_start = chipset.diwstrt >> 8;
+    const int diw_start = omegaDiwVerticalStart(chipset.diwstrt);
     const int viewport_y_offset =
         (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
          diw_start < EARLY_DISPLAY_LINE)
@@ -150,5 +150,4 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
 frame_ready:
     for (int i = 0; i < HOST_RASTER_PIXELS; ++i)
         render_fb[i] = border;
-    memset(host.rasterLineWidth, 0, sizeof(host.rasterLineWidth));
 }
