@@ -590,6 +590,7 @@ typedef struct {
     uint8_t fetchedMask;
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
+    uint8_t pointerReloadMask;
 } BitplaneLineState;
 
 static BitplaneLineState bitplaneLine;
@@ -601,6 +602,7 @@ static void resetBitplaneLine(void) {
     bitplaneLine.fetchedMask = 0;
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
+    bitplaneLine.pointerReloadMask = 0;
 }
 
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
@@ -610,6 +612,8 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
             bitplaneLine.pointerHighWriteMask |= planeMask;
         else
             bitplaneLine.pointerLowWriteMask |= planeMask;
+        bitplaneLine.pointerReloadMask = bitplaneLine.pointerHighWriteMask &
+                                         bitplaneLine.pointerLowWriteMask;
     }
 }
 

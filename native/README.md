@@ -208,7 +208,9 @@ CPU and Copper writes pass through the same register handlers, allowing DMA to
 correlate pointer reloads with the planes that fetched before blank-line
 compatibility advancement is removed. High- and low-word writes are recorded
 separately, so a complete pointer reload can be distinguished from an update
-to only half of a pointer.
+to only half of a pointer. A per-plane reload mask records when both words
+were written during the same scanline; this remains observational until it is
+used to narrow the blank-line compatibility path.
 
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
 groups that actually fetched. Fully blank lines retain compatibility
