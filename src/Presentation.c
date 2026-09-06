@@ -36,11 +36,10 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     for (int i = 0; i < SCREEN_W * SCREEN_H; ++i)
         fb[i] = border;
 
-    // A normal Workbench HIRES screen is stored by the DMA renderer as 320
-    // packed samples per scanline.  Present each sample twice horizontally
-    // and each scanline twice vertically.  The Kickstart artwork uses a
-    // narrower, wrapped fetch window and still needs the pipeline repair path
-    // below.
+    // A full-width HIRES fetch is stored by the DMA renderer as 320 packed
+    // samples per scanline. Present each sample twice horizontally and each
+    // scanline twice vertically. Narrow wrapped fetch windows use the pipeline
+    // reconstruction path below.
     if (isFullWidthDisplay(diw_start)) {
         int row_rotation =
             omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);

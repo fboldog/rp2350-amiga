@@ -237,6 +237,12 @@ end-of-line safety application and its double-advance mask have been removed;
 no-fetch compatibility advancement is the only modulo operation that remains
 at the scanline boundary.
 
+Narrow-window prefix reconstruction remains necessary for wrapped DIW/DDF
+layouts: removing it visibly moves the 3.1.4 requester’s right-edge graphics
+to the left side of the following row. The condition is based on display
+geometry rather than Kickstart identity; code comments use the same generic
+terminology.
+
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to
 correlate pointer reloads with the planes that fetched before blank-line

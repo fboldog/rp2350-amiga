@@ -724,9 +724,9 @@ void dma_execute(){
 
     // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
     if(chipset.bplcon0 & 0x8000){
-        // The standard 0x3c full-width window consumes one more word than the
-        // narrower 0x40 Kickstart-logo window.  The latter's right-edge word
-        // is supplied by hiresDisplayPrefetch() without changing its stride.
+        // The 0x3c full-width window consumes one more word than the narrower
+        // 0x40 fetch window. The latter's right-edge word is supplied by
+        // hiresDisplayPrefetch() without changing its stride.
         bitplaneLine.lastCycle = chipset.ddfstop +
             omegaDdfHiresFetchTail(chipset.ddfstrt, chipset.ddfstop);
         DMAHires[internal.hPos]();
@@ -1185,9 +1185,8 @@ void hiresPlane1(){
         bitplaneLine.hiresWords++;
     }
 
-    // The full-width Workbench raster begins 40 PAL beam lines below DIWSTRT.
-    // Remove that upper overscan so all 200 useful rows, including the lower
-    // window border, fit in the host scratch framebuffer.
+    // The full-width raster begins 40 PAL beam lines below DIWSTRT. Remove
+    // that upper overscan so all 200 useful rows fit in the host framebuffer.
     if (omegaDdfIsFullWidth(chipset.ddfstrt) &&
         bitplaneLine.hiresWords == 1) {
         int upper_overscan =
