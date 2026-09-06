@@ -127,6 +127,8 @@ use the same selected framebuffer dimensions. The RP2350 framebuffer remains
 640×400 because its fixed 8 MB PSRAM map reserves 1 MB for ARGB display output.
 
 PAL uses its own viewport origin and a full-height native intermediate raster.
+Video-standard viewport offsets are owned solely by `omega/VideoStandard.h`;
+the obsolete duplicate host offset has been removed.
 The full beam-row raster is required by full-width LORES copper displays such
 as the Kickstart 1.3 insert-disk requester: its logical picture rows occupy
 alternating beam rows. Presentation samples those rows once and then applies
