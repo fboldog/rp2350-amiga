@@ -219,7 +219,9 @@ Each completion is classified as occurring before, during, or after the active
 DDF interval for its scanline.
 
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
-groups that actually fetched. Fully blank lines retain compatibility
+members that actually fetched, so an unfetched sibling pointer no longer
+advances merely because another plane in its modulo group was active. Fully
+blank lines retain compatibility
 advancement at the scanline boundary, except when every active plane in a
 group completed a pointer reload before DDF. Requiring the full active group
 avoids treating a partial Copper pointer update as a reload of all odd or even
