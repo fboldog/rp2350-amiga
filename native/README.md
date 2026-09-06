@@ -203,15 +203,13 @@ Partial Copper transition lines can therefore distinguish odd-plane and
 even-plane activity, which is necessary before their two modulo registers can
 be timed independently. It also retains the union of planes enabled at any
 point during the line, separately from planes that actually fetched, so
-Copper mode changes are not reduced to the final `BPLCON0` value. Scanline
-state also records bitplane-DMA enablement and display-window activity
-independently, allowing a no-fetch line to be classified before the remaining
-compatibility advancement is narrowed further. Their conjunction is retained
-as a per-plane fetch-eligible mask, distinct from both merely enabled planes
-and planes for which a DMA word was observed. Real fetch marking is shared by
-all implemented OCS plane paths and records the final fetch cycle for each
-plane, plus the final observed cycles for the odd (`BPL1MOD`) and even
-(`BPL2MOD`) groups. On an otherwise eligible line
+Copper mode changes are not reduced to the final `BPLCON0` value. A per-plane
+fetch-eligible mask is accumulated while bitplane DMA and the display window
+are both active, distinct from both merely enabled planes and planes for which
+a DMA word was observed. Real fetch marking is shared by all implemented OCS
+plane paths. Obsolete per-plane/group cycle diagnostics and the redundant
+completed-fetch copy were removed once DDF completion could consume the live
+fetch mask directly. On an otherwise eligible line
 where no fetch occurs, fallback advancement is limited to that eligible set;
 fully ineligible lines reuse the most recently fetched plane set. The legacy
 all-plane startup fallback has been removed, so no pointer receives speculative

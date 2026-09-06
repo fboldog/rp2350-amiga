@@ -594,21 +594,14 @@ typedef struct {
     int lastCycle;
     int hiresWords;
     int loresWords;
-    uint8_t dmaEnabled;
-    uint8_t displayWindowActive;
     uint8_t enabledMask;
     uint8_t fetchEligibleMask;
     uint8_t fetchedMask;
-    uint8_t completedFetchMask;
     uint8_t fetchWindowComplete;
-    uint8_t lastFetchCycle[8];
     uint32_t pointerAtFetchCompletion[4];
-    uint8_t lastOddFetchCycle;
-    uint8_t lastEvenFetchCycle;
     uint8_t pointerHighWriteMask;
     uint8_t pointerLowWriteMask;
     uint8_t pointerReloadMask;
-    uint8_t pointerReloadCycle[8];
     uint8_t pointerReloadPhase[8];
 } BitplaneLineState;
 
@@ -619,21 +612,14 @@ static uint32_t copperWaitPosition = 0;
 static void resetBitplaneLine(void) {
     bitplaneLine.hiresWords = 0;
     bitplaneLine.loresWords = 0;
-    bitplaneLine.dmaEnabled = 0;
-    bitplaneLine.displayWindowActive = 0;
     bitplaneLine.enabledMask = 0;
     bitplaneLine.fetchEligibleMask = 0;
     bitplaneLine.fetchedMask = 0;
-    bitplaneLine.completedFetchMask = 0;
     bitplaneLine.fetchWindowComplete = 0;
-    bitplaneLine.lastOddFetchCycle = 0xff;
-    bitplaneLine.lastEvenFetchCycle = 0xff;
     bitplaneLine.pointerHighWriteMask = 0;
     bitplaneLine.pointerLowWriteMask = 0;
     bitplaneLine.pointerReloadMask = 0;
     for (unsigned plane = 0; plane < 8; plane++) {
-        bitplaneLine.lastFetchCycle[plane] = 0xff;
-        bitplaneLine.pointerReloadCycle[plane] = 0xff;
         bitplaneLine.pointerReloadPhase[plane] = BITPLANE_RELOAD_NONE;
     }
     for (unsigned plane = 0; plane < 4; plane++)
@@ -643,11 +629,6 @@ static void resetBitplaneLine(void) {
 static void markBitplaneFetched(unsigned plane) {
     uint8_t planeMask = (uint8_t)(1u << (plane - 1));
     bitplaneLine.fetchedMask |= planeMask;
-    bitplaneLine.lastFetchCycle[plane - 1] = (uint8_t)internal.hPos;
-    if (plane & 1)
-        bitplaneLine.lastOddFetchCycle = (uint8_t)internal.hPos;
-    else
-        bitplaneLine.lastEvenFetchCycle = (uint8_t)internal.hPos;
 }
 
 void dmaBitplanePointerWrite(unsigned plane, int highWord) {
@@ -661,8 +642,6 @@ void dmaBitplanePointerWrite(unsigned plane, int highWord) {
         bitplaneLine.pointerReloadMask = bitplaneLine.pointerHighWriteMask &
                                          bitplaneLine.pointerLowWriteMask;
         if (!wasReloaded && (bitplaneLine.pointerReloadMask & planeMask)) {
-            bitplaneLine.pointerReloadCycle[plane - 1] =
-                (uint8_t)internal.hPos;
             if (internal.hPos < chipset.ddfstrt)
                 bitplaneLine.pointerReloadPhase[plane - 1] =
                     BITPLANE_RELOAD_BEFORE_FETCH;
@@ -765,10 +744,6 @@ void dma_execute(){
     uint8_t enabledPlanes = enabledBitplaneMask();
     int dmaEnabled = (chipset.dmaconr & 0x300) == 0x300;
     int displayWindowActive = displayWindowContainsLine(internal.vPos);
-    if (dmaEnabled)
-        bitplaneLine.dmaEnabled = 1;
-    if (displayWindowActive)
-        bitplaneLine.displayWindowActive = 1;
     bitplaneLine.enabledMask |= enabledPlanes;
     if (dmaEnabled && displayWindowActive)
         bitplaneLine.fetchEligibleMask |= enabledPlanes;
@@ -790,15 +765,14 @@ void dma_execute(){
     }
 
     if (internal.hPos == bitplaneLine.lastCycle) {
-        bitplaneLine.completedFetchMask = bitplaneLine.fetchedMask;
         bitplaneLine.fetchWindowComplete = 1;
         bitplaneLine.pointerAtFetchCompletion[0] = chipset.bpl1pt;
         bitplaneLine.pointerAtFetchCompletion[1] = chipset.bpl2pt;
         bitplaneLine.pointerAtFetchCompletion[2] = chipset.bpl3pt;
         bitplaneLine.pointerAtFetchCompletion[3] = chipset.bpl4pt;
-        if (bitplaneLine.completedFetchMask != 0) {
-            lastFetchedMask = bitplaneLine.completedFetchMask;
-            applyBitplaneModulo(bitplaneLine.completedFetchMask);
+        if (bitplaneLine.fetchedMask != 0) {
+            lastFetchedMask = bitplaneLine.fetchedMask;
+            applyBitplaneModulo(bitplaneLine.fetchedMask);
         }
     }
 
