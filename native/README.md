@@ -335,8 +335,10 @@ regression logs retain the runner-level information needed for failures.
   visible scanlines. Narrow HIRES screens retain their native horizontal pixels
   rather than passing through the former lossy 27:32 reduction, which had
   compressed complete requester artwork and discarded columns from text.
-  Vertically wrapped fetch rows discard their raw 40-pixel left origin after
-  prefix reconstruction, keeping the complete logical row centred on-screen.
+Vertically wrapped fetch rows discard their raw 40-pixel left origin after
+prefix reconstruction, keeping the complete logical row centred on-screen.
+Prefix clearing and centering are performed together per logical scanline,
+avoiding a redundant traversal of the complete framebuffer.
   This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset

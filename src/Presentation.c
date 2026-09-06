@@ -114,18 +114,13 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             for (int x = HOST_VISIBLE_X0;
                  x < HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS; ++x)
                 row[x] = border;
-            memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
-        }
-
-        // Prefix reconstruction works in raw fetch coordinates. Once the
-        // pipeline prefix is moved to the right edge, remove the visible
-        // raster's left origin so the complete logical row remains on-screen.
-        for (int y = 0; y < SCREEN_H; ++y) {
-            uint32_t *row = &fb[y * SCREEN_W];
+            // Prefix reconstruction uses raw fetch coordinates. Remove that
+            // raster's left origin to keep the complete logical row visible.
             memmove(row, row + HOST_VISIBLE_X0,
                     (SCREEN_W - HOST_VISIBLE_X0) * sizeof(uint32_t));
             for (int x = SCREEN_W - HOST_VISIBLE_X0; x < SCREEN_W; ++x)
                 row[x] = border;
+            memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
         }
     }
 
