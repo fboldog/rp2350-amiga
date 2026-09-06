@@ -259,6 +259,10 @@ longer interprets raw DIW values to select requester reconstruction.
 The remaining content-aware work is contained in named helpers for locating a
 row's rightmost visible pixel and measuring the following row's wrapped prefix,
 instead of being embedded in the reconstruction loop.
+Prefix extent is measured through the last non-border pixel in the complete
+prefix window. A wrapped row may legitimately contain the border colour inside
+its artwork; treating the first such pixel as the endpoint truncated later
+segments and produced a purple line through the animated 3.1.4 floppy.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to

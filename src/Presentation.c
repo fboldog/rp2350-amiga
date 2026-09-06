@@ -28,16 +28,10 @@ static int rightmostContentPixel(const uint32_t *row, uint32_t border) {
 }
 
 static int wrappedPrefixLength(const uint32_t *row, uint32_t border) {
-    int start = HOST_VISIBLE_X0;
     int limit = HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS;
-    while (start < limit && row[start] == border)
-        start++;
-    if (start == limit)
-        return 0;
-
-    int end = start;
-    while (end < limit && row[end] != border)
-        end++;
+    int end = limit;
+    while (end > HOST_VISIBLE_X0 && row[end - 1] == border)
+        end--;
     return end - HOST_VISIBLE_X0;
 }
 
