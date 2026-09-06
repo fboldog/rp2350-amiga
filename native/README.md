@@ -203,7 +203,10 @@ Partial Copper transition lines can therefore distinguish odd-plane and
 even-plane activity, which is necessary before their two modulo registers can
 be timed independently. It also retains the union of planes enabled at any
 point during the line, separately from planes that actually fetched, so
-Copper mode changes are not reduced to the final `BPLCON0` value.
+Copper mode changes are not reduced to the final `BPLCON0` value. Scanline
+state also records bitplane-DMA enablement and display-window activity
+independently, allowing a no-fetch line to be classified before the remaining
+compatibility advancement is narrowed further.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to

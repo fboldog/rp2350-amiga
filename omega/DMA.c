@@ -594,6 +594,8 @@ typedef struct {
     int lastCycle;
     int hiresWords;
     int loresWords;
+    uint8_t dmaEnabled;
+    uint8_t displayWindowActive;
     uint8_t enabledMask;
     uint8_t fetchedMask;
     uint8_t pointerHighWriteMask;
@@ -609,6 +611,8 @@ static uint32_t copperWaitPosition = 0;
 static void resetBitplaneLine(void) {
     bitplaneLine.hiresWords = 0;
     bitplaneLine.loresWords = 0;
+    bitplaneLine.dmaEnabled = 0;
+    bitplaneLine.displayWindowActive = 0;
     bitplaneLine.enabledMask = 0;
     bitplaneLine.fetchedMask = 0;
     bitplaneLine.pointerHighWriteMask = 0;
@@ -723,6 +727,10 @@ void dma_execute(){
     chipset.vposr   = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
     chipset.vhposr  = internal.vPos << 8;
     chipset.vhposr |= internal.hPos;
+    if ((chipset.dmaconr & 0x300) == 0x300)
+        bitplaneLine.dmaEnabled = 1;
+    if (displayWindowContainsLine(internal.vPos))
+        bitplaneLine.displayWindowActive = 1;
     bitplaneLine.enabledMask |= enabledBitplaneMask();
     
 
