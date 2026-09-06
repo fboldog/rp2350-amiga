@@ -256,6 +256,9 @@ the insufficient diagnostic state was removed. DMA and presentation now share
 the OCS ninth-bit decoding of DIW vertical start and stop values. Vertical-bank
 crossing detection also lives in that shared layout layer; presentation no
 longer interprets raw DIW values to select requester reconstruction.
+The remaining content-aware work is contained in named helpers for locating a
+row's rightmost visible pixel and measuring the following row's wrapped prefix,
+instead of being embedded in the reconstruction loop.
 
 Bitplane pointer register writes are tracked per plane and per scanline. Both
 CPU and Copper writes pass through the same register handlers, allowing DMA to

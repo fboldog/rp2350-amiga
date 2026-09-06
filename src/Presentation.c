@@ -20,6 +20,27 @@ static void duplicateScanline(uint32_t *fb, int y) {
            SCREEN_W * sizeof(uint32_t));
 }
 
+static int rightmostContentPixel(const uint32_t *row, uint32_t border) {
+    int right = HOST_VISIBLE_X1 - 1;
+    while (right >= SCREEN_W / 2 && row[right] == border)
+        right--;
+    return right;
+}
+
+static int wrappedPrefixLength(const uint32_t *row, uint32_t border) {
+    int start = HOST_VISIBLE_X0;
+    int limit = HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS;
+    while (start < limit && row[start] == border)
+        start++;
+    if (start == limit)
+        return 0;
+
+    int end = start;
+    while (end < limit && row[end] != border)
+        end++;
+    return end - HOST_VISIBLE_X0;
+}
+
 void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     const uint32_t border = internal.palette[0];
     const int diw_start = omegaDiwVerticalStart(chipset.diwstrt);
@@ -88,21 +109,11 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             continue;
         uint32_t *row = &fb[dy * SCREEN_W];
         uint32_t *next = row + SCREEN_W * 2;
-        int right = HOST_VISIBLE_X1 - 1;
-        while (right >= SCREEN_W / 2 && row[right] == border) right--;
-        int prefix_start = HOST_VISIBLE_X0;
-        while (prefix_start < HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS &&
-               next[prefix_start] == border)
-            prefix_start++;
-        if (right < SCREEN_W / 2 ||
-            prefix_start == HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS)
+        int right = rightmostContentPixel(row, border);
+        int count = wrappedPrefixLength(next, border);
+        if (right < SCREEN_W / 2 || count == 0)
             continue;
 
-        int prefix_end = prefix_start;
-        while (prefix_end < HOST_VISIBLE_X0 + WRAPPED_PREFIX_PIXELS &&
-               next[prefix_end] != border)
-            prefix_end++;
-        int count = prefix_end - HOST_VISIBLE_X0;
         if (count > SCREEN_W - right - 1) count = SCREEN_W - right - 1;
         for (int x = 0; x < count; ++x) {
             row[right + 1 + x] = next[HOST_VISIBLE_X0 + x];
