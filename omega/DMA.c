@@ -600,14 +600,27 @@ static void resetBitplaneLine(void) {
 }
 
 static void advanceBitplanePointers(void) {
-    chipset.bpl1pt += chipset.bpl1mod;
-    chipset.bpl3pt += chipset.bpl1mod;
-    chipset.bpl5pt += chipset.bpl1mod;
-    chipset.bpl7pt += chipset.bpl1mod;
-    chipset.bpl2pt += chipset.bpl2mod;
-    chipset.bpl4pt += chipset.bpl2mod;
-    chipset.bpl6pt += chipset.bpl2mod;
-    chipset.bpl8pt += chipset.bpl2mod;
+    enum { ODD_PLANES = 0x55, EVEN_PLANES = 0xaa };
+    uint8_t fetched = bitplaneLine.fetchedMask;
+
+    // Preserve the existing blank-line fallback until Copper pointer reload
+    // timing is complete. Partial lines, however, can safely advance only the
+    // odd/even groups that took part in DMA.
+    if (fetched == 0)
+        fetched = ODD_PLANES | EVEN_PLANES;
+
+    if (fetched & ODD_PLANES) {
+        chipset.bpl1pt += chipset.bpl1mod;
+        chipset.bpl3pt += chipset.bpl1mod;
+        chipset.bpl5pt += chipset.bpl1mod;
+        chipset.bpl7pt += chipset.bpl1mod;
+    }
+    if (fetched & EVEN_PLANES) {
+        chipset.bpl2pt += chipset.bpl2mod;
+        chipset.bpl4pt += chipset.bpl2mod;
+        chipset.bpl6pt += chipset.bpl2mod;
+        chipset.bpl8pt += chipset.bpl2mod;
+    }
 }
 
 static int displayWindowContainsLine(int vpos) {
@@ -662,6 +675,7 @@ void dma_execute(){
             chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
         DMALores[internal.hPos]();
     }
+
     eclock_execute(&chipset);   // CIA timers
 
     internal.hPos++;
@@ -683,10 +697,8 @@ void dma_execute(){
         CIATODEvent(&CIAB);
         
         
-        // Compatibility timing remains at the scanline boundary. The fetch
-        // state now records every enabled plane, including transition lines
-        // where Copper blanks BPLCON0 before the plane-1 slot. Fully blank
-        // lines still advance until Copper pointer reload is modelled fully.
+        // Compatibility timing remains at the scanline boundary. Per-plane
+        // tracking still limits partial-line modulo to groups that fetched.
         advanceBitplanePointers();
         resetBitplaneLine();
         
