@@ -667,7 +667,10 @@ static void advanceBitplanePointers(void) {
                 reloadedBeforeFetch |= (uint8_t)(1u << plane);
         }
 
-        fetched = (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
+        fetched = bitplaneLine.fetchEligibleMask != 0
+            ? bitplaneLine.fetchEligibleMask
+            : 0xff;
+        fetched &= (uint8_t)~(reloadedBeforeFetch & bitplaneLine.enabledMask);
     }
 
     if (fetched & 0x01)
