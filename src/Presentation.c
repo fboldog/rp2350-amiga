@@ -15,6 +15,11 @@ static void fillPixels(uint32_t *pixels, int count, uint32_t color) {
         pixels[i] = color;
 }
 
+static void duplicateScanline(uint32_t *fb, int y) {
+    memcpy(&fb[(y + 1) * SCREEN_W], &fb[y * SCREEN_W],
+           SCREEN_W * sizeof(uint32_t));
+}
+
 void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     const uint32_t border = internal.palette[0];
     const int diw_start = omegaDiwVerticalStart(chipset.diwstrt);
@@ -53,7 +58,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             } else {
                 memcpy(dst, src, SCREEN_W * sizeof(uint32_t));
             }
-            memcpy(dst + SCREEN_W, dst, SCREEN_W * sizeof(uint32_t));
+            duplicateScanline(fb, y * 2);
         }
         fillPixels(render_fb, HOST_RASTER_PIXELS, border);
         return;
@@ -68,8 +73,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
                           HOST_VISIBLE_X0],
                (HOST_VISIBLE_X1 - HOST_VISIBLE_X0) * sizeof(uint32_t));
 
-        memcpy(&fb[(dy + 1) * SCREEN_W], &fb[dy * SCREEN_W],
-               SCREEN_W * sizeof(uint32_t));
+        duplicateScanline(fb, dy);
     }
 
     // The fetch pipeline places the next logical scanline's prefix after the
@@ -104,8 +108,8 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             row[right + 1 + x] = next[HOST_VISIBLE_X0 + x];
             next[HOST_VISIBLE_X0 + x] = border;
         }
-        memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
-        memcpy(next + SCREEN_W, next, SCREEN_W * sizeof(uint32_t));
+        duplicateScanline(fb, dy);
+        duplicateScanline(fb, dy + 2);
     }
     if (reconstruct_wrapped_fetch_rows) {
         for (int sy = 0; sy < HOST_RASTER_H; ++sy) {
@@ -122,7 +126,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
                     (SCREEN_W - HOST_VISIBLE_X0) * sizeof(uint32_t));
             fillPixels(row + SCREEN_W - HOST_VISIBLE_X0,
                        HOST_VISIBLE_X0, border);
-            memcpy(row + SCREEN_W, row, SCREEN_W * sizeof(uint32_t));
+            duplicateScanline(fb, dy);
         }
     }
 

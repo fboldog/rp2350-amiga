@@ -351,7 +351,8 @@ through a per-pixel loop.
 Presentation paths clear their intermediate raster explicitly through a shared
 fill helper; the former label-and-`goto` cleanup exit is no longer needed. The
 same helper fills the translated wrapped row's trailing border, leaving that
-operation entirely segment-based.
+operation entirely segment-based. All presentation paths also use one shared
+scanline-duplication helper for their 2× vertical output.
   This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
