@@ -218,9 +218,12 @@ DDF interval for its scanline.
 
 Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
 groups that actually fetched. Fully blank lines retain compatibility
-advancement at the scanline boundary. Applying modulo at the emulated terminal
-fetch slot was tested and rejected for now because it shifted the extra
-right-edge fetch used by the Kickstart 2.04 requester.
+advancement at the scanline boundary, except when every active plane in a
+group completed a pointer reload before DDF. Requiring the full active group
+avoids treating a partial Copper pointer update as a reload of all odd or even
+planes. Applying modulo at the emulated terminal fetch slot was tested and
+rejected for now because it shifted the extra right-edge fetch used by the
+Kickstart 2.04 requester.
 
 The shared layout definitions also name the raster origin at beam line 43 and
 the first LORES render line at 44. LORES and HIRES positioning now refer to

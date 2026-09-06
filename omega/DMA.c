@@ -648,11 +648,32 @@ static void advanceBitplanePointers(void) {
     enum { ODD_PLANES = 0x55, EVEN_PLANES = 0xaa };
     uint8_t fetched = bitplaneLine.fetchedMask;
 
-    // Preserve the existing blank-line fallback until Copper pointer reload
-    // timing is complete. Partial lines, however, can safely advance only the
-    // odd/even groups that took part in DMA.
-    if (fetched == 0)
+    // A blank line retains compatibility advancement unless every active
+    // plane in a modulo group was explicitly reloaded before its fetch window.
+    // Partial lines advance only groups that actually took part in DMA.
+    if (fetched == 0) {
+        unsigned planeCount = (chipset.bplcon0 >> 12) & 7;
+        uint8_t activePlanes = planeCount == 0
+            ? 0
+            : (uint8_t)((1u << planeCount) - 1u);
+        uint8_t reloadedBeforeFetch = 0;
+
+        for (unsigned plane = 0; plane < planeCount; plane++) {
+            if (bitplaneLine.pointerReloadPhase[plane] ==
+                BITPLANE_RELOAD_BEFORE_FETCH)
+                reloadedBeforeFetch |= (uint8_t)(1u << plane);
+        }
+
         fetched = ODD_PLANES | EVEN_PLANES;
+        uint8_t activeOddPlanes = activePlanes & ODD_PLANES;
+        uint8_t activeEvenPlanes = activePlanes & EVEN_PLANES;
+        if (activeOddPlanes != 0 &&
+            (reloadedBeforeFetch & activeOddPlanes) == activeOddPlanes)
+            fetched &= (uint8_t)~ODD_PLANES;
+        if (activeEvenPlanes != 0 &&
+            (reloadedBeforeFetch & activeEvenPlanes) == activeEvenPlanes)
+            fetched &= (uint8_t)~EVEN_PLANES;
+    }
 
     if (fetched & ODD_PLANES) {
         chipset.bpl1pt += chipset.bpl1mod;
