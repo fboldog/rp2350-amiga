@@ -371,7 +371,7 @@
 /* Disable certain comparisons if we're not using all CPU types */
 #if M68K_EMULATE_020
 	#define CPU_TYPE_IS_020_PLUS(A)    ((A) & CPU_TYPE_020)
-	#define CPU_TYPE_IS_020_LESS(A)    1
+	#define CPU_TYPE_IS_020_LESS(A)    ((A) & (CPU_TYPE_000 | CPU_TYPE_010 | CPU_TYPE_EC020))
 #else
 	#define CPU_TYPE_IS_020_PLUS(A)    0
 	#define CPU_TYPE_IS_020_LESS(A)    1

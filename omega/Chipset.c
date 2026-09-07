@@ -44,6 +44,7 @@ void ChipsetInit(){
     chipset.cop1lc = 0;
     chipset.cop2lc = 0;
     chipset.dmaconr = 0;
+    chipset.serdatr = 0x3000; // Idle serial transmitter: TSRE and TBE set
     internal.copperPC = 0;
     internal.copperCycle = 0;
     internal.hPos = 0;
@@ -322,6 +323,10 @@ void copcon(uint16_t  value){
 
 void serdat(uint16_t value){
     chipset.serdat = value;
+#ifdef OMEGA_KICKSMASH_SIM
+    if ((value & 0xff) == '\n' || ((value & 0xff) >= 32 && (value & 0xff) < 127))
+        fputc(value & 0xff, stdout);
+#endif
 }
 
 void serper(uint16_t value){

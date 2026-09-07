@@ -10129,7 +10129,14 @@ void m68k_op_movec_32_rc(void)
 			case 0x002:			   /* CACR */
 				if(CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
 				{
-					REG_CACR = REG_DA[(word2 >> 12) & 15];
+					/* The 68020 does not retain later CPUs' CACR bits.  Firmware
+					 * probes those writable bits to distinguish a 020 from a
+					 * 030/040/060; accepting all 32 bits falsely identifies it
+					 * as a 68060 and leads to unsupported cache instructions. */
+					if(CPU_TYPE_IS_020_VARIANT(CPU_TYPE))
+						REG_CACR = REG_DA[(word2 >> 12) & 15] & 0xc0000003u;
+					else
+						REG_CACR = REG_DA[(word2 >> 12) & 15];
 					return;
 				}
 				m68ki_exception_illegal();
@@ -13219,5 +13226,4 @@ void m68k_op_mull_32_i(void)
 /* ======================================================================== */
 /* ============================== END OF FILE ============================= */
 /* ======================================================================== */
-
 

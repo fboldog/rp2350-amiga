@@ -60,6 +60,33 @@ python3 native/ppm2png.py frame_final.ppm frame_final.png
 The same command works with `kick-13.rom` and `kick314.rom`. ROMs and generated
 `frame*.ppm`/`frame*.png` files are local test assets and must not be committed.
 
+### KickSmash ROM switcher
+
+The native runner can boot the small standalone KickSmash ROM-switcher image.
+It needs a 68020 CPU and an opt-in compile-time simulation of the KickSmash32
+ROM-bus message interface:
+
+```sh
+KICKSMASH_SIM=1 VIDEO=PAL ./native/build.sh
+OMEGA_CPU=68020 OMEGA_ROM="$PWD/switcher.rom" ./native/omega-native
+```
+
+Native ROM loading accepts images from 1 byte through 512 KB. Images no larger
+than 256 KB are zero-padded to one 256 KB bank and mirrored across the complete
+Kickstart window, which is required by compact standalone ROMs.
+
+`KICKSMASH_SIM=1` recognizes the switcher's ID, bank-information, and timeout
+NVRAM queries and returns deterministic simulated board data with the protocol's
+normal header, payload, and CRC framing. The responder models the hardware's
+address-independent reply DMA, including the older transport which consumes its
+first reply long on the command-triggering read. It is a native test fixture,
+not a full emulation of the flash programmer, USB link, or bank-switch/reset
+hardware. Unsupported commands return a protocol error.
+
+The default native CPU remains a 68000. `OMEGA_CPU=68020` selects Musashi's
+68020 core at run time; its full indexed addressing and 68020 CACR behavior are
+needed by the standalone switcher firmware.
+
 ### Screenshot regression suite
 
 `REGRESSION=1` is a native compile-time build mode. It forces a headless build

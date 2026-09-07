@@ -13,6 +13,9 @@
 #
 # Screenshot regression build:
 #   REGRESSION=1     — force headless output and suppress diagnostic dumps
+#
+# KickSmash ROM-switcher support:
+#   KICKSMASH_SIM=1  — answer the native ROM transport queries
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -32,6 +35,14 @@ if [ "${REGRESSION:-0}" = "1" ]; then
     HEADLESS=1
     REGRESSION_FLAGS="-DOMEGA_SCREENSHOT_REGRESSION=1"
     echo "REGRESSION=1 — deterministic headless screenshot build"
+fi
+
+KICKSMASH_FLAGS=""
+KICKSMASH_SRC=""
+if [ "${KICKSMASH_SIM:-0}" = "1" ]; then
+    KICKSMASH_FLAGS="-DOMEGA_KICKSMASH_SIM=1"
+    KICKSMASH_SRC="native/kicksmash_sim.c"
+    echo "KICKSMASH_SIM=1 — enabling native KickSmash query simulation"
 fi
 
 SDL_FLAGS=""
@@ -79,7 +90,7 @@ if [ -n "$SDL_SRC" ]; then
         -Isrc -Iomega \
         -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
         -Wno-incompatible-pointer-types \
-        $SDL_FLAGS $REGRESSION_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
+        $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
         -c -o native/display_sdl.o native/display_sdl.c
     SDL_OBJ="native/display_sdl.o"
 fi
@@ -90,9 +101,9 @@ $CC -O2 -g -std=gnu11 \
     -Isrc -Iomega \
     -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
     -Wno-incompatible-pointer-types \
-    $SDL_FLAGS $REGRESSION_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
+    $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
     -o "$OUT" \
-    native/main_native.c native/host_native.c native/memory_native.c \
+    native/main_native.c native/host_native.c native/memory_native.c $KICKSMASH_SRC \
     src/Planar.c src/Presentation.c \
     $SDL_OBJ \
     "${OMEGA_SRC[@]}" \

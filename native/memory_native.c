@@ -21,6 +21,9 @@
 #include "DMA.h"
 #include "Gayle.h"
 #include "../omega/m68k.h"
+#ifdef OMEGA_KICKSMASH_SIM
+#include "kicksmash_sim.h"
+#endif
 
 unsigned char low16Meg[16777216];
 
@@ -35,6 +38,8 @@ void loadROM(){
 
 
 unsigned int chipReadByte(unsigned int address){
+    if (address > 0xFFFFFFu)
+        return 0xFF;
     //ROM
     if(address>=0xF80000){
         return low16Meg[address];
@@ -42,7 +47,9 @@ unsigned int chipReadByte(unsigned int address){
     
     //Autoconfig space
     if(address>0xDFFFFF){
-        return 0;
+        // No expansion board is attached.  An open autoconfig bus reads
+        // high; zero describes a board and makes firmware enumerate ghosts.
+        return 0xFF;
     }
     
 #ifdef THREADED_CPU
@@ -107,6 +114,8 @@ unsigned int chipReadByte(unsigned int address){
     return low16Meg[address];
 }
 unsigned int chipReadWord(unsigned int address){
+    if (address > 0xFFFFFFu)
+        return 0xFFFF;
     //ROM
     if(address>0xF7FFFF){
         //return READ_WORD(chipset.rom,address-0xF80000);
@@ -118,7 +127,7 @@ unsigned int chipReadWord(unsigned int address){
     
     //Autoconfig space
     if(address>0xDFFFFF){
-        return 0;
+        return 0xFFFF;
     }
     
 #ifdef THREADED_CPU
@@ -203,6 +212,17 @@ unsigned int chipReadWord(unsigned int address){
     return value;
 }
 unsigned int chipReadLong(unsigned int address){
+    if (address > 0xFFFFFFu)
+        return 0xFFFFFFFFu;
+#ifdef OMEGA_KICKSMASH_SIM
+    uint32_t simulated;
+    // The transport routine copies itself to RAM before issuing ROM reads.
+    // Keep instruction fetches from the ROM (notably at response offsets)
+    // from consuming the simulated reply stream.
+    if (m68k_get_reg(NULL, M68K_REG_PC) < 0xF80000u &&
+        kicksmash_sim_read_long(address, &simulated))
+        return simulated;
+#endif
     
     //ROM
     if(address>0xF7FFFF){
@@ -210,6 +230,12 @@ unsigned int chipReadLong(unsigned int address){
         uint32_t value = *(uint32_t*)&low16Meg[address];
         value = ((value << 8) & 0xFF00FF00 ) | ((value >> 8) & 0xFF00FF );
         return value << 16 | value >> 16;
+    }
+
+    // Empty Zorro autoconfig space (checked before the custom-register
+    // range, which otherwise catches every address above 0xDFF000).
+    if(address>0xDFFFFF){
+        return 0xFFFFFFFFu;
     }
     
 #ifdef THREADED_CPU
@@ -560,11 +586,11 @@ void chipWriteLong(unsigned int address,unsigned int value){
 
     //Chipregs
     if(address>0xDFEFFF){
-        address = (address - 0xDFF000) >> 1;
-
-                debugChipAddress = address;    // used for debugging to identify the register being called
-
-        putChipReg32[address](value);
+        // A 68020 long write is two adjacent custom-register word writes.
+        // The old 32-bit dispatch table contains mostly no-op placeholders,
+        // which discarded common writes such as BPLxPTH/BPLxPTL pairs.
+        chipWriteWord(address, value >> 16);
+        chipWriteWord(address + 2, value & 0xffff);
         return;
     }
     
@@ -613,5 +639,3 @@ void chipWriteLong(unsigned int address,unsigned int value){
     *dest = value; return;
 
 }
-
-

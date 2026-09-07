@@ -13,10 +13,12 @@
 //                Kickstart must finish drive identification first)
 //
 // Environment:
-//   OMEGA_ROM=<file>   load this Kickstart ROM (256 KB mirrored, or 512 KB)
+//   OMEGA_ROM=<file>   load this Kickstart ROM (images up to 256 KB are
+//                      zero-padded and mirrored; larger images fill 512 KB)
 //                      instead of the built-in Kickstart 1.3.
 //   OMEGA_DISASM=1     turn on the Musashi disassembler (to UART/stdout) -
 //                      useful for seeing where a ROM's early init diverges.
+//   OMEGA_CPU=68020     use Musashi's 68020 core instead of the default 68000.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,28 +47,47 @@ extern unsigned long native_frame_counter;
 extern unsigned long native_nonblack_pixels(void);
 extern void          native_dump_ppm(const char *path);
 
+static uint32_t native_read_u32(uint32_t address) {
+    return ((uint32_t)low16Meg[address] << 24) |
+           ((uint32_t)low16Meg[address + 1] << 16) |
+           ((uint32_t)low16Meg[address + 2] << 8) |
+           low16Meg[address + 3];
+}
+
 int screenWidth  = 640;   // referenced by some omega translation units
 int screenHeight = 200;
 int disass       = 0;     // Musashi disassembler (toggled by OMEGA_DISASM)
 
-// Load a Kickstart ROM file into low16Meg at 0xF80000.
-// 512 KB -> straight copy;  256 KB -> mirrored into 0xF80000 and 0xFC0000.
+// Load a Kickstart ROM file into low16Meg at 0xF80000. Images no larger than
+// 256 KB occupy a zero-padded 256 KB bank which is mirrored at 0xFC0000.
+// Images between 256 KB and 512 KB occupy a zero-padded 512 KB window.
 // Returns 0 on success.
 static int load_rom_file(const char *path) {
     int fd = open(path, O_RDONLY);
-    if (fd < 1) { printf("  ROM: cannot open %s\n", path); return 1; }
+    if (fd < 0) { printf("  ROM: cannot open %s\n", path); return 1; }
     off_t sz = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    if (sz == 0x40000) {                       // 256 KB
-        (void)!read(fd, &low16Meg[0xF80000], 0x40000);
-        memcpy(&low16Meg[0xFC0000], &low16Meg[0xF80000], 0x40000);
-    } else if (sz == 0x80000) {                // 512 KB
-        (void)!read(fd, &low16Meg[0xF80000], 0x80000);
-    } else {
-        printf("  ROM: %s is %lld bytes (expected 262144 or 524288)\n",
+    if (sz <= 0 || sz > 0x80000) {
+        printf("  ROM: %s is %lld bytes (expected 1 to 524288)\n",
                path, (long long)sz);
         close(fd);
         return 1;
+    }
+
+    memset(&low16Meg[0xF80000], 0, 0x80000);
+    size_t loaded = 0;
+    while (loaded < (size_t)sz) {
+        ssize_t got = read(fd, &low16Meg[0xF80000 + loaded],
+                           (size_t)sz - loaded);
+        if (got <= 0) {
+            printf("  ROM: failed to read %s\n", path);
+            close(fd);
+            return 1;
+        }
+        loaded += (size_t)got;
+    }
+    if (sz <= 0x40000) {
+        memcpy(&low16Meg[0xFC0000], &low16Meg[0xF80000], 0x40000);
     }
     close(fd);
     printf("  ROM: %s loaded (%lld KB)\n", path, (long long)(sz >> 10));
@@ -159,6 +180,11 @@ int main(int argc, char **argv) {
     // ── Bring up the emulator ───────────────────────────────────────────
     hostInit();
     cpu_init();
+    const char *cpuType = getenv("OMEGA_CPU");
+    if (cpuType && strcmp(cpuType, "68020") == 0) {
+        m68k_set_cpu_type(M68K_CPU_TYPE_68020);
+        printf("  CPU: 68020\n");
+    }
     ChipsetInit();
 
     printf("Entering emulation loop\n");
@@ -196,7 +222,9 @@ int main(int argc, char **argv) {
         // automated screenshot regression logs enormous and needlessly slow.
 #ifndef OMEGA_SCREENSHOT_REGRESSION
         // PC sampler: after screen is up, print once then stop
-        if (native_frame_counter > 20 && (it % 4000) == 0) {
+        uint32_t exec_base = native_read_u32(4);
+        if (native_frame_counter > 20 && (it % 4000) == 0 &&
+            exec_base >= 0x13Eu && exec_base < 0xF00000u) {
             uint32_t pc  = m68k_get_reg(NULL, M68K_REG_PC);
             uint32_t a0  = m68k_get_reg(NULL, M68K_REG_A0);
             uint32_t a3  = m68k_get_reg(NULL, M68K_REG_A3);
@@ -214,7 +242,7 @@ int main(int argc, char **argv) {
             // Read signal words at (A3)=tc_SigRecvd and (A3-4)=tc_SigWait
             #define RD32(base) ((uint32_t)((low16Meg[(base)]<<24)|(low16Meg[(base)+1]<<16)| \
                                            (low16Meg[(base)+2]<<8)|low16Meg[(base)+3]))
-            uint32_t a6  = RD32(4);  // ExecBase from exception vector table address 4
+            uint32_t a6  = exec_base;
             printf("    PC=%08X A0=%08X A3=%08X ExecBase(addr4)=%08X D0=%08X\n",
                    pc, a0, a3, a6, d0);
             uint32_t tc_sigrecvd = (a3 < 0xF00000u) ? RD32(a3)   : 0xDEADBEEF;
@@ -251,7 +279,7 @@ int main(int argc, char **argv) {
                        RD32(sigt+0x12), RD32(sigt+0x16), RD32(sigt+0x1A));
             }
             // Decode ExecBase LVO -0x13E: 6-byte JMP entry at ExecBase-0x13E = 0xC0094A
-            if (a6 < 0xF00000u) {
+            if (a6 >= 0x13Eu && a6 < 0xF00000u) {
                 uint32_t lvo_addr = a6 - 0x13Eu;
                 uint16_t opcode   = (uint16_t)((low16Meg[lvo_addr]<<8)|low16Meg[lvo_addr+1]);
                 uint32_t tgt      = RD32(lvo_addr + 2);
