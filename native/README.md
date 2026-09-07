@@ -88,6 +88,26 @@ The default native CPU remains a 68000. `OMEGA_CPU=68020` selects Musashi's
 68020 core at run time; its full indexed addressing and 68020 CACR behavior are
 needed by the standalone switcher firmware.
 
+### DiagROM
+
+The native runner recognizes the DiagROM header marker (`DG`) and starts at the
+explicit entry address stored immediately after it instead of assuming the
+normal Kickstart `JMP` instruction at `0xF80002`:
+
+```sh
+VIDEO=PAL ./native/build.sh
+OMEGA_ROM="$PWD/diagrom.rom" ./native/omega-native
+```
+
+DiagROM polls the high byte of `SERDATR` while printing its early diagnostics,
+so byte reads expose the same idle `TSRE`/`TBE` state as word reads. Its memory
+tests also write through empty Zorro/autoconfig space; with no expansion board
+attached these writes are ignored rather than decoded as custom registers.
+
+DiagROM reaches and displays its main diagnostic screen. Its remaining visual
+distortion is a known rendering issue and is intentionally separate from ROM
+startup support.
+
 ### Screenshot regression suite
 
 `REGRESSION=1` is a native compile-time build mode. It forces a headless build

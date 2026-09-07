@@ -314,6 +314,12 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
         return;
     }
 
+    // No expansion board is attached; writes to Zorro/autoconfig space are
+    // ignored instead of being decoded as out-of-range custom registers.
+    if(address>0xDFFFFF){
+        return;
+    }
+
 #ifdef THREADED_CPU
     waitFreeSlot(); //CPU must wait for DMA to complete;
 #endif
@@ -425,6 +431,10 @@ void chipWriteWord(unsigned int address,unsigned int value){
     }
     //ROM
     if(address>=0xF80000){
+        return;
+    }
+
+    if(address>0xDFFFFF){
         return;
     }
 
@@ -578,6 +588,10 @@ void chipWriteLong(unsigned int address,unsigned int value){
                    address, value, pc, ++autoconf_write_count);
             fflush(stdout);
         }
+    }
+
+    if(address>0xDFFFFF){
+        return;
     }
 
 #ifdef THREADED_CPU

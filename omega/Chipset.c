@@ -1193,6 +1193,14 @@ uint8_t potgorBL(){ //  0xB
     return chipset.potinp & 0xFF; // only read the bottom 8bits
 }
 
+uint8_t serdatrBH(){
+    return chipset.serdatr >> 8;
+}
+
+uint8_t serdatrBL(){
+    return chipset.serdatr & 0xFF;
+}
+
 uint8_t intenarBH(){ //0xE
     return chipset.intenar >> 8;
 }
@@ -1246,8 +1254,8 @@ uint8_t (*getChipReg8[])() = {
     noReadB,
     potgorBH,
     potgorBL,
-    noReadB,
-    noReadB,
+    serdatrBH,
+    serdatrBL,
     noReadB,
     noReadB,
     intenarBH,
