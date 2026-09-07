@@ -1,3 +1,19 @@
+/*
+ * Native KickSmash32 ROM-bus simulator.
+ *
+ * The standalone ROM switcher sends commands without a conventional device:
+ * each 16-bit protocol word is encoded as an address in the Kickstart ROM
+ * window and transmitted by reading that address.  After the request CRC, a
+ * read at ROM_BASE + 0x1554 triggers the reply.  The real KickSmash firmware
+ * then disables the flash output and uses DMA to drive successive 32-bit
+ * values on every ROM read, regardless of the address used to clock them.
+ *
+ * This native-only fixture recognizes both 16-bit and 32-bit request-address
+ * shifts.  It provides deterministic ID, bank-information, and timeout-NVRAM
+ * replies with the normal magic, length, status, payload, and STM32-compatible
+ * CRC framing.  It intentionally does not emulate flash programming, USB
+ * communication, reset control, or persistent bank selection.
+ */
 #include "kicksmash_sim.h"
 #include <stdio.h>
 #include <string.h>
@@ -25,7 +41,7 @@ static void put32(uint8_t *p, unsigned *n, uint32_t v) {
 }
 static unsigned id_data(uint8_t *p) {
     unsigned n = 0;
-    put16(p,&n,1); put16(p,&n,5);
+    put16(p,&n,2); put16(p,&n,0);
     p[n++]=20; p[n++]=26; p[n++]=9; p[n++]=7;
     p[n++]=12; p[n++]=0; p[n++]=0; p[n++]=0;
     memset(p+n,0,24); memcpy(p+n,"OMEGA-SIM",9); n+=24;

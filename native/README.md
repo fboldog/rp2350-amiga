@@ -77,7 +77,8 @@ Kickstart window, which is required by compact standalone ROMs.
 
 `KICKSMASH_SIM=1` recognizes the switcher's ID, bank-information, and timeout
 NVRAM queries and returns deterministic simulated board data with the protocol's
-normal header, payload, and CRC framing. The responder models the hardware's
+normal header, payload, and CRC framing. The simulated ID reports KickSmash32
+firmware version 2.0. The responder models the hardware's
 address-independent reply DMA, including the older transport which consumes its
 first reply long on the command-triggering read. It is a native test fixture,
 not a full emulation of the flash programmer, USB link, or bank-switch/reset
