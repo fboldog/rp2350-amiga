@@ -54,25 +54,32 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
     if (omegaDdfIsFullWidth(chipset.ddfstrt)) {
         int row_rotation =
             omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
-        // This full-width LORES layout already advances two beam rows for
-        // each logical picture row.  Sample those rows once before the host
-        // performs its normal 2x vertical integer scaling.
-        int source_step = host.displayIsLores ? 2 : 1;
+        // Overscan LORES layouts can advance two beam rows for each logical
+        // picture row.  Normal 200/256-line LORES displays occupy every row.
+        int alternate_rows =
+            host.displayIsLores &&
+            omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
+                                               chipset.diwstop);
+        int source_step = alternate_rows ? 2 : 1;
+        int y_offset = host.displayIsLores && !alternate_rows
+                     ? EARLY_DISPLAY_LINE : 0;
+        int copy_width = SCREEN_W;
         int rows = HOST_RASTER_H / source_step;
-        if (rows > SCREEN_H / 2) rows = SCREEN_H / 2;
+        if (rows > (SCREEN_H - y_offset) / 2)
+            rows = (SCREEN_H - y_offset) / 2;
         for (int y = 0; y < rows; ++y) {
-            uint32_t *dst = &fb[(y * 2) * SCREEN_W];
+            uint32_t *dst = &fb[(y_offset + y * 2) * SCREEN_W];
             const uint32_t *src = &render_fb[(y * source_step) * SCREEN_W];
             if (row_rotation) {
-                int body = SCREEN_W - row_rotation;
+                int body = copy_width - row_rotation;
                 memcpy(dst, src + row_rotation,
                        body * sizeof(uint32_t));
                 memcpy(dst + body, src,
                        row_rotation * sizeof(uint32_t));
             } else {
-                memcpy(dst, src, SCREEN_W * sizeof(uint32_t));
+                memcpy(dst, src, copy_width * sizeof(uint32_t));
             }
-            duplicateScanline(fb, y * 2);
+            duplicateScanline(fb, y_offset + y * 2);
         }
         fillPixels(render_fb, HOST_RASTER_PIXELS, border);
         return;

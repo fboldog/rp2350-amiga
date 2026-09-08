@@ -104,9 +104,10 @@ so byte reads expose the same idle `TSRE`/`TBE` state as word reads. Its memory
 tests also write through empty Zorro/autoconfig space; with no expansion board
 attached these writes are ignored rather than decoded as custom registers.
 
-DiagROM reaches and displays its main diagnostic screen. Its remaining visual
-distortion is a known rendering issue and is intentionally separate from ROM
-startup support.
+DiagROM reaches and displays its complete main diagnostic screen, including
+the version heading and bottom hardware-status line. DiagROM changes display
+mode near the PAL vertical-comparator boundary, so the Copper terminator must
+remain stopped after line 255 rather than running into adjacent list data.
 
 ### Screenshot regression suite
 
@@ -177,13 +178,15 @@ use the same selected framebuffer dimensions. The RP2350 framebuffer remains
 PAL uses its own viewport origin and a full-height native intermediate raster.
 Video-standard viewport offsets are owned solely by `omega/VideoStandard.h`;
 the obsolete duplicate host offset has been removed.
-The full beam-row raster is required by full-width LORES copper displays such
-as the Kickstart 1.3 insert-disk requester: its logical picture rows occupy
-alternating beam rows. Presentation samples those rows once and then applies
-the normal 2× integer scale, avoiding both empty scanlines and truncation of the
-hand and lower disk artwork. HIRES displays continue to consume half-height
-logical rows. The RP2350 keeps its fixed 200-row intermediate raster because of
-the existing PSRAM layout.
+The full beam-row raster is required by full-width LORES copper displays.
+Overscan windows such as the Kickstart 1.3 insert-disk requester occupy more
+beam rows than the progressive viewport and keep logical picture rows on
+alternating raster rows. Normal 200/256-line LORES windows use every raster
+row. Presentation derives that choice from the DIW vertical span before
+applying the normal 2× integer scale, avoiding both empty scanlines and
+truncation of the hand, lower disk artwork, or DiagROM menu. HIRES displays
+continue to consume half-height logical rows. The RP2350 keeps its fixed
+200-row intermediate raster because of the existing PSRAM layout.
 
 DMA tracks its intermediate destination with separate raster-row and X
 coordinates. The planar-to-chunky helpers write relative to the destination
@@ -366,7 +369,7 @@ The unused host-side `vblCount` member and its native/RP2350 initializations
 have been removed. Native frame counting remains in the native runner's
 separate `native_frame_counter` state.
 
-## Status (2026-09-06)
+## Status (2026-09-08)
 
 The rendering/DMA cleanup checklist is complete. Remaining compatibility
 behavior is documented where it is implemented: content-aware wrapped-prefix
@@ -387,8 +390,11 @@ rendering remain unimplemented.
   Full-width HIRES Workbench screens use a true 640-pixel raster stride rather
   than the narrower wrapped-fetch presentation used by the Kickstart artwork.
   PAL Copper waits that cross line 255 retain the next vertical-line bank, and
-  the 40-line upper overscan is removed before presentation. This keeps the
-  complete loading window—including its lower border—in the 640×400 output.
+  the `FFFF FFFE` list terminator is frozen explicitly. Treating that marker as
+  a normal 16-bit WAIT allowed PAL line 256 to release it and execute adjacent
+  data as Copper instructions. The 40-line upper overscan is removed before
+  presentation. This keeps complete Workbench and DiagROM screens—including
+  their lower borders and status lines—in the output.
 - Kickstart 2.04 boots Workbench 2.x from ADF (`Install3.2.adf` confirmed). ✅
   Its `DDFSTRT=0x3c`, `DDFSTOP=0xd4` HIRES window consumes 40 words per
   bitplane row; the extra fetch needed by the narrower 1.3 window is applied

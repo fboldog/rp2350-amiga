@@ -1072,8 +1072,11 @@ void loresPlane1(void){
         int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
                          ? internal.vPos - (chipset.diwstrt >> 8)
                          : internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
-        host.rasterRow = omegaDdfIsFullWidth(chipset.ddfstrt)
-                       ? display_line * 2 : display_line;
+        host.rasterRow =
+            omegaDdfIsFullWidth(chipset.ddfstrt) &&
+            omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
+                                               chipset.diwstop)
+          ? display_line * 2 : display_line;
         host.rasterX = 0;
     }
     chipset.bpl1dat = 0;
@@ -1286,6 +1289,16 @@ int copperExecute(){
             internal.copperPC += 1;
             
             internal.IR2 = (internal.IR2 <<8) | (internal.IR2 >>8);
+
+            // FFFF FFFE is the Copper-list terminator.  It is commonly
+            // described as an unreachable WAIT, but a PAL beam position with
+            // bit 8 set compares above 0xFFFE in this extended representation.
+            // Freeze explicitly so execution cannot fall into adjacent data
+            // after scanline 255.
+            if (internal.IR1 == 0xFFFF && internal.IR2 == 0xFFFE) {
+                internal.copperCycle = 4;
+                return 1;
+            }
             
             internal.comparisonMask = (internal.IR2 | 0x0000); //ignore the instruction bits
 

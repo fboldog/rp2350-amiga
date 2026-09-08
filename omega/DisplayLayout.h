@@ -31,6 +31,20 @@ static inline int omegaDiwVerticalStop(uint16_t diwstop) {
     return 0x100 | (diwstop >> 8);
 }
 
+static inline int omegaDiwVerticalSpan(uint16_t diwstrt, uint16_t diwstop) {
+    return omegaDiwVerticalStop(diwstop) -
+           omegaDiwVerticalStart(diwstrt);
+}
+
+// Overscan LORES displays can advance through more beam rows than fit in the
+// native progressive viewport.  Keep their logical rows on alternating raster
+// rows; normal 200/256-line displays use every raster row.
+static inline int omegaLoresUsesAlternateRasterRows(uint16_t diwstrt,
+                                                     uint16_t diwstop) {
+    return omegaDiwVerticalSpan(diwstrt, diwstop) >
+           OMEGA_VIDEO_NATIVE_HEIGHT / 2;
+}
+
 static inline int omegaDiwCrossesVerticalBank(uint16_t diwstrt,
                                                uint16_t diwstop) {
     int start = omegaDiwVerticalStart(diwstrt);
