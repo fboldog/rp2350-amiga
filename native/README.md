@@ -29,20 +29,22 @@ mirrored automatically to fill the 512 KB window at 0xF80000–0xFFFFFF):
 
 ```bash
 # Kickstart 1.3 — insert-disk screen only (no floppy):
-OMEGA_ROM=kick-13.rom ./native/omega-native "" 500000
+OMEGA_ROM=sd_card/rom/kick13.rom ./native/omega-native "" 500000
 
 # Kickstart 1.3 — boot a WB 1.3 ADF to the AmigaDOS CLI:
-OMEGA_ROM=kick-13.rom ./native/omega-native workbench13.adf 300000 50000 3000
-#                                           ^disk.adf       ^iters ^dump ^insert-at
+OMEGA_ROM=sd_card/rom/kick13.rom ./native/omega-native \
+    sd_card/adf/amiga-os-134-workbench.adf 300000 50000 3000
+#   ^disk.adf                              ^iters ^dump ^insert-at
 
 # Kickstart 2.04 — ROM disk, no floppy (purple "Insert Workbench" backdrop):
-OMEGA_ROM=kick204.rom ./native/omega-native "" 500000
+OMEGA_ROM=sd_card/rom/kick204.rom ./native/omega-native "" 500000
 
 # Kickstart 2.04 — boot a WB 2.x / Install ADF:
-OMEGA_ROM=kick204.rom ./native/omega-native Install3.2.adf 500000 4000 3000
+OMEGA_ROM=sd_card/rom/kick204.rom ./native/omega-native \
+    sd_card/adf/Install3.2.adf 500000 4000 3000
 
 # Kickstart 3.14 — ROM-based Workbench, no floppy (boots automatically):
-OMEGA_ROM=kick314.rom ./native/omega-native "" 500000
+OMEGA_ROM=sd_card/rom/kick314.rom ./native/omega-native "" 500000
 
 # Convert the final PPM snapshot to PNG:
 python3 native/ppm2png.py frame_final.ppm frame_final.png
@@ -53,12 +55,14 @@ insert-disk screen after 500,000 iterations:
 
 ```bash
 HEADLESS=1 ./native/build.sh
-OMEGA_ROM=kick204.rom ./native/omega-native "" 500000 500000
+OMEGA_ROM=sd_card/rom/kick204.rom ./native/omega-native "" 500000 500000
 python3 native/ppm2png.py frame_final.ppm frame_final.png
 ```
 
-The same command works with `kick-13.rom` and `kick314.rom`. ROMs and generated
-`frame*.ppm`/`frame*.png` files are local test assets and must not be committed.
+The same command works with `sd_card/rom/kick13.rom` and
+`sd_card/rom/kick314.rom`. ROMs, ADFs, reference images under `image_refs/`,
+and generated `frame*.ppm`/`frame*.png` files are local test assets and must not
+be committed.
 
 ### KickSmash ROM switcher
 
@@ -68,7 +72,8 @@ ROM-bus message interface:
 
 ```sh
 KICKSMASH_SIM=1 VIDEO=PAL ./native/build.sh
-OMEGA_CPU=68020 OMEGA_ROM="$PWD/switcher.rom" ./native/omega-native
+OMEGA_CPU=68020 OMEGA_ROM="$PWD/sd_card/rom/switcher.rom" \
+    ./native/omega-native
 ```
 
 Native ROM loading accepts images from 1 byte through 512 KB. Images no larger
@@ -96,7 +101,7 @@ normal Kickstart `JMP` instruction at `0xF80002`:
 
 ```sh
 VIDEO=PAL ./native/build.sh
-OMEGA_ROM="$PWD/diagrom.rom" ./native/omega-native
+OMEGA_ROM="$PWD/sd_card/rom/diagrom.rom" ./native/omega-native
 ```
 
 DiagROM polls the high byte of `SERDATR` while printing its early diagnostics,

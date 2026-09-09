@@ -16,6 +16,8 @@ case "$VIDEO" in
 esac
 
 BASELINES="native/regression-baselines.sha256"
+ROM_DIR="sd_card/rom"
+ADF_DIR="sd_card/adf"
 OUTPUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omega-regression-${VIDEO_NAME}.XXXXXX")
 echo "regression artifacts: $OUTPUT_DIR"
 
@@ -34,9 +36,11 @@ require_file() {
     fi
 }
 
-for asset in kick-13.rom kick204.rom kick314.rom \
-             amiga-os-134-workbench.adf amiga-os-204-workbench.adf \
-             Install3.2.adf; do
+for asset in "$ROM_DIR/kick13.rom" "$ROM_DIR/kick204.rom" \
+             "$ROM_DIR/kick314.rom" \
+             "$ADF_DIR/amiga-os-134-workbench.adf" \
+             "$ADF_DIR/amiga-os-204-workbench.adf" \
+             "$ADF_DIR/Install3.2.adf"; do
     require_file "$asset"
 done
 
@@ -59,12 +63,15 @@ run_case() {
     printf '%s  %s/%s.ppm\n' "$checksum" "$VIDEO_NAME" "$name" >> "$RESULTS"
 }
 
-run_case kick13-insert kick-13.rom "" 500000 3000
-run_case kick204-insert kick204.rom "" 500000 3000
-run_case kick314-boot kick314.rom "" 500000 3000
-run_case wb13 kick-13.rom "$PWD/amiga-os-134-workbench.adf" 500000 3000
-run_case wb204 kick204.rom "$PWD/amiga-os-204-workbench.adf" 500000 3000
-run_case wb314 kick314.rom "$PWD/Install3.2.adf" 500000 3000
+run_case kick13-insert "$ROM_DIR/kick13.rom" "" 500000 3000
+run_case kick204-insert "$ROM_DIR/kick204.rom" "" 500000 3000
+run_case kick314-boot "$ROM_DIR/kick314.rom" "" 500000 3000
+run_case wb13 "$ROM_DIR/kick13.rom" \
+    "$PWD/$ADF_DIR/amiga-os-134-workbench.adf" 500000 3000
+run_case wb204 "$ROM_DIR/kick204.rom" \
+    "$PWD/$ADF_DIR/amiga-os-204-workbench.adf" 500000 3000
+run_case wb314 "$ROM_DIR/kick314.rom" \
+    "$PWD/$ADF_DIR/Install3.2.adf" 500000 3000
 
 if [ "${UPDATE_BASELINES:-0}" = "1" ]; then
     UPDATED="$OUTPUT_DIR/updated.sha256"
