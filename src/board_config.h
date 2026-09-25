@@ -43,9 +43,9 @@
 //  For DVI at 640x480p60 the pixel clock chain wants a sys clock that is an
 //  integer multiple of 251.75 MHz/N; PicoDVI's dvi_timing uses 252 MHz for
 //  full-res or ~126 MHz for the "scanbuf" path. If you enable DVI, revisit
-//  BOARD_SYS_CLK_KHZ so CPU speed and the DVI bit clock agree.
-#ifndef BOARD_SYS_CLK_KHZ
-#define BOARD_SYS_CLK_KHZ   250000u
+//  OMEGA_BOARD_SYS_CLK_KHZ so CPU speed and the DVI bit clock agree.
+#ifndef OMEGA_BOARD_SYS_CLK_KHZ
+#define OMEGA_BOARD_SYS_CLK_KHZ   150000u
 #endif
 #define BOARD_VREG_VOLTAGE  VREG_VOLTAGE_1_15
 
@@ -77,19 +77,19 @@
 #define BOARD_HAS_PSRAM      1
 #endif
 
-#define BOARD_PSRAM_CS_PIN       47          // QMI CS1  (GPIO_FUNC_XIP_CS1)
+#define BOARD_PSRAM_CS_PIN       47          // QMI CS1 (GPIO_FUNC_XIP_CS1)
 #define BOARD_PSRAM_BASE         0x11000000u // CS1 XIP window
 #ifndef BOARD_PSRAM_SIZE_BYTES
 #define BOARD_PSRAM_SIZE_BYTES   0x800000u   // 8 MB  (set to your fitted part)
 #endif
 
-//  QMI CS1 timing. clkdiv=2 -> QSPI at sys/2 (125 MHz @ 250 MHz sys), within
-//  APS6404L's 133 MHz quad-read rating. Raise to 3 if reads are unstable.
+//  QMI CS1 timing. At 3.3 V the APS6404L conservative maximum is 109 MHz;
+//  clkdiv=3 gives 83.3 MHz at the emulator's 250 MHz system clock.
 #ifndef BOARD_PSRAM_CLKDIV
-#define BOARD_PSRAM_CLKDIV       2u
+#define BOARD_PSRAM_CLKDIV       3u
 #endif
 #define BOARD_PSRAM_RXDELAY      1u
-#define BOARD_PSRAM_READ_DUMMY   6u          // 0xEB quad fast-read dummy cycles
+#define BOARD_PSRAM_READ_DUMMY   6u          // QMI encoding: 24 bits = 6 quad clocks
 
 // ---------------------------------------------------------------------------
 //  DVI / HDMI output   (differential pairs are {P = pin, N = pin+1})
@@ -134,6 +134,9 @@
 #define BOARD_SD_MISO_PIN       40    // SPI1 RX   (SD DAT0)
 #define BOARD_SD_CS_PIN         43    // plain GPIO (SD DAT3)
 #define BOARD_SD_SPI_BAUD       12500000u   // 12.5 MHz init-safe; raise after init
+#ifndef BOARD_SD_ROM_PATH
+#define BOARD_SD_ROM_PATH       "0:/rom/kick13.rom"
+#endif
 
 //  SDIO path (4-bit, faster) - D0..D3 are contiguous from BOARD_SD_SDIO_D0_PIN:
 #define BOARD_SD_SDIO_CLK_PIN   38    // NOTE: shared with DVI clock - SDIO and
@@ -162,7 +165,8 @@
 //  0x000000..0x1FFFFF  Chip RAM        (2 MB)      Amiga 0x000000..0x1FFFFF
 //  0x200000..0x27FFFF  Slow/Ranger RAM (512 KB)    Amiga 0xC00000..0xC7FFFF
 //  0x280000..0x47FFFF  DF0 MFM buffer  (2 MB)
-//  0x480000..0x67FFFF  DF1 MFM buffer  (2 MB)
+//  0x480000..0x4FFFFF  SD ROM cache    (512 KB; overlaps DF1)
+//  0x480000..0x67FFFF  DF1 MFM buffer  (2 MB; unavailable with SD ROM)
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
 //  0x780000..0x7FCFFF  Video DMA raster scratch (640x200 ARGB32, 500 KB)
 //  0x7FD000..0x7FFFFF  Reserved (12 KB)
@@ -172,10 +176,12 @@
 #define BOARD_MAP_DF1_OFFSET       0x480000u
 #define BOARD_MAP_FRAMEBUF_OFFSET  0x680000u
 #define BOARD_MAP_VIDEO_RASTER_OFFSET 0x780000u
+#define BOARD_MAP_SD_ROM_OFFSET    0x480000u
 
 #define BOARD_MAP_CHIPRAM_SIZE     0x200000u   // 2 MB
 #define BOARD_MAP_SLOWRAM_SIZE     0x080000u   // 512 KB
 #define BOARD_MAP_FLOPPY_SIZE      0x200000u   // 2 MB per drive
+#define BOARD_MAP_SD_ROM_SIZE      0x080000u   // 512 KB maximum
 
 //  Kickstart ROM in flash (place with tools/combine_uf2.py at offset 0x200000)
 #define BOARD_ROM_FLASH_BASE       0x10200000u

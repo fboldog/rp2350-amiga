@@ -65,7 +65,7 @@ Pick ONE output method and implement `display_push_frame()` in `src/Host.c`.
       RP2350-PiZero demo pack; or upstream Wren6991/PicoDVI)
 - [ ] `struct dvi_serialiser_cfg cfg = BOARD_DVI_SERIALISER_CFG;` +
       `pio_set_gpio_base(pio0, BOARD_DVI_GPIO_BASE);`
-- [ ] Pick timing: 640×480p60. Reconcile `BOARD_SYS_CLK_KHZ` with the DVI bit
+- [ ] Pick timing: 640×480p60. Reconcile `OMEGA_BOARD_SYS_CLK_KHZ` with the DVI bit
       clock (252 MHz full-res, ~126 MHz scanbuf). May need to drop the CPU
       overclock or run DVI on its own clock.
 - [ ] Allocate DVI scanline/framebuffer in PSRAM; convert Omega's ARGB32

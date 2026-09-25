@@ -10,7 +10,7 @@ to the **RP2350B** (Pimoroni Pico Plus 2), running on Cortex-M33 @ 250 MHz.
 | Build system (Pico SDK 2.x) | ✅ |
 | PSRAM init (APS6404L on QMI CS1) | ✅ |
 | Chip RAM / Slow RAM in PSRAM | ✅ |
-| ROM from flash (0x10200000) | ✅ |
+| ROM from microSD, with flash fallback | ✅ |
 | Musashi 68K CPU core | ✅ |
 | Custom chipset + CIA + DMA | ✅ |
 | Floppy (DF0/DF1 from flash ADF) | ✅ |
@@ -34,7 +34,7 @@ Target board: **Waveshare RP2350-PiZero** (RP2350B).  All board wiring is in
 - **Display (Phase 2)**: on-board DVI/HDMI.  TMDS D0=GPIO36, D1=GPIO34,
   D2=GPIO32, CLK=GPIO38 (`invert_diffpairs=false`, PIO0, `gpio_base=16`) —
   i.e. PicoDVI's `pico_sock_cfg`.
-- **microSD (Phase 3)**: SPI1 — SCK=GPIO30, MOSI=GPIO31, MISO=GPIO40,
+- **microSD**: SPI1 — SCK=GPIO30, MOSI=GPIO31, MISO=GPIO40,
   CS=GPIO43 (4-bit SDIO also wired: D0=40, D1=41, D2=42, D3=43, CLK=38).
 - **USB**: native USB-C (TinyUSB host for HID), plus an optional PIO-USB port.
 - **LED**: one WS2812 on GPIO2 (no plain LED).
@@ -48,9 +48,9 @@ To build for the original Pimoroni Pico Plus 2 instead, pass
 0x11000000  Chip RAM (2 MB)
 0x11200000  Slow/Ranger RAM (512 KB)
 0x11280000  DF0 MFM floppy buffer (2 MB)
-0x11480000  DF1 MFM floppy buffer (2 MB)
+0x11480000  SD Kickstart cache (first 512 KB) / DF1 MFM buffer (2 MB)
 0x11680000  Framebuffer 640×400 ARGB32 (1 MB)
-0x11780000  Reserved (512 KB)
+0x11780000  Video DMA raster scratch
 ```
 
 ## Flash Layout
@@ -85,6 +85,27 @@ chipset frame length, video-identification bit, and display viewport. PAL uses
 the taller 200-line intermediate raster required by its 400-line output.
 
 Output: `build/omega-amiga.uf2`
+
+### Load Kickstart from microSD
+
+Format a microSD card as FAT16 or FAT32 and copy the project `sd_card`
+contents to its root. The default ROM path is therefore:
+
+```text
+/rom/kick13.rom
+```
+
+At boot the firmware mounts the card through SPI1 and loads a valid 256 KB or
+512 KB Kickstart into PSRAM before resetting the 68K. Change
+`BOARD_SD_ROM_PATH` in `src/board_config.h` to select another ROM. If the card,
+filesystem, or file cannot be read, the firmware uses the ROM embedded in flash.
+
+The SD ROM cache overlaps DF1 because the current full-disk MFM representation
+uses almost all 8 MB of PSRAM. Consequently DF1 is disabled when an SD ROM is
+active; DF0 remains available. ADF files are not streamed from SD yet: the
+RP2350 path still reads an ADF from flash and expands the complete disk into its
+2 MB MFM buffer. Direct SD-backed ADF operation will require a track-sized
+read/encode cache rather than a normal file pointer.
 
 ### Flash with Kickstart ROM
 
@@ -143,8 +164,12 @@ TinyUSB is included in the Pico SDK; add `tinyusb_host` to `target_link_librarie
   compiles on Linux/macOS; `ADF2MFM_from_mem(buf,size,...)` is used on RP2350.
 - **CPU.c** has a `PICO_BUILD` guard in `cpu_pulse_reset()` to call
   `memory_clear_chipram()` instead of the `low16Meg` loop.
+- **FatFs** is configured read-only and provides FAT16/FAT32 access for ROM
+  loading. Its low-level disk layer uses the SPI1 pins in `board_config.h`.
 
 ## License
 
 Omega is licensed under MPL 2.0.  RP2350 port additions are also MPL 2.0.
 Kickstart ROMs are © Commodore/Cloanto – you must own a legal copy.
+FatFs is distributed under its own permissive license in
+`third_party/fatfs/LICENSE.txt`.

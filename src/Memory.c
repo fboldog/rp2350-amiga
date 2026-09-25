@@ -28,6 +28,16 @@ static uint8_t *slow_ram;   // PSRAM + PSRAM_SLOWRAM_OFFSET
 static const uint8_t *rom_base;
 static uint32_t       rom_size;
 
+static void psram_clear_words(uint8_t *memory, uint32_t bytes) {
+    volatile uint32_t *words = (volatile uint32_t *)memory;
+    for (uint32_t i = 0; i < bytes / sizeof(uint32_t); ++i) {
+        words[i] = 0;
+        if ((i & 0x3fffu) == 0x3fffu) {
+            printf("Memory: cleared through %p\n", (void *)&words[i]);
+        }
+    }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 // Big-endian word stored in RAM ↔ little-endian ARM read/write helpers
@@ -82,13 +92,25 @@ void memory_init(void) {
         rom_size = 0;
     }
 
+    printf("Memory: clearing chip RAM\n");
     memory_clear_chipram();
-    memset(slow_ram, 0, PSRAM_SLOWRAM_SIZE);
+    printf("Memory: clearing slow RAM\n");
+    psram_clear_words(slow_ram, PSRAM_SLOWRAM_SIZE);
+    printf("Memory: PSRAM clear complete\n");
+}
+
+int memory_set_rom(const uint8_t *data, uint32_t size) {
+    if (!data || (size != 0x40000u && size != 0x80000u) || data[0] != 0x11) {
+        return 0;
+    }
+    rom_base = data;
+    rom_size = size;
+    return 1;
 }
 
 void memory_clear_chipram(void) {
     // Leave longword at 0x000000 (Guru indicator) intact; clear from 4 up
-    memset(chip_ram + 4, 0, PSRAM_CHIPRAM_SIZE - 4);
+    psram_clear_words(chip_ram + 4, PSRAM_CHIPRAM_SIZE - 4);
 }
 
 // ── chipReadByte ──────────────────────────────────────────────────────────

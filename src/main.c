@@ -22,11 +22,13 @@
 #include "pico/multicore.h"
 #include "hardware/vreg.h"
 #include "hardware/clocks.h"
+#include "hardware/structs/scb.h"
 
 #include "board_config.h"
 #include "psram.h"
 #include "Memory.h"
 #include "Host.h"
+#include "sd_card.h"
 
 #include "../omega/CPU.h"
 #include "../omega/Chipset.h"
@@ -48,9 +50,27 @@
 #define ADF_FLASH_SIZE   0x200000u     // 2 MB per drive (MFM encoded)
 
 // ── Overclock ─────────────────────────────────────────────────────────────
-// RP2350 default: 150 MHz.  BOARD_SYS_CLK_KHZ (board_config.h) is the working
+// RP2350 default: 150 MHz. OMEGA_BOARD_SYS_CLK_KHZ is the working
 // point (250 MHz).  PSRAM QSPI = sys / BOARD_PSRAM_CLKDIV, kept ≤ 133 MHz.
-#define OVERCLOCK_KHZ  BOARD_SYS_CLK_KHZ
+#define OVERCLOCK_KHZ  OMEGA_BOARD_SYS_CLK_KHZ
+
+void __attribute__((noreturn, used)) hardfault_report(uint32_t *frame) {
+    printf("HARDFAULT: pc=%08lx lr=%08lx cfsr=%08lx hfsr=%08lx "
+           "mmfar=%08lx bfar=%08lx\n",
+           (unsigned long)frame[6], (unsigned long)frame[5],
+           (unsigned long)scb_hw->cfsr, (unsigned long)scb_hw->hfsr,
+           (unsigned long)scb_hw->mmfar, (unsigned long)scb_hw->bfar);
+    for (;;) tight_loop_contents();
+}
+
+void __attribute__((naked)) isr_hardfault(void) {
+    __asm volatile(
+        "tst lr, #4\n"
+        "ite eq\n"
+        "mrseq r0, msp\n"
+        "mrsne r0, psp\n"
+        "b hardfault_report\n");
+}
 
 static void set_sys_clock_250mhz(void) {
     vreg_set_voltage(BOARD_VREG_VOLTAGE);
@@ -77,6 +97,30 @@ static void load_floppy_from_flash(int drive, uint32_t flash_abs_addr) {
     printf("DF%d: loaded from flash 0x%08lx\n", drive, (unsigned long)flash_abs_addr);
 }
 
+static bool load_kickstart_from_sd(void) {
+#if BOARD_HAS_SDCARD
+    size_t rom_size = 0;
+    uint8_t *rom_cache = psram_ptr(PSRAM_SD_ROM_OFFSET);
+    if (!sd_card_mount() ||
+        !sd_card_load_file(BOARD_SD_ROM_PATH, rom_cache, PSRAM_SD_ROM_SIZE,
+                           &rom_size)) {
+        printf("ROM: using flash fallback\n");
+        return false;
+    }
+    if (!memory_set_rom(rom_cache, (uint32_t)rom_size)) {
+        printf("ROM: %s must be a valid 256 KB or 512 KB Kickstart\n",
+               BOARD_SD_ROM_PATH);
+        printf("ROM: using flash fallback\n");
+        return false;
+    }
+    printf("ROM: loaded %s from SD (%lu KB)\n", BOARD_SD_ROM_PATH,
+           (unsigned long)(rom_size >> 10));
+    return true;
+#else
+    return false;
+#endif
+}
+
 // ── Second core: runs the 68K CPU (future use) ────────────────────────────
 // Phase 1: everything runs on core 0.  Un-comment core1_entry to enable
 // dual-core operation once the shared-state locking is implemented.
@@ -98,11 +142,15 @@ int main(void) {
            OMEGA_VIDEO_RATE_DENOMINATOR);
 
     // 2. PSRAM
-    psram_init();
+    if (!psram_init()) {
+        printf("PSRAM: unsupported or not responding; halted\n");
+        for (;;) tight_loop_contents();
+    }
     printf("PSRAM initialised at 0x%08x (%u MB)\n", PSRAM_BASE, PSRAM_SIZE >> 20);
 
-    // 3. Memory (chip RAM, slow RAM, ROM from flash)
+    // 3. Memory (chip RAM, slow RAM, flash ROM fallback, then SD override)
     memory_init();
+    bool sd_rom_active = load_kickstart_from_sd();
 
     // 4. Host (framebuffer, display hardware)
     hostInit();
@@ -113,7 +161,8 @@ int main(void) {
 
     // 6. Floppy images (optional)
     load_floppy_from_flash(0, ADF0_FLASH_BASE);
-    load_floppy_from_flash(1, ADF1_FLASH_BASE);
+    if (!sd_rom_active) load_floppy_from_flash(1, ADF1_FLASH_BASE);
+    else printf("DF1: disabled (its PSRAM region holds the SD ROM cache)\n");
 
     printf("Entering emulation loop\n");
 

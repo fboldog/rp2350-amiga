@@ -22,10 +22,12 @@
 #define PSRAM_DF1_OFFSET        BOARD_MAP_DF1_OFFSET
 #define PSRAM_FRAMEBUF_OFFSET   BOARD_MAP_FRAMEBUF_OFFSET
 #define PSRAM_VIDEO_RASTER_OFFSET BOARD_MAP_VIDEO_RASTER_OFFSET
+#define PSRAM_SD_ROM_OFFSET     BOARD_MAP_SD_ROM_OFFSET
 
 #define PSRAM_CHIPRAM_SIZE      BOARD_MAP_CHIPRAM_SIZE
 #define PSRAM_SLOWRAM_SIZE      BOARD_MAP_SLOWRAM_SIZE
 #define PSRAM_FLOPPY_SIZE       BOARD_MAP_FLOPPY_SIZE
+#define PSRAM_SD_ROM_SIZE       BOARD_MAP_SD_ROM_SIZE
 
 static inline uint8_t *psram_ptr(uint32_t offset) {
     return (uint8_t *)(PSRAM_BASE + offset);
@@ -33,4 +35,6 @@ static inline uint8_t *psram_ptr(uint32_t offset) {
 
 // Initialise QMI CS1 for the fitted QSPI PSRAM (APS6404L class) at up to
 // sys/BOARD_PSRAM_CLKDIV.  Call once early in main() before any PSRAM access.
-void psram_init(void);
+// Returns true only when a supported AP Memory PSRAM responds and QMI mapping
+// has been configured.
+bool psram_init(void);

@@ -48,6 +48,9 @@ extern unsigned char low16Meg[16777216];
 // ── public API ───────────────────────────────────────────────────────────
 // Called once at startup; clears chip/slow RAM and mirrors ROM if needed.
 void memory_init(void);
+// Select a 256 KB or 512 KB Kickstart image already resident in memory.
+// Returns 1 when accepted; a 256 KB image is mirrored by address decoding.
+int memory_set_rom(const uint8_t *data, uint32_t size);
 // Wipe chip RAM from address 4 upward (called on 68k RESET)
 void memory_clear_chipram(void);
 

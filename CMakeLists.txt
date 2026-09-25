@@ -45,6 +45,9 @@ set(PLATFORM_SOURCES
     src/Host.c
     src/Planar.c
     src/Presentation.c
+    src/sd_card.c
+    src/sd_diskio.c
+    third_party/fatfs/ff.c
 )
 
 # Omega emulator core (platform-independent)
@@ -75,11 +78,16 @@ add_executable(omega-amiga
 target_include_directories(omega-amiga PRIVATE
     src
     omega
+    third_party/fatfs
 )
 
 # ── Compile definitions ────────────────────────────────────────────────────
 target_compile_definitions(omega-amiga PRIVATE
     PICO_BUILD=1
+    PICO_PSRAM_CS_PIN=47
+    PICO_AUTO_DETECT_PSRAM_SIZE=1
+    PICO_DEFAULT_PSRAM_MAX_FREQ=50000000
+    PICO_DEFAULT_PSRAM_MIN_DESELECT=50
     # Overclock: vreg / PLL config in main.c sets the actual clock;
     # this constant is just for documentation.
     OMEGA_SYS_KHZ=250000
@@ -92,6 +100,8 @@ target_link_libraries(omega-amiga
     pico_multicore
     hardware_vreg
     hardware_clocks
+    hardware_spi
+    hardware_psram
     hardware_structs    # qmi_hw
     hardware_xip_cache  # xip_cache_invalidate_all() (RP2350 XIP maintenance)
     # hardware_dma      # uncomment if you add DMA transfers for display
