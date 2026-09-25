@@ -19,6 +19,15 @@ set(PICO_BOARD waveshare_rp2350_pizero CACHE STRING "Target board")
 # Pull in Pico SDK (must be before project())
 include(pico_sdk_import.cmake)
 
+include(FetchContent)
+FetchContent_Declare(picodvi
+    GIT_REPOSITORY https://github.com/Wren6991/PicoDVI.git
+    GIT_TAG dccd738bfa9af75badcb32acde3e41bd6a3fa30a
+    GIT_SHALLOW TRUE
+    PATCH_COMMAND git apply --whitespace=nowarn
+                  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/picodvi-rp2350b.patch
+)
+
 project(omega-amiga C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -36,6 +45,14 @@ endif()
 
 pico_sdk_init()
 
+# Import only PicoDVI's driver library, not its examples or top-level project.
+FetchContent_GetProperties(picodvi)
+if(NOT picodvi_POPULATED)
+    FetchContent_Populate(picodvi)
+endif()
+add_subdirectory(${picodvi_SOURCE_DIR}/software/libdvi
+                 ${picodvi_BINARY_DIR}/libdvi)
+
 # ── Sources ───────────────────────────────────────────────────────────────
 # RP2350-specific files (override platform-dependent Omega originals)
 set(PLATFORM_SOURCES
@@ -45,6 +62,7 @@ set(PLATFORM_SOURCES
     src/Host.c
     src/Planar.c
     src/Presentation.c
+    src/dvi_display.c
     src/sd_card.c
     src/sd_diskio.c
     third_party/fatfs/ff.c
@@ -100,10 +118,12 @@ target_link_libraries(omega-amiga
     pico_multicore
     hardware_vreg
     hardware_clocks
+    hardware_dma
     hardware_spi
     hardware_psram
     hardware_structs    # qmi_hw
     hardware_xip_cache  # xip_cache_invalidate_all() (RP2350 XIP maintenance)
+    libdvi
     # hardware_dma      # uncomment if you add DMA transfers for display
 )
 
@@ -136,6 +156,14 @@ target_compile_options(omega-amiga PRIVATE
     -Wno-unused-variable
     # Musashi generates lots of implicit-fallthrough; suppress it
     -Wno-implicit-fallthrough
+)
+
+target_compile_definitions(omega-amiga PRIVATE
+    DVI_VERTICAL_REPEAT=2
+    # Two 720-pixel TMDS buffers fit beside Musashi's large dispatch tables
+    # in the RP2350's 520 KB SRAM. DMA consumes one while core 1 fills the other.
+    DVI_N_TMDS_BUFFERS=2
+    PICO_PIO_USE_GPIO_BASE=1
 )
 
 message(STATUS "Board:       ${PICO_BOARD}")

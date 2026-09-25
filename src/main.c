@@ -29,6 +29,7 @@
 #include "Memory.h"
 #include "Host.h"
 #include "sd_card.h"
+#include "dvi_display.h"
 
 #include "../omega/CPU.h"
 #include "../omega/Chipset.h"
@@ -72,10 +73,12 @@ void __attribute__((naked)) isr_hardfault(void) {
         "b hardfault_report\n");
 }
 
-static void set_sys_clock_250mhz(void) {
+static void set_board_sys_clock(void) {
     vreg_set_voltage(BOARD_VREG_VOLTAGE);
     sleep_ms(10);
-    set_sys_clock_khz(OVERCLOCK_KHZ, true);
+    if (!set_sys_clock_khz(OVERCLOCK_KHZ, true)) {
+        panic("Unsupported board system clock");
+    }
 }
 
 // ── Load floppy images from flash into PSRAM ──────────────────────────────
@@ -131,7 +134,7 @@ static bool load_kickstart_from_sd(void) {
 
 int main(void) {
     // 1. Clock and UART
-    set_sys_clock_250mhz();
+    set_board_sys_clock();
     stdio_uart_init_full(BOARD_UART_ID, BOARD_UART_BAUD,
                          BOARD_UART_TX_PIN, BOARD_UART_RX_PIN);
     printf("\n\nOmega/RP2350 – Amiga emulator\n");
@@ -140,6 +143,10 @@ int main(void) {
            OMEGA_VIDEO_NAME, OMEGA_VIDEO_FRAME_LINES,
            (double)OMEGA_VIDEO_RATE_NUMERATOR /
            OMEGA_VIDEO_RATE_DENOMINATOR);
+
+    // Bring HDMI up before touching external PSRAM. This SRAM-only test image
+    // keeps video diagnosis independent from the current PSRAM hardware issue.
+    dvi_display_init();
 
     // 2. PSRAM
     if (!psram_init()) {

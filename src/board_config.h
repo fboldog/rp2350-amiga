@@ -39,15 +39,12 @@
 // ---------------------------------------------------------------------------
 //  System clock
 // ---------------------------------------------------------------------------
-//  250 MHz is the emulator's working point (VREG 1.15 V, set in main.c).
-//  For DVI at 640x480p60 the pixel clock chain wants a sys clock that is an
-//  integer multiple of 251.75 MHz/N; PicoDVI's dvi_timing uses 252 MHz for
-//  full-res or ~126 MHz for the "scanbuf" path. If you enable DVI, revisit
-//  OMEGA_BOARD_SYS_CLK_KHZ so CPU speed and the DVI bit clock agree.
+//  270 MHz is the DVI serial bit clock for standard 720x576p50 and
+//  720x480p60. PicoDVI's PIO serialiser runs directly at the system clock.
 #ifndef OMEGA_BOARD_SYS_CLK_KHZ
-#define OMEGA_BOARD_SYS_CLK_KHZ   150000u
+#define OMEGA_BOARD_SYS_CLK_KHZ   270000u
 #endif
-#define BOARD_VREG_VOLTAGE  VREG_VOLTAGE_1_15
+#define BOARD_VREG_VOLTAGE  VREG_VOLTAGE_1_20
 
 // ---------------------------------------------------------------------------
 //  Debug UART  (UART0, 115200 8N1)
@@ -94,33 +91,21 @@
 // ---------------------------------------------------------------------------
 //  DVI / HDMI output   (differential pairs are {P = pin, N = pin+1})
 // ---------------------------------------------------------------------------
-//  Matches PicoDVI's "pico_sock_cfg" that Waveshare's 01-DVI demo selects.
+//  The connector uses GPIO32..39. These pins are not HSTX-capable: video must
+//  use PicoDVI's PIO serialiser (matching Waveshare's reference demo).
 #define BOARD_HAS_DVI            1
 #define BOARD_DVI_TMDS_D0_PIN    36    // pair 36/37  (blue)
 #define BOARD_DVI_TMDS_D1_PIN    34    // pair 34/35  (green)
 #define BOARD_DVI_TMDS_D2_PIN    32    // pair 32/33  (red)
 #define BOARD_DVI_TMDS_CLK_PIN   38    // pair 38/39
 #define BOARD_DVI_INVERT_DIFF    0     // pico_sock_cfg: invert_diffpairs = false
-#define BOARD_DVI_PIO            pio0
-#define BOARD_DVI_GPIO_BASE      16    // pio_set_gpio_base(pio, 16) - pins are >=16
+#define BOARD_DVI_PIO_GPIO_BASE  16
 
 //  HDMI DDC (EDID) + CEC - not needed for blind video output, wire later if
 //  you want mode negotiation.
 #define BOARD_DVI_DDC_SDA_PIN    44
 #define BOARD_DVI_DDC_SCL_PIN    45
 #define BOARD_DVI_CEC_PIN        46
-
-//  PicoDVI dvi_serialiser_cfg initialiser (drop into libdvi):
-//    struct dvi_serialiser_cfg cfg = BOARD_DVI_SERIALISER_CFG;
-#define BOARD_DVI_SERIALISER_CFG {                    \
-    .pio             = BOARD_DVI_PIO,                 \
-    .sm_tmds         = {0, 1, 2},                     \
-    .pins_tmds       = {BOARD_DVI_TMDS_D0_PIN,        \
-                        BOARD_DVI_TMDS_D1_PIN,        \
-                        BOARD_DVI_TMDS_D2_PIN},       \
-    .pins_clk        = BOARD_DVI_TMDS_CLK_PIN,        \
-    .invert_diffpairs = BOARD_DVI_INVERT_DIFF        \
-}
 
 // ---------------------------------------------------------------------------
 //  microSD card

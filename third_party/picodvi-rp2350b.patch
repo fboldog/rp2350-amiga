@@ -1,0 +1,16 @@
+diff --git a/software/libdvi/dvi_serialiser.pio b/software/libdvi/dvi_serialiser.pio
+--- a/software/libdvi/dvi_serialiser.pio
++++ b/software/libdvi/dvi_serialiser.pio
+@@ -1,3 +1,3 @@
+ .program dvi_serialiser
+-.side_set 2
++.side_set 2 opt
+ .origin 0
+@@ -32,5 +32,5 @@ static inline void dvi_serialiser_program_init(PIO pio, uint sm, uint offset, uint data_pins, bool debug) {
+ static inline void dvi_serialiser_program_init(PIO pio, uint sm, uint offset, uint data_pins, bool debug) {
+-    pio_sm_set_pins_with_mask(pio, sm, 2u << data_pins, 3u << data_pins);
+-    pio_sm_set_pindirs_with_mask(pio, sm, ~0u, 3u << data_pins);
++    pio_sm_set_pins_with_mask64(pio, sm, 2ull << data_pins, 3ull << data_pins);
++    pio_sm_set_pindirs_with_mask64(pio, sm, ~0ull, 3ull << data_pins);
+     pio_gpio_init(pio, data_pins);
+     pio_gpio_init(pio, data_pins + 1);
