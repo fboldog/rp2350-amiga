@@ -1,20 +1,22 @@
 # Omega Amiga Emulator – RP2350 Bare-Metal Port
 
 Port of [Omega](https://github.com/h5n1xp/Omega) (bare-metal 68K + Amiga chipset emulator)
-to the **RP2350B** (Pimoroni Pico Plus 2), running on Cortex-M33 @ 250 MHz.
+to the **RP2350B** (Waveshare RP2350-PiZero), running on Cortex-M33. The
+current hardware-debug build uses the RP2350 default 150 MHz clock.
 
 ## Status – Phase 1
 
 | Component | Status |
 |---|---|
 | Build system (Pico SDK 2.x) | ✅ |
-| PSRAM init (APS6404L on QMI CS1) | ✅ |
-| Chip RAM / Slow RAM in PSRAM | ✅ |
-| ROM from microSD, with flash fallback | ✅ |
+| PSRAM detection (APS6404L on QMI CS1) | ✅ 8 MB detected |
+| Sustained PSRAM access | ⚠️ blocked during first real write |
+| Chip RAM / Slow RAM in PSRAM | ⚠️ implemented, awaiting PSRAM fix |
+| ROM from microSD, with flash fallback | ⚠️ implemented, not reached on hardware |
 | Musashi 68K CPU core | ✅ |
 | Custom chipset + CIA + DMA | ✅ |
 | Floppy (DF0/DF1 from flash ADF) | ✅ |
-| Framebuffer in PSRAM | ✅ |
+| Framebuffer in PSRAM | ⚠️ implemented, awaiting PSRAM fix |
 | Display output (VGA/DVI/SPI-TFT) | ⬜ Phase 2 |
 | USB HID keyboard/mouse | ⬜ Phase 2 |
 
@@ -24,11 +26,11 @@ Target board: **Waveshare RP2350-PiZero** (RP2350B).  All board wiring is in
 [`src/board_config.h`](src/board_config.h); the Pico SDK board header is
 [`src/boards/waveshare_rp2350_pizero.h`](src/boards/waveshare_rp2350_pizero.h).
 
-- **MCU**: RP2350B (80-pin, GPIO0..47), Cortex-M33 @ 250 MHz
-- **PSRAM**: ⚠️ **not fitted from the factory** — the PiZero has an empty 8-pin
-  QSPI pad (U1) on the shared QMI bus, CS = GPIO47.  Solder an APS6404L-class
-  part (3.3 V quad, `0x35` enter-QPI, `0xEB` fast-read).  8 MB max on one die.
-  Mapped at `0x11000000` after `psram_init()`.
+- **MCU**: RP2350B (80-pin, GPIO0..47), Cortex-M33; currently run at 150 MHz
+- **PSRAM**: the tested board has an **APS6404L-3SQR** fitted to U1 on the
+  shared QMI bus, CS = GPIO47. Direct identification returns KGD `0x5d`, EID
+  `0x46` (8 MB), but sustained memory-mapped access currently stalls. The SDK
+  maps CS1 at `0x11000000` after startup detection.
 - **Flash**: 16 MB QSPI (CS0) → firmware at `0x10000000`, ROM at `0x10200000`
 - **UART**: TX=GPIO0, RX=GPIO1 (115200 8N1) for debug output
 - **Display (Phase 2)**: on-board DVI/HDMI.  TMDS D0=GPIO36, D1=GPIO34,
@@ -85,6 +87,25 @@ chipset frame length, video-identification bit, and display viewport. PAL uses
 the taller 200-line intermediate raster required by its 400-line output.
 
 Output: `build/omega-amiga.uf2`
+
+### Current RP2350 hardware result
+
+The firmware builds and can be flashed with OpenOCD. UART output is available
+on GPIO0/GPIO1 at 115200 baud (observed as `/dev/ttyACM1` with the current debug
+probe). On the populated APS6404L-3SQR board the current run reaches:
+
+```text
+Omega/RP2350 – Amiga emulator
+Sys clock: 150000 kHz
+Video: PAL (313 lines, 50.000 Hz)
+PSRAM: SDK detected 8 MB
+```
+
+It then stalls at the first real memory-mapped PSRAM write. A short cached
+write/read probe can appear successful and must not be treated as validation.
+Until QMI timing/cache behavior is fixed, memory clearing, SD mounting,
+Kickstart loading, emulation, and HDMI output are not reached. The HDMI path is
+also still a stub, so resolving PSRAM alone will not yet produce video.
 
 ### Load Kickstart from microSD
 
