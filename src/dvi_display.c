@@ -69,6 +69,11 @@ static void build_test_pattern(void) {
 }
 
 static void __not_in_flash_func(dvi_core1)(void) {
+    // Notify core 0 that runtime_run_per_core_initializers() (which calls
+    // bootrom_state_reset, resetting QMI M1) has completed.  Core 0 waits
+    // on this signal before calling psram_reinstate_m1() and memory_init().
+    multicore_fifo_push_blocking(0u);
+
     dvi_register_irqs_this_core(&dvi, DMA_IRQ_0);
     dvi_start(&dvi);
     uint y = 0;

@@ -144,16 +144,26 @@ int main(void) {
            (double)OMEGA_VIDEO_RATE_NUMERATOR /
            OMEGA_VIDEO_RATE_DENOMINATOR);
 
-    // Bring HDMI up before touching external PSRAM. This SRAM-only test image
-    // keeps video diagnosis independent from the current PSRAM hardware issue.
-    dvi_display_init();
-
-    // 2. PSRAM
+    // 2. PSRAM – must come before dvi_display_init() / multicore_launch_core1().
+    // psram_reinitialize() briefly suspends flash XIP; core 1 or DVI DMA IRQs
+    // firing from flash during that window would cause a HardFault.
     if (!psram_init()) {
         printf("PSRAM: unsupported or not responding; halted\n");
         for (;;) tight_loop_contents();
     }
     printf("PSRAM initialised at 0x%08x (%u MB)\n", PSRAM_BASE, PSRAM_SIZE >> 20);
+
+    // 2b. DVI – launches core 1 after PSRAM is confirmed working.
+    dvi_display_init();
+
+    // 2c. Wait for core 1's per-core init to complete.
+    // core1_wrapper calls runtime_run_per_core_initializers() which includes
+    // runtime_init_per_core_bootrom_reset() → bootrom_state_reset(CURRENT_CORE).
+    // That ROM call resets QMI M1 registers to SPI-single defaults, breaking
+    // PSRAM QUAD mode.  dvi_core1() signals us via FIFO once past that init;
+    // we re-apply QUAD mode before any PSRAM access.
+    multicore_fifo_pop_blocking();
+    psram_reinstate_m1();
 
     // 3. Memory (chip RAM, slow RAM, flash ROM fallback, then SD override)
     memory_init();

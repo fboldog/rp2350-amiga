@@ -29,13 +29,7 @@ static const uint8_t *rom_base;
 static uint32_t       rom_size;
 
 static void psram_clear_words(uint8_t *memory, uint32_t bytes) {
-    volatile uint32_t *words = (volatile uint32_t *)memory;
-    for (uint32_t i = 0; i < bytes / sizeof(uint32_t); ++i) {
-        words[i] = 0;
-        if ((i & 0x3fffu) == 0x3fffu) {
-            printf("Memory: cleared through %p\n", (void *)&words[i]);
-        }
-    }
+    memset(memory, 0, bytes);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

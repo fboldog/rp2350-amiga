@@ -38,3 +38,10 @@ static inline uint8_t *psram_ptr(uint32_t offset) {
 // Returns true only when a supported AP Memory PSRAM responds and QMI mapping
 // has been configured.
 bool psram_init(void);
+
+// Re-apply the QMI M1 QUAD-mode register values computed by psram_init().
+// Call from core 0 after multicore_launch_core1() returns, to undo the QMI M1
+// reset performed by core 1's per-core bootrom_state_reset.
+// Also called automatically via flash_set_qmi_cs1_setup_function after any
+// flash erase/program operation that temporarily suspends XIP.
+void psram_reinstate_m1(void);
