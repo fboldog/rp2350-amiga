@@ -2,9 +2,10 @@
 //
 // Boot sequence:
 //   1. Pico SDK CRT0 runs, initialises clocks / UART (via stdio)
-//   2. psram_init()     – configure QMI CS1 for 8 MB APS6404L PSRAM
+//      and hardware_psram configures QMI PSRAM
+//   2. psram_init()     – validate SDK detection and a read/write pattern
 //   3. memory_init()    – set up chip/slow RAM in PSRAM, find ROM in flash
-//   4. hostInit()       – point framebuffer into PSRAM, init display HW
+//   4. hostInit()       – point framebuffer into PSRAM
 //   5. cpu_init()       – reset Musashi 68K, CIA chips
 //   6. ChipsetInit()    – reset custom chip register state
 //   7. Main loop:       – run DMA + 68K cycles interleaved, call hostDisplay
@@ -19,17 +20,25 @@
 //   files at flash offsets defined by ADF0_FLASH_BASE / ADF1_FLASH_BASE.
 
 #include "pico/stdlib.h"
-#include "pico/multicore.h"
-#include "hardware/vreg.h"
 #include "hardware/clocks.h"
 #include "hardware/structs/scb.h"
+
+#if OMEGA_ENABLE_HDMI
+#include "hardware/psram.h"
+#include "hardware/vreg.h"
+#include "pico/multicore.h"
+#endif
 
 #include "board_config.h"
 #include "psram.h"
 #include "Memory.h"
 #include "Host.h"
+#if OMEGA_ENABLE_SDCARD
 #include "sd_card.h"
+#endif
+#if OMEGA_ENABLE_HDMI
 #include "dvi_display.h"
+#endif
 
 #include "../omega/CPU.h"
 #include "../omega/Chipset.h"
@@ -38,22 +47,19 @@
 #include "../omega/Floppy.h"
 #include "../omega/VideoStandard.h"
 
+#include <string.h>
+
 // ── PAL timing ────────────────────────────────────────────────────────────
 // 313 scanlines × 227 DMA cycles/line × 2 (odd+even) ≈ 142 246 cycles/frame
 // We batch 200 DMA+CPU pairs per main-loop iteration, matching the original.
 #define DMA_CPU_BATCH 200
 
 // ── Flash locations for ADF images (optional) ─────────────────────────────
-// Place MFM-pre-encoded ADF binaries in flash at these absolute addresses.
+// Place standard raw ADF images in flash at these absolute addresses. They are
+// expanded into each drive's MFM buffer during startup when the feature is on.
 // Leave them 0 / unprogrammed to boot without a floppy.
 #define ADF0_FLASH_BASE  0x10280000u   // flash offset 0x280000
 #define ADF1_FLASH_BASE  0x10480000u   // flash offset 0x480000
-#define ADF_FLASH_SIZE   0x200000u     // 2 MB per drive (MFM encoded)
-
-// ── Overclock ─────────────────────────────────────────────────────────────
-// RP2350 default: 150 MHz. OMEGA_BOARD_SYS_CLK_KHZ is the working
-// point (250 MHz).  PSRAM QSPI = sys / BOARD_PSRAM_CLKDIV, kept ≤ 133 MHz.
-#define OVERCLOCK_KHZ  OMEGA_BOARD_SYS_CLK_KHZ
 
 void __attribute__((noreturn, used)) hardfault_report(uint32_t *frame) {
     printf("HARDFAULT: pc=%08lx lr=%08lx cfsr=%08lx hfsr=%08lx "
@@ -71,14 +77,6 @@ void __attribute__((naked)) isr_hardfault(void) {
         "mrseq r0, msp\n"
         "mrsne r0, psp\n"
         "b hardfault_report\n");
-}
-
-static void set_board_sys_clock(void) {
-    vreg_set_voltage(BOARD_VREG_VOLTAGE);
-    sleep_ms(10);
-    if (!set_sys_clock_khz(OVERCLOCK_KHZ, true)) {
-        panic("Unsupported board system clock");
-    }
 }
 
 // ── Load floppy images from flash into PSRAM ──────────────────────────────
@@ -100,8 +98,27 @@ static void load_floppy_from_flash(int drive, uint32_t flash_abs_addr) {
     printf("DF%d: loaded from flash 0x%08lx\n", drive, (unsigned long)flash_abs_addr);
 }
 
+static void prepare_empty_df0(void) {
+    // Kickstart still needs a real, empty DF0 device when no ADF is loaded.
+    // Give each track a sync word followed by invalid/zero sector data. This
+    // lets trackdisk time out with "no sector header" and display the normal
+    // insert-disk screen instead of waiting forever for a sync marker.
+    enum { TRACK_BYTES = 12798, CYLINDERS = 80, SIDES = 2 };
+    uint8_t *mfm = df[0].mfmData;
+    if (!mfm) return;
+
+    memset(mfm, 0, PSRAM_FLOPPY_SIZE);
+    for (int cylinder = 0; cylinder < CYLINDERS; ++cylinder) {
+        for (int side = 0; side < SIDES; ++side) {
+            uint32_t offset = (uint32_t)(cylinder * SIDES + side) * TRACK_BYTES;
+            mfm[offset] = 0x44;
+            mfm[offset + 1] = 0x89;
+        }
+    }
+}
+
 static bool load_kickstart_from_sd(void) {
-#if BOARD_HAS_SDCARD
+#if OMEGA_ENABLE_SDCARD
     size_t rom_size = 0;
     uint8_t *rom_cache = psram_ptr(PSRAM_SD_ROM_OFFSET);
     if (!sd_card_mount() ||
@@ -132,11 +149,43 @@ static bool load_kickstart_from_sd(void) {
 //     for (;;) cpu_execute();
 // }
 
+#if OMEGA_ENABLE_HDMI
+static void prepare_hdmi_clock(void) {
+#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
+    const uint32_t dvi_clock_khz = 270000u;
+#else
+    const uint32_t dvi_clock_khz = 252000u;
+#endif
+
+    // PicoDVI serialises one TMDS bit per system-clock cycle. Raise the core
+    // voltage before overclocking, then recalculate and apply the SDK PSRAM
+    // timing for the faster QMI clock before touching external memory.
+    vreg_set_voltage(VREG_VOLTAGE_1_20);
+    sleep_ms(10);
+    if (!set_sys_clock_khz(dvi_clock_khz, true))
+        panic("Unable to select the PicoDVI system clock");
+    if (psram_configure_params(PICO_DEFAULT_PSRAM_MAX_FREQ,
+                               PICO_DEFAULT_PSRAM_MAX_SELECT,
+                               PICO_DEFAULT_PSRAM_MIN_DESELECT) != PICO_OK ||
+        psram_reinitialize() != PICO_OK)
+        panic("Unable to retime PSRAM for PicoDVI");
+}
+#endif
+
 int main(void) {
-    // 1. Clock and UART
-    set_board_sys_clock();
+    // 1. Clock and stdio. Normal builds retain the SDK's 150 MHz startup
+    // clock; PicoDVI builds select their video bit clock and retime PSRAM.
+#if OMEGA_ENABLE_HDMI
+    prepare_hdmi_clock();
+#endif
+#if OMEGA_STDIO_USB
+    stdio_init_all();
+    // Let the host enumerate USB CDC before printing the bring-up log.
+    sleep_ms(1500);
+#else
     stdio_uart_init_full(BOARD_UART_ID, BOARD_UART_BAUD,
                          BOARD_UART_TX_PIN, BOARD_UART_RX_PIN);
+#endif
     printf("\n\nOmega/RP2350 – Amiga emulator\n");
     printf("Sys clock: %lu kHz\n", (unsigned long)(clock_get_hz(clk_sys) / 1000));
     printf("Video: %s (%d lines, %.3f Hz)\n",
@@ -144,42 +193,51 @@ int main(void) {
            (double)OMEGA_VIDEO_RATE_NUMERATOR /
            OMEGA_VIDEO_RATE_DENOMINATOR);
 
-    // 2. PSRAM – must come before dvi_display_init() / multicore_launch_core1().
-    // psram_reinitialize() briefly suspends flash XIP; core 1 or DVI DMA IRQs
-    // firing from flash during that window would cause a HardFault.
+#if OMEGA_ENABLE_HDMI
+    // Launch core 1 first, but hold it before scanout until PSRAM is ready.
+    dvi_display_init();
+    multicore_fifo_pop_blocking();
+#endif
+
+    // 2. PSRAM was configured by hardware_psram before main(). Validate it.
     if (!psram_init()) {
         printf("PSRAM: unsupported or not responding; halted\n");
         for (;;) tight_loop_contents();
     }
     printf("PSRAM initialised at 0x%08x (%u MB)\n", PSRAM_BASE, PSRAM_SIZE >> 20);
 
-    // 2b. DVI – launches core 1 after PSRAM is confirmed working.
-    dvi_display_init();
-
-    // 2c. Wait for core 1's per-core init to complete.
-    // core1_wrapper calls runtime_run_per_core_initializers() which includes
-    // runtime_init_per_core_bootrom_reset() → bootrom_state_reset(CURRENT_CORE).
-    // That ROM call resets QMI M1 registers to SPI-single defaults, breaking
-    // PSRAM QUAD mode.  dvi_core1() signals us via FIFO once past that init;
-    // we re-apply QUAD mode before any PSRAM access.
-    multicore_fifo_pop_blocking();
-    psram_reinstate_m1();
-
-    // 3. Memory (chip RAM, slow RAM, flash ROM fallback, then SD override)
+    // 3. Memory (chip RAM, slow RAM, flash ROM fallback, optional SD override)
     memory_init();
     bool sd_rom_active = load_kickstart_from_sd();
 
     // 4. Host (framebuffer, display hardware)
     hostInit();
+#if OMEGA_ENABLE_HDMI
+    dvi_display_start();
+#endif
 
     // 5. Emulator core
     cpu_init();
     ChipsetInit();
 
-    // 6. Floppy images (optional)
+    // 6. Floppy images (optional). Keep this disabled while isolating HDMI;
+    // Kickstart boots without a disk and no MFM conversion runs at startup.
+    for (int drive = 0; drive < 4; ++drive)
+        floppyInit(drive);
+#if OMEGA_ENABLE_FLASH_FLOPPY
     load_floppy_from_flash(0, ADF0_FLASH_BASE);
+#if OMEGA_ENABLE_HDMI
+    (void)sd_rom_active;
+    printf("DF1: disabled (its PSRAM region holds HDMI scanout buffers)\n");
+#else
     if (!sd_rom_active) load_floppy_from_flash(1, ADF1_FLASH_BASE);
     else printf("DF1: disabled (its PSRAM region holds the SD ROM cache)\n");
+#endif
+#else
+    (void)sd_rom_active;
+    prepare_empty_df0();
+    printf("DF0/DF1: flash ADF loading disabled\n");
+#endif
 
     printf("Entering emulation loop\n");
 

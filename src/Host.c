@@ -1,14 +1,16 @@
 // RP2350 host layer – Phase 1 implementation.
 //
-// Video:   renders planar→chunky into a PSRAM framebuffer; no real display
-//          output yet.  Wire up PicoDVI / VGA PIO in Phase 2 by implementing
-//          display_push_frame() below.
+// Video:   renders planar→chunky into a PSRAM framebuffer and, when enabled,
+//          submits completed frames to the PicoDVI scanout running on core 1.
 // Input:   USB HID via TinyUSB (stubs until USB stack is wired up).
 // Serial:  printf → UART via pico_stdio_uart (configured in CMakeLists.txt).
 
 #include "Host.h"
 #include "Presentation.h"
 #include "psram.h"
+#if OMEGA_ENABLE_HDMI
+#include "dvi_display.h"
+#endif
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
 #include "../omega/CPU.h"
@@ -76,11 +78,17 @@ void toggleLEDs(void) {
 }
 
 // ── Display output stub ───────────────────────────────────────────────────
-// Replace this with PicoDVI push / SPI TFT blit / VGA scanline feed.
+// PicoDVI consumes completed frames; other display backends remain optional.
 static void display_push_frame(void) {
-    // Phase 1: no-op – framebuffer is in PSRAM, hook up display here.
-    // Example for SPI TFT: spi_tft_blit(fb, SCREEN_W, SCREEN_H);
+#if OMEGA_ENABLE_HDMI
+    static bool first_frame_queued;
+    if (dvi_display_submit_frame(fb) && !first_frame_queued) {
+        first_frame_queued = true;
+        printf("DVI: first emulator frame queued\n");
+    }
+#else
     (void)fb;
+#endif
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────

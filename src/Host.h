@@ -1,9 +1,10 @@
 // RP2350 host layer for the Omega Amiga emulator.
 // Replaces the SDL2-based Host.h/Host.c with bare-metal equivalents.
 //
-// Phase 1 (this file): framebuffer written to PSRAM; UART for debug output;
-//   USB HID stubs for keyboard/mouse.
-// Phase 2: hook up PicoDVI / VGA-PIO / SPI-TFT for real video output.
+// The framebuffer is written to PSRAM; keyboard/mouse entry points remain
+// stubs until USB HID support is added.
+// PicoDVI is implemented when OMEGA_ENABLE_HDMI is enabled; VGA-PIO and
+// SPI-TFT remain possible alternative backends.
 
 #pragma once
 #include <stdint.h>
@@ -14,7 +15,10 @@
 #ifdef PICO_BUILD
 // The RP2350's 8 MB PSRAM map reserves a fixed 1 MB ARGB framebuffer.
 #define SCREEN_H 400
-#define HOST_RASTER_H 200
+// Full-width LORES modes use alternate beam rows.  Keep the complete NTSC
+// field here: a 200-row scratch buffer preserves only the upper 100 logical
+// rows of the Kickstart 1.3 insert-disk artwork.
+#define HOST_RASTER_H SCREEN_H
 #else
 #define SCREEN_H OMEGA_VIDEO_NATIVE_HEIGHT
 // Native LORES DMA can occupy every PAL/NTSC beam row before presentation

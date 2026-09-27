@@ -847,18 +847,12 @@ void diskCycle(void){
 
                 uint16_t syncword = b1 << 8 | b2;
 
-                static int rdLog = 0;
-                if (rdLog < 8) { printf("[RD] cyl=%d side=%d idx=%d b1=%02X b2=%02X sw=%04X dsksync=%04X\n", df[driveSelected].cylinder, df[driveSelected].side, df[driveSelected].index-2, b1, b2, syncword, chipset.dsksync); rdLog++; }
-
                 if(syncword==chipset.dsksync){
                 
                     putChipReg16[INTREQ](0x9000);   //DSKSYNC INT
                     chipset.dskbytr |= 0x1000;  // set word sync bit
                 
                     if(floppySync==0){
-
-                        static int syncHits = 0;
-                        if (syncHits < 5) printf("[SYNC] found cyl=%d side=%d idx=%d dsklen=%04X (hit %d)\n", df[driveSelected].cylinder, df[driveSelected].side, df[driveSelected].index-2, chipset.dsklen, ++syncHits);
                         floppySync=1;
                         return;
                     }
@@ -876,8 +870,6 @@ void diskCycle(void){
                     chipset.dsklen -= 1;
                 
                     if( (chipset.dsklen & 0x3FFF) == 0){
-                        static int dskblkHits = 0;
-                        if (dskblkHits < 5) printf("[DSKBLK] fired (hit %d) cyl=%d side=%d\n", ++dskblkHits, df[driveSelected].cylinder, df[driveSelected].side);
                         putChipReg16[INTREQ](0x8002);   //Disk block loaded INT
                         floppySync = 0;
                         return;
@@ -1069,14 +1061,22 @@ void loresPlane1(void){
         return;
     }
     if (bitplaneLine.loresWords++ == 0) {
-        int display_line = omegaDdfIsFullWidth(chipset.ddfstrt)
-                         ? internal.vPos - (chipset.diwstrt >> 8)
-                         : internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
-        host.rasterRow =
-            omegaDdfIsFullWidth(chipset.ddfstrt) &&
+        int full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
+        int alternate_rows =
+            full_width &&
             omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
-                                               chipset.diwstop)
-          ? display_line * 2 : display_line;
+                                               chipset.diwstop);
+        // Overscan screens such as the Kickstart 1.3 requester start their
+        // display window before the standard visible raster. Anchor those
+        // rows at the first visible beam line instead of DIWSTRT, otherwise
+        // the artwork is shifted down and its lower edge is clipped.
+        int raster_origin = alternate_rows
+                          ? OMEGA_LORES_FIRST_RENDER_LINE
+                          : full_width ? (chipset.diwstrt >> 8)
+                                       : OMEGA_DISPLAY_RASTER_ORIGIN;
+        int display_line = internal.vPos - raster_origin;
+        host.rasterRow =
+            alternate_rows ? display_line * 2 : display_line;
         host.rasterX = 0;
     }
     chipset.bpl1dat = 0;

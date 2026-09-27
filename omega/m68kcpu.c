@@ -584,6 +584,7 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CYC_SHIFT        = 1;
 			CYC_RESET        = 132;
 			return;
+#ifndef PICO_BUILD
 		case M68K_CPU_TYPE_68010:
 			CPU_TYPE         = CPU_TYPE_010;
 			CPU_ADDRESS_MASK = 0x00ffffff;
@@ -632,6 +633,7 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CYC_SHIFT        = 0;
 			CYC_RESET        = 518;
 			return;
+#endif
 	}
 }
 

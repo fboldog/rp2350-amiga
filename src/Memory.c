@@ -84,6 +84,14 @@ void memory_init(void) {
         // ROM not found – ROM region will return 0 / open bus
         rom_base = NULL;
         rom_size = 0;
+        printf("ROM: no Kickstart header at flash 0x%08x\n",
+               (unsigned)ROM_FLASH_BASE);
+    } else {
+        uint16_t opcode = ram_read_word(rom_base + 2);
+        uint32_t entry = ram_read_long(rom_base + 4);
+        printf("ROM: flash 0x%08x, header=%02x%02x opcode=%04x entry=%08lx\n",
+               (unsigned)ROM_FLASH_BASE, rom_base[0], rom_base[1], opcode,
+               (unsigned long)entry);
     }
 
     printf("Memory: clearing chip RAM\n");

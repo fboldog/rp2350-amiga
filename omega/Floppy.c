@@ -395,7 +395,9 @@ void floppyState(){
 void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
     static uint8_t PRB;
+#ifndef PICO_BUILD
     static int count = 0;
+#endif
     
     PRB = CIAB.prb;
     
@@ -492,7 +494,9 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
     //Step head (don't step again if we've already stepped)
     if( (PRB & 0x1) && !(df[driveSelected].prb & 0x1) ){
+#ifndef PICO_BUILD
         printf("%04x - DF%d Click\n",count,driveSelected);
+#endif
         
         if(PRB & 0x2){
             df[driveSelected].cylinder -=1;
@@ -549,4 +553,3 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
 
 }
-

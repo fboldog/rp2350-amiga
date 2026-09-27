@@ -1,32 +1,69 @@
 cmake_minimum_required(VERSION 3.18)
 
 # ── Board / SDK setup ────────────────────────────────────────────────────
-# Point PICO_SDK_PATH to your Pico SDK 2.x checkout before running cmake:
-#   export PICO_SDK_PATH=/path/to/pico-sdk
-# Or set -DPICO_SDK_PATH=... on the cmake command line.
+# An existing Pico SDK can be selected with PICO_SDK_PATH. If it is omitted,
+# pico_sdk_import.cmake downloads the pinned SDK release into the build tree.
 #
-# Target board: Waveshare RP2350-PiZero (RP2350B, 16MB flash, PSRAM pad on
-# GPIO47, DVI, microSD).  We ship a local Pico SDK board header for it since
-# SDK 2.1.1 does not include one.  All peripheral pins live in
-# src/board_config.h; psram_init() in src/psram.c does the QMI CS1 setup.
+# Supported boards:
+#   waveshare_rp2350_pizero     optional PSRAM on GPIO47, on-board HDMI/microSD
+#   weact_studio_rp2350b_core   populated PSRAM on GPIO0, external DVI breakout
 #
-# To build for the original Pimoroni Pico Plus 2 instead, set
-#   -DPICO_BOARD=pimoroni_pico_plus2_rp2350
-# and define BOARD_* overrides, or revert to -DPICO_BOARD=pico2 (RP2350A).
+# The Waveshare header is local because older Pico SDK releases do not ship
+# it.  The WeAct header is provided by current Pico SDK 2.x releases.
 set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/src/boards)
 set(PICO_BOARD waveshare_rp2350_pizero CACHE STRING "Target board")
+set_property(CACHE PICO_BOARD PROPERTY STRINGS
+    waveshare_rp2350_pizero
+    weact_studio_rp2350b_core
+)
+
+option(OMEGA_ENABLE_HDMI "Build the PicoDVI output" OFF)
+option(OMEGA_ENABLE_SDCARD "Build microSD/FatFs Kickstart loading" OFF)
+option(OMEGA_ENABLE_FLASH_FLOPPY "Load ADF images embedded in flash" OFF)
+
+# Match the small hardware_psram test project: describe the physical PSRAM to
+# the SDK and let its startup code configure QMI before main().
+if(NOT DEFINED PSRAM_CS_PIN)
+    if(PICO_BOARD STREQUAL "weact_studio_rp2350b_core")
+        set(PSRAM_CS_PIN 0 CACHE STRING "PSRAM chip-select GPIO")
+    elseif(PICO_BOARD STREQUAL "waveshare_rp2350_pizero")
+        set(PSRAM_CS_PIN 47 CACHE STRING "PSRAM chip-select GPIO")
+    else()
+        message(FATAL_ERROR
+            "Unsupported PICO_BOARD '${PICO_BOARD}'. Set PSRAM_CS_PIN explicitly.")
+    endif()
+endif()
+
+set(PSRAM_SIZE_BYTES 8388608 CACHE STRING "PSRAM capacity in bytes")
+set(PICO_PSRAM_SIZE_BYTES ${PSRAM_SIZE_BYTES} CACHE STRING
+    "Pico SDK PSRAM linker region size")
+
+if(OMEGA_ENABLE_HDMI AND
+   NOT PICO_BOARD STREQUAL "waveshare_rp2350_pizero" AND
+   NOT PICO_BOARD STREQUAL "weact_studio_rp2350b_core")
+    message(FATAL_ERROR "OMEGA_ENABLE_HDMI is only supported on the Waveshare and WeAct boards")
+endif()
+if(OMEGA_ENABLE_SDCARD AND NOT PICO_BOARD STREQUAL "waveshare_rp2350_pizero")
+    message(FATAL_ERROR "OMEGA_ENABLE_SDCARD is only supported on waveshare_rp2350_pizero")
+endif()
 
 # Pull in Pico SDK (must be before project())
 include(pico_sdk_import.cmake)
 
-include(FetchContent)
-FetchContent_Declare(picodvi
-    GIT_REPOSITORY https://github.com/Wren6991/PicoDVI.git
-    GIT_TAG dccd738bfa9af75badcb32acde3e41bd6a3fa30a
-    GIT_SHALLOW TRUE
-    PATCH_COMMAND git apply --whitespace=nowarn
-                  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/picodvi-rp2350b.patch
-)
+if(OMEGA_ENABLE_HDMI)
+    include(FetchContent)
+    find_package(Git REQUIRED)
+    FetchContent_Declare(picodvi
+        GIT_REPOSITORY https://github.com/Wren6991/PicoDVI.git
+        GIT_TAG dccd738bfa9af75badcb32acde3e41bd6a3fa30a
+        GIT_SHALLOW TRUE
+        PATCH_COMMAND ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DSOURCE_DIR=<SOURCE_DIR>
+            -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/third_party/picodvi-rp2350b.patch
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_picodvi_patch.cmake
+    )
+endif()
 
 project(omega-amiga C CXX ASM)
 set(CMAKE_C_STANDARD 11)
@@ -45,13 +82,15 @@ endif()
 
 pico_sdk_init()
 
-# Import only PicoDVI's driver library, not its examples or top-level project.
-FetchContent_GetProperties(picodvi)
-if(NOT picodvi_POPULATED)
-    FetchContent_Populate(picodvi)
+if(OMEGA_ENABLE_HDMI)
+    # Import only PicoDVI's driver library, not its examples or top-level project.
+    FetchContent_GetProperties(picodvi)
+    if(NOT picodvi_POPULATED)
+        FetchContent_Populate(picodvi)
+    endif()
+    add_subdirectory(${picodvi_SOURCE_DIR}/software/libdvi
+                     ${picodvi_BINARY_DIR}/libdvi)
 endif()
-add_subdirectory(${picodvi_SOURCE_DIR}/software/libdvi
-                 ${picodvi_BINARY_DIR}/libdvi)
 
 # ── Sources ───────────────────────────────────────────────────────────────
 # RP2350-specific files (override platform-dependent Omega originals)
@@ -62,11 +101,19 @@ set(PLATFORM_SOURCES
     src/Host.c
     src/Planar.c
     src/Presentation.c
-    src/dvi_display.c
-    src/sd_card.c
-    src/sd_diskio.c
-    third_party/fatfs/ff.c
 )
+
+if(OMEGA_ENABLE_HDMI)
+    list(APPEND PLATFORM_SOURCES src/dvi_display.c)
+endif()
+
+if(OMEGA_ENABLE_SDCARD)
+    list(APPEND PLATFORM_SOURCES
+        src/sd_card.c
+        src/sd_diskio.c
+        third_party/fatfs/ff.c
+    )
+endif()
 
 # Omega emulator core (platform-independent)
 set(OMEGA_SOURCES
@@ -102,34 +149,53 @@ target_include_directories(omega-amiga PRIVATE
 # ── Compile definitions ────────────────────────────────────────────────────
 target_compile_definitions(omega-amiga PRIVATE
     PICO_BUILD=1
-    PICO_PSRAM_CS_PIN=47
+    PICO_PSRAM_CS_PIN=${PSRAM_CS_PIN}
+    PICO_PSRAM_SIZE_BYTES=${PSRAM_SIZE_BYTES}
     PICO_AUTO_DETECT_PSRAM_SIZE=1
-    PICO_DEFAULT_PSRAM_MAX_FREQ=50000000
-    PICO_DEFAULT_PSRAM_MIN_DESELECT=50
-    # Overclock: vreg / PLL config in main.c sets the actual clock;
-    # this constant is just for documentation.
-    OMEGA_SYS_KHZ=250000
+    OMEGA_ENABLE_HDMI=$<BOOL:${OMEGA_ENABLE_HDMI}>
+    OMEGA_ENABLE_SDCARD=$<BOOL:${OMEGA_ENABLE_SDCARD}>
+    OMEGA_ENABLE_FLASH_FLOPPY=$<BOOL:${OMEGA_ENABLE_FLASH_FLOPPY}>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
 )
+
+if(PICO_BOARD STREQUAL "weact_studio_rp2350b_core")
+    target_compile_definitions(omega-amiga PRIVATE
+        OMEGA_BOARD_WEACT=1
+        OMEGA_STDIO_USB=0
+    )
+elseif(PICO_BOARD STREQUAL "waveshare_rp2350_pizero")
+    target_compile_definitions(omega-amiga PRIVATE
+        OMEGA_BOARD_WAVESHARE=1
+        OMEGA_STDIO_USB=0
+    )
+endif()
 
 # ── Pico SDK libraries ────────────────────────────────────────────────────
 target_link_libraries(omega-amiga
     pico_stdlib
-    pico_multicore
-    hardware_vreg
     hardware_clocks
     hardware_dma
-    hardware_spi
     hardware_psram
-    hardware_structs    # qmi_hw
-    hardware_xip_cache  # xip_cache_invalidate_all() (RP2350 XIP maintenance)
-    libdvi
-    # hardware_dma      # uncomment if you add DMA transfers for display
 )
 
-# ── UART stdio (printf → UART0) ───────────────────────────────────────────
-pico_enable_stdio_uart(omega-amiga 1)
-pico_enable_stdio_usb(omega-amiga 0)
+if(OMEGA_ENABLE_HDMI)
+    target_link_libraries(omega-amiga pico_multicore hardware_vreg libdvi)
+endif()
+
+if(OMEGA_ENABLE_SDCARD)
+    target_link_libraries(omega-amiga hardware_spi)
+endif()
+
+# ── Board-specific stdio ──────────────────────────────────────────────────
+if(PICO_BOARD STREQUAL "weact_studio_rp2350b_core")
+    pico_enable_stdio_uart(omega-amiga 1)
+    pico_enable_stdio_usb(omega-amiga 0)
+    set(OMEGA_STDIO_DESCRIPTION "UART1 GPIO4/5")
+else()
+    pico_enable_stdio_uart(omega-amiga 1)
+    pico_enable_stdio_usb(omega-amiga 0)
+    set(OMEGA_STDIO_DESCRIPTION "UART0")
+endif()
 
 # ── Output formats ────────────────────────────────────────────────────────
 pico_add_extra_outputs(omega-amiga)   # generates .uf2, .hex, .bin, .map
@@ -158,15 +224,22 @@ target_compile_options(omega-amiga PRIVATE
     -Wno-implicit-fallthrough
 )
 
-target_compile_definitions(omega-amiga PRIVATE
-    DVI_VERTICAL_REPEAT=2
-    # Two 720-pixel TMDS buffers fit beside Musashi's large dispatch tables
-    # in the RP2350's 520 KB SRAM. DMA consumes one while core 1 fills the other.
-    DVI_N_TMDS_BUFFERS=2
-    PICO_PIO_USE_GPIO_BASE=1
-)
+if(OMEGA_ENABLE_HDMI)
+    target_compile_definitions(omega-amiga PRIVATE
+        DVI_VERTICAL_REPEAT=2
+        # Vertical repeat keeps a line owned by DMA for two physical rows;
+        # three buffers prevent the encoder starving on every second row.
+        DVI_N_TMDS_BUFFERS=3
+        PICO_PIO_USE_GPIO_BASE=1
+    )
+endif()
 
 message(STATUS "Board:       ${PICO_BOARD}")
-message(STATUS "SDK path:    $ENV{PICO_SDK_PATH}")
+message(STATUS "SDK path:    ${PICO_SDK_PATH}")
 message(STATUS "Build type:  ${CMAKE_BUILD_TYPE}")
 message(STATUS "Video mode:  ${OMEGA_VIDEO_MODE}")
+message(STATUS "PSRAM:      ${PSRAM_SIZE_BYTES} bytes, CS GPIO${PSRAM_CS_PIN}")
+message(STATUS "HDMI:       ${OMEGA_ENABLE_HDMI}")
+message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD}")
+message(STATUS "Flash ADF:  ${OMEGA_ENABLE_FLASH_FLOPPY}")
+message(STATUS "Console:    ${OMEGA_STDIO_DESCRIPTION}")

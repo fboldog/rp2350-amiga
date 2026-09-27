@@ -19,6 +19,15 @@
 #include "DMA.h"
 #include "debug.h"
 
+// Register-stub diagnostics are useful in the desktop debugger, but a ROM can
+// hit them continuously.  Printing every access over Pico USB stdio slows the
+// emulated CPU dramatically and obscures the boot/fault messages we need.
+#ifdef PICO_BUILD
+#define CHIPSET_STUB_LOG(...) ((void)0)
+#else
+#define CHIPSET_STUB_LOG(...) printf(__VA_ARGS__)
+#endif
+
 Chipset_t chipset;
 Internal_t internal;
 
@@ -82,7 +91,7 @@ uint32_t EHB2ARGB(uint16_t color){
 }
 
 uint16_t noRead(void){
-    printf("can't read a Write only Register %s\n",regNames[debugChipAddress]);
+    CHIPSET_STUB_LOG("can't read a Write only Register %s\n",regNames[debugChipAddress]);
     debugChipAddress = 0;
     return 0;
 }
@@ -203,7 +212,7 @@ void noopL(uint32_t value){
 }
 
 void longWrite(uint32_t value){
-    printf("32bit Write: to %s (%0x - %d) not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
+    CHIPSET_STUB_LOG("32bit Write: to %s (%0x - %d) not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
         debugChipAddress = 0;
 }
 
@@ -235,7 +244,7 @@ uint16_t clxdat(){
 }
 uint16_t adkconr(){
     
-    printf("adkconr called\n");
+    CHIPSET_STUB_LOG("adkconr called\n");
     
     return chipset.adkconr;
 }
@@ -266,12 +275,12 @@ uint16_t deniseid(){
 }
 
 void wordWrite(uint16_t value){
-    printf("16bit Write: %d to %s (%0x - %d) Not implemented!\n", debugChipValue, regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
+    CHIPSET_STUB_LOG("16bit Write: %d to %s (%0x - %d) Not implemented!\n", debugChipValue, regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
     debugChipAddress = 0;
 }
 
 void wordIllegalWrite(uint16_t value){
-     printf("16bit Write: To a read only register %s\n",regNames[debugChipAddress]);
+    CHIPSET_STUB_LOG("16bit Write: To a read only register %s\n",regNames[debugChipAddress]);
     debugChipAddress = 0;
 }
 
@@ -481,17 +490,10 @@ void diwstop(uint16_t value){
 
 
 void ddfstrt(uint16_t value){
-    static int ddfLog = 0;
-    if (value != chipset.ddfstrt && ddfLog < 5)
-        printf("[DDF] DDFSTRT 0x%02X -> 0x%02X (lastFetch will be 0x%02X)\n",
-               chipset.ddfstrt, value, value + 160), ddfLog++;
     chipset.ddfstrt = value;
 }
 
 void ddfstop(uint16_t value){
-    static int ddfStopLog = 0;
-    if (value != chipset.ddfstop && ddfStopLog < 5)
-        printf("[DDF] DDFSTOP 0x%02X -> 0x%02X\n", chipset.ddfstop, value), ddfStopLog++;
     chipset.ddfstop = value;
 }
 
@@ -1132,7 +1134,7 @@ void noop(uint16_t value){
 
 //***********************************************************************************************
 uint32_t noReadL(void){
-    printf("32bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
+    CHIPSET_STUB_LOG("32bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
     return 0;
 }
 
@@ -1141,7 +1143,7 @@ uint32_t vposrL(){  //0x2
 }
 
 uint8_t noReadB(void){
-    printf("8bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
+    CHIPSET_STUB_LOG("8bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
     return 0;
 }
 

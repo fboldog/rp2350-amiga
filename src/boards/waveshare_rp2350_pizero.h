@@ -69,8 +69,11 @@
 // The PiZero has a *footprint* (U1) for an 8-pin QSPI PSRAM on the shared QMI
 // bus (QSPI_SD0..3 / QSPI_SCLK), with its own chip-select on GPIO47.  Not
 // fitted from the factory - see src/board_config.h (BOARD_HAS_PSRAM).
-#ifndef PICO_RP2350_PSRAM_CS_PIN
-#define PICO_RP2350_PSRAM_CS_PIN 47
+#ifndef PICO_PSRAM_CS_PIN
+#define PICO_PSRAM_CS_PIN 47
+#endif
+#ifndef PICO_PSRAM_SIZE_BYTES
+#define PICO_PSRAM_SIZE_BYTES (8 * 1024 * 1024)
 #endif
 
 #ifndef PICO_RP2350_A2_SUPPORTED

@@ -4,7 +4,14 @@
 
 #include "m68kops.h"
 
-#define NUM_CPU_TYPES 3
+#define OPCODE_CPU_TYPES 3
+#ifdef PICO_BUILD
+// The RP2350 port always configures an A500-class 68000. Do not reserve two
+// unused 64 KiB cycle tables for the 68010 and 68020 in scarce internal SRAM.
+#define NUM_CPU_TYPES 1
+#else
+#define NUM_CPU_TYPES OPCODE_CPU_TYPES
+#endif
 
 void  (*m68ki_instruction_jump_table[0x10000])(void); /* opcode handler jump table */
 unsigned char m68ki_cycles[NUM_CPU_TYPES][0x10000]; /* Cycles used by CPU type */
@@ -15,7 +22,7 @@ typedef struct
 	void (*opcode_handler)(void);        /* handler function */
 	unsigned int  mask;                  /* mask on opcode */
 	unsigned int  match;                 /* what to match after masking */
-	unsigned char cycles[NUM_CPU_TYPES]; /* cycles each cpu type takes */
+	unsigned char cycles[OPCODE_CPU_TYPES]; /* cycles each cpu type takes */
 } opcode_handler_struct;
 
 
@@ -2048,9 +2055,11 @@ void m68ki_build_opcode_table(void)
 					// Add the cycle cost of shifting; 2 times the shift distance
 					cycle_cost = ((((i-1)&7)+1)<<1);
 					m68ki_cycles[0][instr] += cycle_cost;
+#if NUM_CPU_TYPES > 1
 					m68ki_cycles[1][instr] += cycle_cost;
 					// On the 68020 shift distance does not affect execution time
 					m68ki_cycles[2][instr] += 0;
+#endif
 				}
 			}
 		}
@@ -2099,5 +2108,4 @@ void m68ki_build_opcode_table(void)
 /* ======================================================================== */
 /* ============================== END OF FILE ============================= */
 /* ======================================================================== */
-
 

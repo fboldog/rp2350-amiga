@@ -8,7 +8,7 @@ Usage:
 The firmware is written starting at 0x10000000 (flash XIP base).
 The ROM is written starting at 0x10200000 (flash offset 0x200000).
 
-This matches the ROM_FLASH_BASE constant in src/memory.h.
+This matches BOARD_ROM_FLASH_BASE in src/board_config.h.
 
 ADF floppy images can also be appended at:
   DF0: 0x10280000  (flash offset 0x280000)
@@ -18,16 +18,14 @@ ADF floppy images can also be appended at:
         --adf0 workbench.adf --adf1 extras.adf
 """
 
-import sys
 import struct
 import argparse
+from collections import Counter
 
 UF2_MAGIC1 = 0x0A324655   # "UF2\n"
 UF2_MAGIC2 = 0x9E5D5157
 UF2_MAGIC3 = 0x0AB16F30
 UF2_FLAG_FAMILYID = 0x00002000
-RP2350_FAMILY_ID  = 0xe48bff57  # RP2350 family ID
-
 BLOCK_SIZE   = 512
 PAYLOAD_SIZE = 256
 FLASH_BASE   = 0x10000000
@@ -38,21 +36,40 @@ ADF1_FLASH_OFFSET = 0x480000
 
 
 def read_uf2_blocks(path):
-    """Return list of (target_addr, data_256) tuples from a UF2 file."""
-    blocks = []
+    """Read and validate a UF2, returning its original 512-byte blocks."""
     with open(path, 'rb') as f:
         data = f.read()
+
+    if not data or len(data) % BLOCK_SIZE:
+        raise ValueError(
+            f"{path}: size must be a non-zero multiple of {BLOCK_SIZE} bytes")
+
+    blocks = []
     for off in range(0, len(data), BLOCK_SIZE):
         blk = data[off:off + BLOCK_SIZE]
-        if len(blk) < BLOCK_SIZE:
-            break
-        m1, m2, flags, addr, plen, blkno, totalblks, familyid, m3 = \
-            struct.unpack_from('<IIIIIIIII', blk, 0)
+        m1, m2, flags, addr, plen, blkno, totalblks, familyid = \
+            struct.unpack_from('<IIIIIIII', blk, 0)
+        m3 = struct.unpack_from('<I', blk, BLOCK_SIZE - 4)[0]
         if m1 != UF2_MAGIC1 or m2 != UF2_MAGIC2 or m3 != UF2_MAGIC3:
-            continue
-        payload = blk[32:32 + PAYLOAD_SIZE]
-        blocks.append((addr, payload))
+            raise ValueError(f"{path}: invalid UF2 magic in block {off // BLOCK_SIZE}")
+        if plen == 0 or plen > BLOCK_SIZE - 36:
+            raise ValueError(
+                f"{path}: invalid payload size {plen} in block {off // BLOCK_SIZE}")
+        blocks.append(blk)
     return blocks
+
+
+def firmware_family_id(blocks):
+    """Use the predominant family ID from the input application's UF2 blocks."""
+    families = Counter()
+    for blk in blocks:
+        flags, _addr, _plen, _blkno, _totalblks, familyid = \
+            struct.unpack_from('<IIIIII', blk, 8)
+        if flags & UF2_FLAG_FAMILYID:
+            families[familyid] += 1
+    if not families:
+        raise ValueError("firmware UF2 contains no family ID")
+    return families.most_common(1)[0][0]
 
 
 def binary_to_uf2_blocks(data, base_addr):
@@ -65,11 +82,15 @@ def binary_to_uf2_blocks(data, base_addr):
     return blocks
 
 
-def write_uf2(blocks, path):
-    """Write (addr, data_256) list to a UF2 file."""
-    total = len(blocks)
+def write_uf2(firmware_blocks, appended_blocks, family_id, path):
+    """Preserve firmware blocks and append a separately numbered UF2 image."""
+    total = len(appended_blocks)
     with open(path, 'wb') as f:
-        for blkno, (addr, payload) in enumerate(blocks):
+        # RP2350 SDK UF2s can contain metadata/extension blocks.  Keep every
+        # firmware block byte-for-byte instead of reconstructing and losing it.
+        for blk in firmware_blocks:
+            f.write(blk)
+        for blkno, (addr, payload) in enumerate(appended_blocks):
             hdr = struct.pack('<IIIIIII',
                               UF2_MAGIC1,
                               UF2_MAGIC2,
@@ -78,12 +99,12 @@ def write_uf2(blocks, path):
                               PAYLOAD_SIZE,
                               blkno,
                               total)
-            fam = struct.pack('<I', RP2350_FAMILY_ID)
+            fam = struct.pack('<I', family_id)
             blk = hdr + fam + payload + b'\x00' * (BLOCK_SIZE - 32 - PAYLOAD_SIZE - 4)
             blk += struct.pack('<I', UF2_MAGIC3)
             assert len(blk) == BLOCK_SIZE
             f.write(blk)
-    print(f"Wrote {total} UF2 blocks to {path}")
+    print(f"Wrote {len(firmware_blocks)} firmware + {total} data blocks to {path}")
 
 
 def main():
@@ -96,8 +117,15 @@ def main():
     parser.add_argument('--adf1',       help='DF1 ADF image (optional)')
     args = parser.parse_args()
 
-    blocks = read_uf2_blocks(args.firmware_uf2)
-    print(f"Firmware: {len(blocks)} blocks from {args.firmware_uf2}")
+    try:
+        firmware_blocks = read_uf2_blocks(args.firmware_uf2)
+        family_id = firmware_family_id(firmware_blocks)
+    except ValueError as exc:
+        parser.error(str(exc))
+    print(f"Firmware: {len(firmware_blocks)} blocks from {args.firmware_uf2}")
+    print(f"Family ID: 0x{family_id:08x} (copied from firmware)")
+
+    blocks = []
 
     with open(args.rom_bin, 'rb') as f:
         rom = f.read()
@@ -127,7 +155,7 @@ def main():
         print(f"DF1 ADF:  {len(adf1_blocks)} blocks at 0x{adf1_addr:08x}")
         blocks.extend(adf1_blocks)
 
-    write_uf2(blocks, args.output_uf2)
+    write_uf2(firmware_blocks, blocks, family_id, args.output_uf2)
 
 
 if __name__ == '__main__':

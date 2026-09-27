@@ -7,12 +7,12 @@
 
 ---
 
-## Phase 1 – Compile target (PARTIAL — build and UART verified on hardware)
+## Phase 1 – Compile target (COMPLETE — emulator and HDMI verified on hardware)
 
-Toolchain: ARM GNU Toolchain 14.2.rel1 (aarch64-arm-none-eabi) + Pico SDK 2.1.1.
-Output `build/omega-amiga.uf2` builds clean and has been flashed through a Pico
-Debug Probe. UART startup is verified. The board currently stops during its
-first sustained PSRAM access; it does not yet enter the emulator loop.
+Toolchain: ARM GNU Toolchain 14.2.rel1 (aarch64-arm-none-eabi) + Pico SDK 2.3.1.
+Output `omega-amiga.uf2` builds for both Waveshare and WeAct RP2350B boards.
+On WeAct, PSRAM, flash Kickstart loading, emulation, UART, and external DVI on
+GPIO11..18 are verified through the Kickstart 1.3 insert-disk animation.
 
 Core logic verified via `native/` head-less runner (2026-09-01): Kickstart 1.3 +
 `original2.adf` boot to the AmigaDOS CLI on a PC build of the same `omega/*.c`.
@@ -20,14 +20,13 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 (The `rp2350-emu` crate can't run the firmware — no QMI/PSRAM emulation.)
 
 - [x] Project structure: `omega/` (upstream), `src/` (RP2350 platform)
-- [x] CMakeLists.txt for Pico SDK 2.x, board `pico2`
-- [~] `src/psram.c` – SDK detects the 8 MB APS6404L on QMI CS1/GPIO47, but
-      sustained memory-mapped access stalls at 0x11000000
-- [~] `src/Memory.c` – PSRAM-backed chipRead*/chipWrite* is implemented, but
-      hardware validation is blocked by PSRAM access
+- [x] CMakeLists.txt for Pico SDK 2.x, Waveshare and WeAct RP2350B boards
+- [x] `src/psram.c` – simple SDK-backed availability/size/pattern validation,
+      based on the known-good `rp2350b-psram` project
+- [x] `src/Memory.c` – PSRAM-backed chipRead*/chipWrite* hardware-validated
 - [x] `src/Host.c` – SDL-free host; framebuffer pointer in PSRAM; UART printf
-- [~] `src/main.c` – bare-metal entry and PSRAM/memory/CPU init sequence;
-      currently held at 150 MHz while PSRAM access is debugged
+- [x] `src/main.c` – bare-metal entry and PSRAM/memory/CPU init sequence;
+      HDMI clock selection safely retimes PSRAM through the SDK
 - [x] `omega/CPU.c` – `#ifdef PICO_BUILD` guard around `low16Meg` clear in `cpu_pulse_reset`
 - [x] `omega/Chipset.c` – `chipramW` set via `CHIPRAM_BASE_PTR` macro
 - [x] `omega/DMA.c` – disk DMA writes use `CHIPRAM_BASE_PTR`; SDL_Atomic calls commented
@@ -41,16 +40,12 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 
 ---
 
-## Phase 2 – Display output
+## Phase 2 – Display output (DVI COMPLETE ON WEACT)
 
-Target board is the **Waveshare RP2350-PiZero** (see `src/board_config.h`),
-which has an on-board **DVI/HDMI** connector — so Option C below is the natural
-choice. Pin map is already in `board_config.h`:
-TMDS D0=GPIO36, D1=GPIO34, D2=GPIO32, CLK=GPIO38, `invert_diffpairs=false`,
-PIO0, `pio_set_gpio_base(pio0, 16)` — identical to PicoDVI's `pico_sock_cfg`.
-Use `BOARD_DVI_SERIALISER_CFG` to init libdvi.
-
-Pick ONE output method and implement `display_push_frame()` in `src/Host.c`.
+PicoDVI is implemented for Waveshare's on-board connector and the WeAct board
+with an external Adafruit breakout on GPIO11..18. The WeAct path is verified
+with stable, correctly positioned Kickstart 1.3 video. VGA and SPI TFT remain
+alternative future backends.
 
 ### Option A: SPI TFT (easiest hardware, lowest bandwidth)
 - [ ] Choose driver chip: ILI9341 (240×320) or ST7789 (240×240 or 320×240)
@@ -65,17 +60,14 @@ Pick ONE output method and implement `display_push_frame()` in `src/Host.c`.
 - [ ] In DMA `evenCycle` VBL handler, push each scanline to the VGA scanvideo buffer
 - [ ] Add `pico_scanvideo_dpi` to target_link_libraries
 
-### Option C: DVI/HDMI via PicoDVI  ◀ RP2350-PiZero has this on-board
-- [ ] Add PicoDVI `libdvi` (Waveshare ship a known-good copy in their
-      RP2350-PiZero demo pack; or upstream Wren6991/PicoDVI)
-- [ ] `struct dvi_serialiser_cfg cfg = BOARD_DVI_SERIALISER_CFG;` +
-      `pio_set_gpio_base(pio0, BOARD_DVI_GPIO_BASE);`
-- [ ] Pick timing: 640×480p60. Reconcile `OMEGA_BOARD_SYS_CLK_KHZ` with the DVI bit
-      clock (252 MHz full-res, ~126 MHz scanbuf). May need to drop the CPU
-      overclock or run DVI on its own clock.
-- [ ] Allocate DVI scanline/framebuffer in PSRAM; convert Omega's ARGB32
-      640×400 → RGB565 (letterbox to 480 lines) in `display_push_frame()`
-- [ ] DVI IRQ + scanout on core 1 (see Phase 4)
+### Option C: DVI/HDMI via PicoDVI
+- [x] Fetch and patch PicoDVI `libdvi` through CMake
+- [x] Configure board-specific serialiser pins and PIO GPIO bases
+- [x] Use 720×480p60 at 252 MHz for NTSC and 720×576p50 at 270 MHz for PAL
+- [x] Present Omega's 640×400 ARGB32 framebuffer through double-buffered
+      RGB332 frames in PSRAM
+- [x] Run TMDS encoding and scanout on core 1, with startup acknowledgement
+- [ ] Repeat the hardware test on Waveshare with a compatible PSRAM fitted
 
 ---
 
@@ -84,8 +76,9 @@ Pick ONE output method and implement `display_push_frame()` in `src/Host.c`.
 - [x] Add a read-only FatFs + SD-SPI driver; pins in
       `board_config.h`: SPI1 SCK30/MOSI31/MISO40/CS43)
 - [~] Load Kickstart ROM from `/rom/kick13.rom`, with flash fallback. The code
-      is complete but has not run on hardware because boot stalls in PSRAM
-      before SD mounting. ADFs remain flash-backed and fully MFM-expanded.
+      is complete but SD reading is temporarily build-disabled by default and
+      still needs validation on Waveshare. ADFs remain flash-backed and are
+      expanded to MFM in PSRAM when enabled.
 - [ ] Stream ADF tracks from SD instead of storing a complete MFM image in
       PSRAM; this is needed for practical disk swapping
 - [ ] Optional: a tiny on-screen disk chooser
@@ -174,13 +167,9 @@ exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
 
 ## Known issues / investigation needed
 
-- [ ] **PSRAM memory-mapped access blocker**: APS6404L-3SQR identification on
-      GPIO47 is valid (KGD `0x5d`, EID `0x46`, 8 MB), and the Pico SDK reports
-      the device at a 50 MHz maximum setting. At the current 150 MHz system
-      clock, the first sustained write through `0x11000000` stalls. Test the
-      uncached/no-allocate XIP alias and explicit cache maintenance, inspect QMI
-      registers, then compare the SDK setup with a known-working APS6404 driver.
-      Do not accept the present eight-word cached probe as proof of operation.
+- [ ] **Waveshare PSRAM hardware validation**: WeAct passes the 1024-byte test,
+      full memory clear, emulator loop, and HDMI output. Repeat on a Waveshare
+      board with a compatible PSRAM part fitted to U1.
 - [ ] **`chipset.vposr` PAL/NTSC flag**: currently hardcoded to NTSC value `0x1000`.
       PAL should be `0x0000`. Change in `omega/DMA.c:dma_execute()`.
 - [ ] **ROM validation**: `src/Memory.c:memory_init()` checks `rom_base[0] == 0x11`.

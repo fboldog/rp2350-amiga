@@ -4,7 +4,8 @@
 // board_config.h.  The Amiga-side memory map is defined there too; the names
 // below are kept as short aliases so the rest of the code is unchanged.
 //
-// After boot-time QMI init (psram_init()), PSRAM is memory-mapped at PSRAM_BASE.
+// Pico SDK hardware_psram initializes QMI before main(). psram_init() only
+// validates detection, capacity, and a small deterministic read/write pattern.
 
 #pragma once
 #include <stdint.h>
@@ -33,15 +34,5 @@ static inline uint8_t *psram_ptr(uint32_t offset) {
     return (uint8_t *)(PSRAM_BASE + offset);
 }
 
-// Initialise QMI CS1 for the fitted QSPI PSRAM (APS6404L class) at up to
-// sys/BOARD_PSRAM_CLKDIV.  Call once early in main() before any PSRAM access.
-// Returns true only when a supported AP Memory PSRAM responds and QMI mapping
-// has been configured.
+// Validate the SDK-initialized PSRAM before any emulator memory is accessed.
 bool psram_init(void);
-
-// Re-apply the QMI M1 QUAD-mode register values computed by psram_init().
-// Call from core 0 after multicore_launch_core1() returns, to undo the QMI M1
-// reset performed by core 1's per-core bootrom_state_reset.
-// Also called automatically via flash_set_qmi_cs1_setup_function after any
-// flash erase/program operation that temporarily suspends XIP.
-void psram_reinstate_m1(void);
