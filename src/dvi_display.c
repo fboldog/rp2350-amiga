@@ -42,7 +42,9 @@ static const struct dvi_timing amiga_dvi_timing = {
 #define DVI_ACTIVE_WIDTH   720u
 #define DVI_MODE_PREFIX    "720x576p50"
 #define SOURCE_HEIGHT      288u
-#define AMIGA_SOURCE_HEIGHT 200u
+// PAL screens such as Workbench use 256 lines; showing only 200 cut off the
+// lower edge of windows.
+#define AMIGA_SOURCE_HEIGHT 256u
 #else
 // NTSC builds run clk_sys at 252 MHz, which is exactly VGA 640x480p60
 // (25.2 MHz pixels). PicoDVI's 720x480p60 timing needs 270 MHz; at 252 MHz it
@@ -75,7 +77,8 @@ typedef uint8_t dvi_pixel_t;
 // Full-width scanlines are too large to fetch from PSRAM on core 1: the
 // emulator saturates the shared QMI bus and 720-byte line reads regularly
 // missed the scanline deadline (PicoDVI then emits red lines). Keep only the
-// 640x200 image, double-buffered, in SRAM; core 1 adds the black borders.
+// 640x200 (NTSC) or 640x256 (PAL) image, double-buffered, in SRAM; core 1
+// adds the borders.
 #define DVI_FRAME_W AMIGA_SOURCE_WIDTH
 #define DVI_FRAME_H AMIGA_SOURCE_HEIGHT
 static dvi_pixel_t sram_frames[2][DVI_FRAME_W * DVI_FRAME_H]
@@ -182,10 +185,17 @@ bool dvi_display_submit_frame(const uint32_t *argb_frame) {
     // Borders stay black after the first frame, so only update the image
     // rectangle. This avoids a full-frame write on subsequent frames.
     // The presented frame's corner always holds the border colour.
-    frame_border[target] = argb_to_dvi_pixel(argb_frame[0]);
+    const dvi_pixel_t border_pixel = argb_to_dvi_pixel(argb_frame[0]);
+    frame_border[target] = border_pixel;
     for (uint y = 0; y < AMIGA_SOURCE_HEIGHT; ++y) {
-        const uint32_t *src_row = argb_frame + (y * 2u) * SCREEN_W;
         dvi_pixel_t *dst_row = dvi_image_row(dst, y);
+        // The presented framebuffer holds SCREEN_H / 2 logical rows.
+        if (y >= SCREEN_H / 2u) {
+            for (uint x = 0; x < AMIGA_SOURCE_WIDTH; ++x)
+                dst_row[x] = border_pixel;
+            continue;
+        }
+        const uint32_t *src_row = argb_frame + (y * 2u) * SCREEN_W;
         for (uint x = 0; x < AMIGA_SOURCE_WIDTH; ++x)
             dst_row[x] = argb_to_dvi_pixel(
                 src_row[x * (DVI_FULL_WIDTH ? 1u : 2u)]);

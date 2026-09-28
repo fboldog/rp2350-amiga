@@ -23,7 +23,9 @@ unsigned short m68ki_instruction_index[0x10000]; /* opcode handler index */
 #define M68KI_HANDLER_TABLE_CONST
 void  (*m68ki_instruction_jump_table[0x10000])(void); /* opcode handler jump table */
 #endif
+#ifndef PICO_BUILD
 unsigned char m68ki_cycles[NUM_CPU_TYPES][0x10000]; /* Cycles used by CPU type */
+#endif
 
 /* This is used to generate the opcode handler jump table */
 typedef struct
@@ -2010,16 +2012,33 @@ static M68KI_HANDLER_TABLE_CONST opcode_handler_struct m68k_opcode_handler_table
 /* The terminating entry's slot dispatches illegal opcodes. */
 #define M68KI_ILLEGAL_INDEX (M68KI_HANDLER_COUNT - 1)
 void (*m68ki_handler_ptrs[M68KI_HANDLER_COUNT])(void);
+/* Per-handler 68000 cycles; replaces the 64 KiB per-opcode cycle table. */
+unsigned short m68ki_handler_cycles[M68KI_HANDLER_COUNT];
 #define M68KI_SET_HANDLER(op, os) \
 	(m68ki_instruction_index[op] = \
 		(unsigned short)((os) - m68k_opcode_handler_table))
 #define M68KI_SET_ILLEGAL(op) \
 	(m68ki_instruction_index[op] = M68KI_ILLEGAL_INDEX)
+/* Cycles are per handler (see m68ki_instruction_cycles()). */
+#define M68KI_SET_CYCLES(op, os)
+#define M68KI_CLEAR_CYCLES(op)
 #else
 #define M68KI_SET_HANDLER(op, os) \
 	(m68ki_instruction_jump_table[op] = (os)->opcode_handler)
 #define M68KI_SET_ILLEGAL(op) \
 	(m68ki_instruction_jump_table[op] = m68k_op_illegal)
+#define M68KI_SET_CYCLES(op, os) \
+	do { \
+		int k_; \
+		for(k_ = 0; k_ < NUM_CPU_TYPES; k_++) \
+			m68ki_cycles[k_][op] = (os)->cycles[k_]; \
+	} while(0)
+#define M68KI_CLEAR_CYCLES(op) \
+	do { \
+		int k_; \
+		for(k_ = 0; k_ < NUM_CPU_TYPES; k_++) \
+			m68ki_cycles[k_][op] = 0; \
+	} while(0)
 #endif
 
 
@@ -2037,14 +2056,24 @@ void m68ki_build_opcode_table(void)
 	for(i = 0; i < (int)M68KI_HANDLER_COUNT; i++)
 		m68ki_handler_ptrs[i] = m68k_opcode_handler_table[i].opcode_handler;
 	m68ki_handler_ptrs[M68KI_ILLEGAL_INDEX] = m68k_op_illegal;
+	for(i = 0; i < (int)M68KI_HANDLER_COUNT; i++)
+	{
+		ostruct = &m68k_opcode_handler_table[i];
+		m68ki_handler_cycles[i] = ostruct->cycles[0];
+		/* Register shifts by an immediate count cost 2 cycles per bit;
+		   m68ki_instruction_cycles() adds them from the opcode. */
+		if(ostruct->mask == 0xf1f8 &&
+		   (ostruct->match & 0xf000) == 0xe000 && !(ostruct->match & 0x20))
+			m68ki_handler_cycles[i] |= M68KI_CYCLES_IMMEDIATE_SHIFT;
+	}
+	m68ki_handler_cycles[M68KI_ILLEGAL_INDEX] = 0;
 #endif
 
 	for(i = 0; i < 0x10000; i++)
 	{
 		/* default to illegal */
 		M68KI_SET_ILLEGAL(i);
-		for(k=0;k<NUM_CPU_TYPES;k++)
-			m68ki_cycles[k][i] = 0;
+		M68KI_CLEAR_CYCLES(i);
 	}
 
 	ostruct = m68k_opcode_handler_table;
@@ -2055,8 +2084,7 @@ void m68ki_build_opcode_table(void)
 			if((i & ostruct->mask) == ostruct->match)
 			{
 				M68KI_SET_HANDLER(i, ostruct);
-				for(k=0;k<NUM_CPU_TYPES;k++)
-					m68ki_cycles[k][i] = ostruct->cycles[k];
+				M68KI_SET_CYCLES(i, ostruct);
 			}
 		}
 		ostruct++;
@@ -2066,8 +2094,7 @@ void m68ki_build_opcode_table(void)
 		for(i = 0;i <= 0xff;i++)
 		{
 			M68KI_SET_HANDLER(ostruct->match | i, ostruct);
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | i] = ostruct->cycles[k];
+			M68KI_SET_CYCLES(ostruct->match | i, ostruct);
 		}
 		ostruct++;
 	}
@@ -2079,9 +2106,9 @@ void m68ki_build_opcode_table(void)
 			{
 				instr = ostruct->match | (i << 9) | j;
 				M68KI_SET_HANDLER(instr, ostruct);
-				for(k=0;k<NUM_CPU_TYPES;k++)
-					m68ki_cycles[k][instr] = ostruct->cycles[k];
+				M68KI_SET_CYCLES(instr, ostruct);
 				// For all shift operations with known shift distance (encoded in instruction word)
+#ifndef PICO_BUILD
 				if((instr & 0xf000) == 0xe000 && (!(instr & 0x20)))
 				{
 					// On the 68000 and 68010 shift distance affect execution time.
@@ -2094,6 +2121,7 @@ void m68ki_build_opcode_table(void)
 					m68ki_cycles[2][instr] += 0;
 #endif
 				}
+#endif
 			}
 		}
 		ostruct++;
@@ -2103,8 +2131,7 @@ void m68ki_build_opcode_table(void)
 		for(i = 0;i <= 0x0f;i++)
 		{
 			M68KI_SET_HANDLER(ostruct->match | i, ostruct);
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | i] = ostruct->cycles[k];
+			M68KI_SET_CYCLES(ostruct->match | i, ostruct);
 		}
 		ostruct++;
 	}
@@ -2113,8 +2140,7 @@ void m68ki_build_opcode_table(void)
 		for(i = 0;i <= 0x07;i++)
 		{
 			M68KI_SET_HANDLER(ostruct->match | (i << 9), ostruct);
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | (i << 9)] = ostruct->cycles[k];
+			M68KI_SET_CYCLES(ostruct->match | (i << 9), ostruct);
 		}
 		ostruct++;
 	}
@@ -2123,16 +2149,14 @@ void m68ki_build_opcode_table(void)
 		for(i = 0;i <= 0x07;i++)
 		{
 			M68KI_SET_HANDLER(ostruct->match | i, ostruct);
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | i] = ostruct->cycles[k];
+			M68KI_SET_CYCLES(ostruct->match | i, ostruct);
 		}
 		ostruct++;
 	}
 	while(ostruct->mask == 0xffff)
 	{
 		M68KI_SET_HANDLER(ostruct->match, ostruct);
-		for(k=0;k<NUM_CPU_TYPES;k++)
-			m68ki_cycles[k][ostruct->match] = ostruct->cycles[k];
+		M68KI_SET_CYCLES(ostruct->match, ostruct);
 		ostruct++;
 	}
 }

@@ -572,7 +572,9 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CPU_TYPE         = CPU_TYPE_000;
 			CPU_ADDRESS_MASK = 0x00ffffff;
 			CPU_SR_MASK      = 0xa71f; /* T1 -- S  -- -- I2 I1 I0 -- -- -- X  N  Z  V  C  */
+#ifndef PICO_BUILD
 			CYC_INSTRUCTION  = m68ki_cycles[0];
+#endif
 			CYC_EXCEPTION    = m68ki_exception_cycle_table[0];
 			CYC_BCC_NOTAKE_B = -2;
 			CYC_BCC_NOTAKE_W = 2;
@@ -673,7 +675,7 @@ int m68k_execute(int num_cycles)
 			/* Read an instruction and call its handler */
 			REG_IR = m68ki_read_imm_16();
 			m68ki_call_instruction(REG_IR);
-			USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
+			USE_CYCLES(CYC_INSTRUCTION_OF(REG_IR));
 
 			/* Trace m68k_exception, if necessary */
 			m68ki_exception_if_trace(); /* auto-disable (see m68kcpu.h) */

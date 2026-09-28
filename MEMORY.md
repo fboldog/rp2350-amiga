@@ -278,3 +278,15 @@ mismatch.
   firmware in the same family; the RP2350 boot ROM stops after the first
   block's numBlocks, so a new ADF was never written via BOOTSEL. Now one
   sequence per family; other families (E10 workaround block) untouched.
+
+**PAL 256 lines (2026-09-28).** PAL HDMI showed only 200 of Workbench's 256
+lines. Freed 60 KB more SRAM by replacing Musashi's 64 KB per-opcode cycle
+table with per-handler cycles (`m68ki_handler_cycles`, flag 0x100 = register
+shift by immediate count, +2 cycles per bit, count 0 = 8), read through
+`CYC_INSTRUCTION_OF()`. Verified by linking the original and new
+`m68kops.c` against stub handlers: all 65,536 opcodes give the same handler
+and cycles. PAL frames are 640x256 x2 in SRAM with 3 TMDS buffers (~11 KB heap
+spare); NTSC keeps 200 lines and 4 buffers (~80 KB spare). The border stays
+COLOR00 by user choice, so Workbench has no visible screen outline (authentic).
+A PAL Workbench 1.3 boot takes ~4 min on device (~3.5 min after the AmigaDOS
+window appears); a long wait at the CLI is normal, not a hang.

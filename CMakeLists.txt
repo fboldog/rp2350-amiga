@@ -229,8 +229,13 @@ target_compile_options(omega-amiga PRIVATE
 if(OMEGA_ENABLE_HDMI)
     if(PICO_BOARD STREQUAL "weact_studio_rp2350b_core")
         # Full-width scanout reads its frames from SRAM, so encoding never
-        # stalls on QMI; the SRAM frames leave room for only four buffers.
-        set(OMEGA_DVI_TMDS_BUFFERS 4)
+        # stalls on QMI; the SRAM frames leave little heap for TMDS buffers
+        # (the 640x256 PAL frames least of all).
+        if(OMEGA_VIDEO_MODE STREQUAL "PAL")
+            set(OMEGA_DVI_TMDS_BUFFERS 3)
+        else()
+            set(OMEGA_DVI_TMDS_BUFFERS 4)
+        endif()
     else()
         # Eight buffers absorb short encoder stalls caused by QMI traffic.
         set(OMEGA_DVI_TMDS_BUFFERS 8)

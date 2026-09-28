@@ -143,7 +143,7 @@ framebuffer, then queues it for PicoDVI (full-width DDF modes skip that pass
 and convert the raw raster directly). Core 1 encodes double-buffered RGB332
 frames to TMDS. The Waveshare RP2350-PiZero has HDMI on-board and uses
 pixel-doubled 320×200 frames in PSRAM. WeAct has HDMI on GPIO12..19 and scans
-out 640×200 at full width (no upscaling, so HIRES text keeps every pixel) with
+out 640×200 (NTSC) or 640×256 (PAL) at full width (no upscaling, so HIRES text keeps every pixel) with
 the RP2350 SIO TMDS encoder; its frames are in internal SRAM. Verified on
 hardware through the Kickstart boot screens and Workbench 1.3.
 

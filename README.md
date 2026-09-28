@@ -132,11 +132,14 @@ locked onto unreliably.
 WeAct scans out at full width without upscaling: each of the 640 image
 columns becomes one DVI pixel, so HIRES (e.g. Workbench text) keeps every
 pixel. Core 1 drives the RP2350 SIO TMDS encoder at one symbol per pixel.
-Its two 640×200 RGB332 frames live in internal SRAM, not PSRAM: the emulator
+Its two 640×200 (NTSC) or 640×256 (PAL) RGB332 frames live in internal SRAM,
+not PSRAM: the emulator
 saturates the shared QMI bus, and 720-byte PSRAM (or flash) line fetches
 regularly missed the scanline deadline, which PicoDVI shows as solid red lines.
 Nothing in core 1's per-line path may execute from or read flash for the same
-reason. Four TMDS buffers suffice because the encoder no longer stalls.
+reason. Four TMDS buffers (three for PAL, whose larger frames leave about
+11 KB of heap) suffice because the encoder no longer stalls. PAL shows all 256
+lines, so the lower edge of Workbench windows is no longer cut off.
 
 Waveshare keeps the pixel-doubled 320×200 path: its double-buffered RGB332
 frames share DF1's PSRAM region, so HDMI builds keep DF1 disabled (DF0 remains
@@ -261,8 +264,12 @@ TinyUSB is included in the Pico SDK; add `tinyusb_host` to `target_link_librarie
 - **Musashi 68K** (`omega/m68k*.c`) keeps only the 68000 tables in Pico builds
   to reduce internal SRAM use; the native build retains the full tables.
   Pico builds also replace the 256 KB opcode pointer table with a 16-bit
-  handler index per opcode (128 KB) and keep the opcode description table in
-  flash, freeing about 150 KB of SRAM for the WeAct HDMI frames.
+  handler index per opcode (128 KB), keep the opcode description table in
+  flash, and store 68000 cycle counts per handler instead of per opcode
+  (register shifts by an immediate count add their 2-cycles-per-bit cost from
+  the opcode). Together this frees about 210 KB of SRAM for the WeAct HDMI
+  frames; handlers and cycle counts were checked identical for all 65,536
+  opcodes against the original tables.
 - **Chipset/CIA/DMA/Blitter** remain close to upstream, with Pico memory paths,
   quieter diagnostics, and the shared raster-position fixes called out above.
 - **Floppy.c** has a `PICO_BUILD` guard: the desktop `ADF2MFM(fd,...)` retains
