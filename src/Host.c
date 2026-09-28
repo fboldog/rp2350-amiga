@@ -61,6 +61,7 @@ static void hostBorderUnwrittenPixels(uint32_t border) {
 // start.
 #define DIRECT_MAX_ROWS 256
 static bool direct_frame;         // this frame renders straight to RGB332
+int hostDirectActive;             // mirrors direct_frame for DMA.c
 static uint8_t *direct_image;     // acquired scanout frame, or NULL
 static int direct_first_row;      // image row of raster row 0
 static int direct_step;           // raster rows per image row
@@ -80,6 +81,7 @@ static void hostDirectResetRows(void) {
 static void hostDirectBegin(void) {
     direct_frame = dvi_display_direct_supported() &&
                    omegaDdfIsFullWidth(chipset.ddfstrt);
+    hostDirectActive = direct_frame;
     if (!direct_frame)
         return;
     const int alternate_rows =
@@ -94,16 +96,16 @@ static void hostDirectBegin(void) {
         direct_height = DIRECT_MAX_ROWS;
 }
 
-static inline void hostDirectConvert(uint8_t *dst, const uint32_t *src,
-                                     int y, int x, int count) {
-    for (int i = 0; i < count; ++i)
-        dst[x + i] = dvi_rgb332(src[i]);
+static inline void hostDirectCopy(uint8_t *line, const uint8_t *pixels,
+                                  int y, int x, int count) {
+    memcpy(line + x, pixels, (size_t)count);
     if (x < direct_row_min[y]) direct_row_min[y] = (int16_t)x;
     if (x + count > direct_row_max[y])
         direct_row_max[y] = (int16_t)(x + count);
 }
 
-static void hostDirectCommit(int row, int x, int width) {
+// Places `width` RGB332 pixels of raster (row, x) into the scanout frame.
+static void hostDirectPlace(int row, int x, const uint8_t *pixels, int width) {
     if (!direct_image) {
         direct_image = dvi_display_direct_acquire();
         if (!direct_image)
@@ -121,9 +123,84 @@ static void hostDirectCommit(int row, int x, int width) {
     int first = HOST_RASTER_W - image_x;
     if (first > width)
         first = width;
-    hostDirectConvert(line, direct_block, y, image_x, first);
+    hostDirectCopy(line, pixels, y, image_x, first);
     if (first < width) // the block wraps around the rotated row
-        hostDirectConvert(line, direct_block + first, y, 0, width - first);
+        hostDirectCopy(line, pixels + first, y, 0, width - first);
+}
+
+// ARGB block (HAM path) -> RGB332.
+static void hostDirectCommit(int row, int x, int width) {
+    uint8_t pixels[32];
+    for (int i = 0; i < width; ++i)
+        pixels[i] = dvi_rgb332(direct_block[i]);
+    hostDirectPlace(row, x, pixels, width);
+}
+
+// Table-driven planar-to-RGB332: c2p_spread[b] holds the 8 pixels of plane
+// byte b as bytes 0/1 (leftmost pixel = bit 7 = lowest byte), so OR-ing the
+// entries of all planes, shifted by plane number, yields 8 colour indices
+// at once. Pixel order matches *Planar2Chunky: bits 7..0 of the low byte of
+// each plane word first, then bits 15..8.
+static uint32_t c2p_spread[256][2];
+
+static void hostInitPlanarTables(void) {
+    for (int b = 0; b < 256; ++b) {
+        uint32_t lo = 0, hi = 0;
+        for (int k = 0; k < 4; ++k) {
+            lo |= (uint32_t)((b >> (7 - k)) & 1) << (8 * k);
+            hi |= (uint32_t)((b >> (3 - k)) & 1) << (8 * k);
+        }
+        c2p_spread[b][0] = lo;
+        c2p_spread[b][1] = hi;
+    }
+}
+
+#define C2P(p, shift, half) c2p_spread[((p) >> (shift)) & 0xffu][half]
+
+void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
+                     uint16_t p3, uint16_t p4) {
+    uint8_t pixels[16];
+    const uint8_t *palette = internal.palette332;
+    for (int half = 0; half < 2; ++half) {
+        const int shift = half * 8;
+        for (int part = 0; part < 2; ++part) {
+            uint32_t index = C2P(p1, shift, part) |
+                             C2P(p2, shift, part) << 1 |
+                             C2P(p3, shift, part) << 2 |
+                             C2P(p4, shift, part) << 3;
+            uint8_t *out = pixels + half * 8 + part * 4;
+            out[0] = palette[index & 0xffu];
+            out[1] = palette[(index >> 8) & 0xffu];
+            out[2] = palette[(index >> 16) & 0xffu];
+            out[3] = palette[index >> 24];
+        }
+    }
+    hostDirectPlace(row, x, pixels, 16);
+}
+
+// LORES: 16 pixels of up to 6 planes (EHB palette 32..63), each doubled.
+void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
+                     uint16_t p4, uint16_t p5, uint16_t p6) {
+    uint8_t pixels[32];
+    const uint8_t *palette = internal.palette332;
+    for (int half = 0; half < 2; ++half) {
+        const int shift = half * 8;
+        for (int part = 0; part < 2; ++part) {
+            uint32_t index = C2P(p1, shift, part) |
+                             C2P(p2, shift, part) << 1 |
+                             C2P(p3, shift, part) << 2 |
+                             C2P(p4, shift, part) << 3 |
+                             C2P(p5, shift, part) << 4 |
+                             C2P(p6, shift, part) << 5;
+            uint8_t *out = pixels + half * 16 + part * 8;
+            for (int k = 0; k < 4; ++k) {
+                const uint8_t colour = palette[(index >> (8 * k)) & 0xffu];
+                out[2 * k] = colour;
+                out[2 * k + 1] = colour;
+            }
+        }
+    }
+    hostDirectPlace(row, x, pixels, 32);
 }
 
 static void hostDirectFinish(void) {
@@ -254,6 +331,8 @@ void hostInit(void) {
 #if OMEGA_ENABLE_HDMI
     hostDirectResetRows();
     direct_frame = false;
+    hostDirectActive = 0;
+    hostInitPlanarTables();
 #endif
     printf("Host init: framebuffer at %p (%d×%d ARGB)\n",
            (void *)fb, SCREEN_W, SCREEN_H);

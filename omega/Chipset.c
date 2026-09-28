@@ -875,164 +875,164 @@ void spr7data(uint16_t value){
 
 void color00(uint16_t value){
     chipset.color00 = value; //old register
-    internal.palette[0] = OCS2ARGB(value);
-    internal.palette[32] = EHB2ARGB(value);
+    internal.palette[0] = OCS2ARGB(value); internal.palette332[0] = omegaRGB332(internal.palette[0]);
+    internal.palette[32] = EHB2ARGB(value); internal.palette332[32] = omegaRGB332(internal.palette[32]);
 }
 void color01(uint16_t value){
     chipset.color01 = value; //old register
-    internal.palette[1] = OCS2ARGB(value);
-    internal.palette[33] = EHB2ARGB(value);
+    internal.palette[1] = OCS2ARGB(value); internal.palette332[1] = omegaRGB332(internal.palette[1]);
+    internal.palette[33] = EHB2ARGB(value); internal.palette332[33] = omegaRGB332(internal.palette[33]);
 }
 
 void color02(uint16_t value){
     chipset.color02 = value; //old register
-    internal.palette[2] = OCS2ARGB(value);
-    internal.palette[34] = EHB2ARGB(value);
+    internal.palette[2] = OCS2ARGB(value); internal.palette332[2] = omegaRGB332(internal.palette[2]);
+    internal.palette[34] = EHB2ARGB(value); internal.palette332[34] = omegaRGB332(internal.palette[34]);
 }
 void color03(uint16_t value){
     chipset.color03 = value; //old register
-    internal.palette[3] = OCS2ARGB(value);
-    internal.palette[35] = EHB2ARGB(value);
+    internal.palette[3] = OCS2ARGB(value); internal.palette332[3] = omegaRGB332(internal.palette[3]);
+    internal.palette[35] = EHB2ARGB(value); internal.palette332[35] = omegaRGB332(internal.palette[35]);
 }
 void color04(uint16_t value){
     chipset.color04 = value; //old register
-    internal.palette[4] = OCS2ARGB(value);
-    internal.palette[36] = EHB2ARGB(value);
+    internal.palette[4] = OCS2ARGB(value); internal.palette332[4] = omegaRGB332(internal.palette[4]);
+    internal.palette[36] = EHB2ARGB(value); internal.palette332[36] = omegaRGB332(internal.palette[36]);
 }
 void color05(uint16_t value){
     chipset.color05 = value; //old register
-    internal.palette[5] = OCS2ARGB(value);
-    internal.palette[37] = EHB2ARGB(value);
+    internal.palette[5] = OCS2ARGB(value); internal.palette332[5] = omegaRGB332(internal.palette[5]);
+    internal.palette[37] = EHB2ARGB(value); internal.palette332[37] = omegaRGB332(internal.palette[37]);
 }
 void color06(uint16_t value){
     chipset.color06 = value; //old register
-    internal.palette[6] = OCS2ARGB(value);
-    internal.palette[38] = EHB2ARGB(value);
+    internal.palette[6] = OCS2ARGB(value); internal.palette332[6] = omegaRGB332(internal.palette[6]);
+    internal.palette[38] = EHB2ARGB(value); internal.palette332[38] = omegaRGB332(internal.palette[38]);
 }
 void color07(uint16_t value){
     chipset.color07 = value; //old register
-    internal.palette[7] = OCS2ARGB(value);
-    internal.palette[39] = EHB2ARGB(value);
+    internal.palette[7] = OCS2ARGB(value); internal.palette332[7] = omegaRGB332(internal.palette[7]);
+    internal.palette[39] = EHB2ARGB(value); internal.palette332[39] = omegaRGB332(internal.palette[39]);
 }
 void color08(uint16_t value){
     chipset.color08 = value; //old register
-    internal.palette[8] = OCS2ARGB(value);
-    internal.palette[40] = EHB2ARGB(value);
+    internal.palette[8] = OCS2ARGB(value); internal.palette332[8] = omegaRGB332(internal.palette[8]);
+    internal.palette[40] = EHB2ARGB(value); internal.palette332[40] = omegaRGB332(internal.palette[40]);
 }
 void color09(uint16_t value){
     chipset.color09 = value; //old register
-    internal.palette[9] = OCS2ARGB(value);
-    internal.palette[41] = EHB2ARGB(value);
+    internal.palette[9] = OCS2ARGB(value); internal.palette332[9] = omegaRGB332(internal.palette[9]);
+    internal.palette[41] = EHB2ARGB(value); internal.palette332[41] = omegaRGB332(internal.palette[41]);
 }
 void color10(uint16_t value){
     chipset.color10 = value; //old register
-    internal.palette[10] = OCS2ARGB(value);
-    internal.palette[42] = EHB2ARGB(value);
+    internal.palette[10] = OCS2ARGB(value); internal.palette332[10] = omegaRGB332(internal.palette[10]);
+    internal.palette[42] = EHB2ARGB(value); internal.palette332[42] = omegaRGB332(internal.palette[42]);
 }
 void color11(uint16_t value){
     chipset.color11 = value; //old register
-    internal.palette[11] = OCS2ARGB(value);
-    internal.palette[43] = EHB2ARGB(value);
+    internal.palette[11] = OCS2ARGB(value); internal.palette332[11] = omegaRGB332(internal.palette[11]);
+    internal.palette[43] = EHB2ARGB(value); internal.palette332[43] = omegaRGB332(internal.palette[43]);
 }
 void color12(uint16_t value){
     chipset.color12 = value; //old register
-    internal.palette[12] = OCS2ARGB(value);
-    internal.palette[44] = EHB2ARGB(value);
+    internal.palette[12] = OCS2ARGB(value); internal.palette332[12] = omegaRGB332(internal.palette[12]);
+    internal.palette[44] = EHB2ARGB(value); internal.palette332[44] = omegaRGB332(internal.palette[44]);
 }
 void color13(uint16_t value){
     chipset.color13 = value; //old register
-    internal.palette[13] = OCS2ARGB(value);
-    internal.palette[45] = EHB2ARGB(value);
+    internal.palette[13] = OCS2ARGB(value); internal.palette332[13] = omegaRGB332(internal.palette[13]);
+    internal.palette[45] = EHB2ARGB(value); internal.palette332[45] = omegaRGB332(internal.palette[45]);
 }
 void color14(uint16_t value){
     chipset.color14 = value; //old register
-    internal.palette[14] = OCS2ARGB(value);
-    internal.palette[46] = EHB2ARGB(value);
+    internal.palette[14] = OCS2ARGB(value); internal.palette332[14] = omegaRGB332(internal.palette[14]);
+    internal.palette[46] = EHB2ARGB(value); internal.palette332[46] = omegaRGB332(internal.palette[46]);
 }
 void color15(uint16_t value){
     chipset.color15 = value; //old register
-    internal.palette[15] = OCS2ARGB(value);
-    internal.palette[47] = EHB2ARGB(value);
+    internal.palette[15] = OCS2ARGB(value); internal.palette332[15] = omegaRGB332(internal.palette[15]);
+    internal.palette[47] = EHB2ARGB(value); internal.palette332[47] = omegaRGB332(internal.palette[47]);
 }
 void color16(uint16_t value){
     chipset.color16 = value; //old register
-    internal.palette[16] = OCS2ARGB(value);
-    internal.palette[48] = EHB2ARGB(value);
+    internal.palette[16] = OCS2ARGB(value); internal.palette332[16] = omegaRGB332(internal.palette[16]);
+    internal.palette[48] = EHB2ARGB(value); internal.palette332[48] = omegaRGB332(internal.palette[48]);
 }
 void color17(uint16_t value){
     chipset.color17 = value; //old register
-    internal.palette[17] = OCS2ARGB(value);
-    internal.palette[49] = EHB2ARGB(value);
+    internal.palette[17] = OCS2ARGB(value); internal.palette332[17] = omegaRGB332(internal.palette[17]);
+    internal.palette[49] = EHB2ARGB(value); internal.palette332[49] = omegaRGB332(internal.palette[49]);
 }
 void color18(uint16_t value){
     chipset.color18 = value; //old register
-    internal.palette[18] = OCS2ARGB(value);
-    internal.palette[50] = EHB2ARGB(value);
+    internal.palette[18] = OCS2ARGB(value); internal.palette332[18] = omegaRGB332(internal.palette[18]);
+    internal.palette[50] = EHB2ARGB(value); internal.palette332[50] = omegaRGB332(internal.palette[50]);
 }
 void color19(uint16_t value){
     chipset.color19 = value; //old register
-    internal.palette[19] = OCS2ARGB(value);
-    internal.palette[51] = EHB2ARGB(value);
+    internal.palette[19] = OCS2ARGB(value); internal.palette332[19] = omegaRGB332(internal.palette[19]);
+    internal.palette[51] = EHB2ARGB(value); internal.palette332[51] = omegaRGB332(internal.palette[51]);
 }
 void color20(uint16_t value){
     chipset.color20 = value; //old register
-    internal.palette[20] = OCS2ARGB(value);
-    internal.palette[52] = EHB2ARGB(value);
+    internal.palette[20] = OCS2ARGB(value); internal.palette332[20] = omegaRGB332(internal.palette[20]);
+    internal.palette[52] = EHB2ARGB(value); internal.palette332[52] = omegaRGB332(internal.palette[52]);
 }
 void color21(uint16_t value){
     chipset.color21 = value; //old register
-    internal.palette[21] = OCS2ARGB(value);
-    internal.palette[53] = EHB2ARGB(value);
+    internal.palette[21] = OCS2ARGB(value); internal.palette332[21] = omegaRGB332(internal.palette[21]);
+    internal.palette[53] = EHB2ARGB(value); internal.palette332[53] = omegaRGB332(internal.palette[53]);
 }
 void color22(uint16_t value){
     chipset.color22 = value; //old register
-    internal.palette[22] = OCS2ARGB(value);
-    internal.palette[54] = EHB2ARGB(value);
+    internal.palette[22] = OCS2ARGB(value); internal.palette332[22] = omegaRGB332(internal.palette[22]);
+    internal.palette[54] = EHB2ARGB(value); internal.palette332[54] = omegaRGB332(internal.palette[54]);
 }
 void color23(uint16_t value){
     chipset.color23 = value; //old register
-    internal.palette[23] = OCS2ARGB(value);
-    internal.palette[55] = EHB2ARGB(value);
+    internal.palette[23] = OCS2ARGB(value); internal.palette332[23] = omegaRGB332(internal.palette[23]);
+    internal.palette[55] = EHB2ARGB(value); internal.palette332[55] = omegaRGB332(internal.palette[55]);
 }
 void color24(uint16_t value){
     chipset.color24 = value; //old register
-    internal.palette[24] = OCS2ARGB(value);
-    internal.palette[56] = EHB2ARGB(value);
+    internal.palette[24] = OCS2ARGB(value); internal.palette332[24] = omegaRGB332(internal.palette[24]);
+    internal.palette[56] = EHB2ARGB(value); internal.palette332[56] = omegaRGB332(internal.palette[56]);
 }
 void color25(uint16_t value){
     chipset.color25 = value; //old register
-    internal.palette[25] = OCS2ARGB(value);
-    internal.palette[57] = EHB2ARGB(value);
+    internal.palette[25] = OCS2ARGB(value); internal.palette332[25] = omegaRGB332(internal.palette[25]);
+    internal.palette[57] = EHB2ARGB(value); internal.palette332[57] = omegaRGB332(internal.palette[57]);
 }
 void color26(uint16_t value){
     chipset.color26 = value; //old register
-    internal.palette[26] = OCS2ARGB(value);
-    internal.palette[58] = EHB2ARGB(value);
+    internal.palette[26] = OCS2ARGB(value); internal.palette332[26] = omegaRGB332(internal.palette[26]);
+    internal.palette[58] = EHB2ARGB(value); internal.palette332[58] = omegaRGB332(internal.palette[58]);
 }
 void color27(uint16_t value){
     chipset.color27 = value; //old register
-    internal.palette[27] = OCS2ARGB(value);
-    internal.palette[59] = EHB2ARGB(value);
+    internal.palette[27] = OCS2ARGB(value); internal.palette332[27] = omegaRGB332(internal.palette[27]);
+    internal.palette[59] = EHB2ARGB(value); internal.palette332[59] = omegaRGB332(internal.palette[59]);
 }
 void color28(uint16_t value){
     chipset.color28 = value; //old register
-    internal.palette[28] = OCS2ARGB(value);
-    internal.palette[60] = EHB2ARGB(value);
+    internal.palette[28] = OCS2ARGB(value); internal.palette332[28] = omegaRGB332(internal.palette[28]);
+    internal.palette[60] = EHB2ARGB(value); internal.palette332[60] = omegaRGB332(internal.palette[60]);
 }
 void color29(uint16_t value){
     chipset.color29 = value; //old register
-    internal.palette[29] = OCS2ARGB(value);
-    internal.palette[61] = EHB2ARGB(value);
+    internal.palette[29] = OCS2ARGB(value); internal.palette332[29] = omegaRGB332(internal.palette[29]);
+    internal.palette[61] = EHB2ARGB(value); internal.palette332[61] = omegaRGB332(internal.palette[61]);
 }
 void color30(uint16_t value){
     chipset.color30 = value; //old register
-    internal.palette[30] = OCS2ARGB(value);
-    internal.palette[62] = EHB2ARGB(value);
+    internal.palette[30] = OCS2ARGB(value); internal.palette332[30] = omegaRGB332(internal.palette[30]);
+    internal.palette[62] = EHB2ARGB(value); internal.palette332[62] = omegaRGB332(internal.palette[62]);
 }
 void color31(uint16_t value){
     chipset.color31 = value; //old register
-    internal.palette[31] = OCS2ARGB(value);
-    internal.palette[63] = EHB2ARGB(value);
+    internal.palette[31] = OCS2ARGB(value); internal.palette332[31] = omegaRGB332(internal.palette[31]);
+    internal.palette[63] = EHB2ARGB(value); internal.palette332[63] = omegaRGB332(internal.palette[63]);
 }
 
 void color00L(uint32_t value){

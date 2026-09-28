@@ -703,9 +703,13 @@ static void hiresDisplayPrefetch(void) {
     if (internal.bitplaneMask & 0x08)
         p4 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[3]];
 
-    hiresPlanar2Chunky(hostRasterPixels(host.rasterRow, host.rasterX),
-                       p1, p2, p3, p4);
-    hostRasterWritten(host.rasterRow, host.rasterX, 16);
+    if (hostDirectActive) {
+        hostDirectHires(host.rasterRow, host.rasterX, p1, p2, p3, p4);
+    } else {
+        hiresPlanar2Chunky(hostRasterPixels(host.rasterRow, host.rasterX),
+                           p1, p2, p3, p4);
+        hostRasterWritten(host.rasterRow, host.rasterX, 16);
+    }
     host.rasterX += 16;
 }
 
@@ -1096,13 +1100,17 @@ void loresPlane1(void){
         host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W)
         return;
     
-    uint32_t *pixels = hostRasterPixels(host.rasterRow, host.rasterX);
-    if(chipset.bplcon0 & 0x800){
-        loresHAM2Chunky(pixels, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
-    }else{
-        loresPlanar2Chunky(pixels, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+    if (hostDirectActive && !(chipset.bplcon0 & 0x800)) {
+        hostDirectLores(host.rasterRow, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat, chipset.bpl5dat, chipset.bpl6dat);
+    } else {
+        uint32_t *pixels = hostRasterPixels(host.rasterRow, host.rasterX);
+        if(chipset.bplcon0 & 0x800){
+            loresHAM2Chunky(pixels, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        }else{
+            loresPlanar2Chunky(pixels, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        }
+        hostRasterWritten(host.rasterRow, host.rasterX, 32);
     }
-    hostRasterWritten(host.rasterRow, host.rasterX, 32);
     host.rasterX += 32;
     
 }
@@ -1230,9 +1238,13 @@ void hiresPlane1(){
         raster_row--;
     }
 
-    uint32_t *line = hostRasterPixels(raster_row, host.rasterX);
-    hiresPlanar2Chunky(line, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
-    hostRasterWritten(raster_row, host.rasterX, 16);
+    if (hostDirectActive) {
+        hostDirectHires(raster_row, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+    } else {
+        uint32_t *line = hostRasterPixels(raster_row, host.rasterX);
+        hiresPlanar2Chunky(line, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+        hostRasterWritten(raster_row, host.rasterX, 16);
+    }
     host.rasterX += 16;
     return;
 }

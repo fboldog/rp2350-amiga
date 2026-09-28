@@ -185,6 +185,14 @@ How to measure (no halt, firmware keeps running):
       Result (PAL, WeAct): boot to the Workbench icons 151.5 s → 93.5 s;
       just after reaching Workbench 5.9 → 11.1 vblanks/s.
       Verified on NTSC and PAL hardware.
+- [x] **Table-driven planar → RGB332.** `hostDirectHires`/`hostDirectLores`
+      convert 16-pixel blocks with a 2 KB byte-spread table (8 colour indices
+      per OR of the plane entries) and `internal.palette332` (kept in sync with
+      every `internal.palette` write), skipping the per-bit loop and the ARGB
+      step. HAM, narrow layouts, Waveshare and native keep the ARGB path.
+      Verified identical to the bit loops on 400,000 random blocks. Results:
+      NTSC KEY insert → AmigaDOS 78.8 s → 64.3 s; PAL boot to the Workbench
+      icons 86.8 s → 82.1 s; idle Workbench 14.2 vblanks/s.
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [ ] **Use core 1's spare time.** Scanout uses ~20 µs of each ~64 µs line
@@ -220,8 +228,9 @@ appears only ~2 min 12 s later.
       the Workbench icons: 93.5 s → 86.8 s.
 - [ ] **Remaining per-slot overhead.** Hoist per-line state out of
       `dma_execute()` (plane mask, display-window test), add a fast path for
-      slots with no DMA, and run CIA/E-clock work every 10 slots instead of
-      every slot. Keep the native regression suite green.
+      slots with no DMA, and skip `copperExecute()` cheaply while the Copper
+      waits. (CIA work already runs only every 5th slot.) Keep the native
+      regression suite green.
 - [ ] **SRAM window over low chip RAM** (vectors, stacks, hot Exec data) once
       SRAM is available; one compare per access saves a QSPI round trip.
 

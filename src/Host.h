@@ -68,6 +68,29 @@ static inline void hostRasterWritten(int row, int x, int width) {
 }
 #endif
 
+// Direct RGB332 rendering (RP2350 HDMI): while hostDirectActive, the DMA
+// converts plain bitplane blocks with these table-driven functions instead of
+// hostRasterPixels()/hostRasterWritten() (HAM still uses the ARGB path).
+#if defined(PICO_BUILD) && OMEGA_ENABLE_HDMI
+extern int hostDirectActive;
+void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
+                     uint16_t p3, uint16_t p4);
+void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
+                     uint16_t p4, uint16_t p5, uint16_t p6);
+#else
+#define hostDirectActive 0
+static inline void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
+                                   uint16_t p3, uint16_t p4) {
+    (void)row; (void)x; (void)p1; (void)p2; (void)p3; (void)p4;
+}
+static inline void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2,
+                                   uint16_t p3, uint16_t p4, uint16_t p5,
+                                   uint16_t p6) {
+    (void)row; (void)x; (void)p1; (void)p2; (void)p3; (void)p4;
+    (void)p5; (void)p6;
+}
+#endif
+
 // ── Pixel-conversion helpers (same signature as the SDL version) ──────────
 void hiresPlanar2Chunky(uint32_t *pixBuff,
                         uint16_t p1, uint16_t p2, uint16_t p3, uint16_t p4);
