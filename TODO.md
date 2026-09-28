@@ -187,12 +187,14 @@ How to measure (no halt, firmware keeps running):
       pair; row conversion (or MFM track encoding) could move to core 1.
 
 ### P2 – Emulation core
-- [ ] **Hot code in SRAM.** All 287 KB of `.text` runs from XIP flash and
-      shares the 16 KB XIP cache with every chip-RAM access to PSRAM. Place
-      `dma_execute`, the DMA slot functions, `*Planar2Chunky`, Copper, CIA,
-      `m68k_execute` and the hottest opcode handlers (by profile) in RAM with
-      `__not_in_flash_func`. SRAM budget: ~80 KB spare on NTSC, ~11 KB on PAL,
-      more once P1 lands.
+- [x] ~~**Hot code in SRAM.**~~ Tried 2026-09-28 and reverted: ~6 KB of the
+      hottest functions (DMA slots, planar conversion, Copper, CIA,
+      `m68k_execute`, chip RAM accessors) placed in `.time_critical` put 95 %
+      of PC samples in SRAM code but gave no speedup (idle 5.9 vblanks/s, boot
+      152 s). The XIP cache was already serving the code; the time is spent
+      waiting on PSRAM *data*. It also exhausted PAL's SRAM (PicoDVI's TMDS
+      `malloc` failed until the buffers were made static). Revisit only after
+      P1, and for opcode handlers only if the CPU becomes the bottleneck.
 - [ ] **Chip RAM fast path in `chipRead*`/`chipWrite*`.** Chip RAM is the
       most common target but is tested last, after ~8 range compares (ROM,
       autoconfig, custom registers, Gayle, slow RAM, CIAs). Test
@@ -216,12 +218,23 @@ How to measure (no halt, firmware keeps running):
       measure whether a PSRAM copy (126 MHz) is faster.
 
 ### P4 – Floppy / boot time
-- [ ] **Faster disk DMA.** `turboFloppy` moves 8 words per slot; completing a
-      whole DSKLEN block at once would cut emulated load time. Check trackdisk
-      and non-DOS loaders still work.
-- [ ] **Track-change cost.** Each head step re-encodes a 12.8 KB MFM track from
-      the flash ADF into SRAM on core 0; measure during boot and consider a
-      multi-track cache or encoding on core 1.
+Measured on a PAL Workbench 1.3 boot (170 s SWD timeline, 2026-09-28): the
+emulator runs at a steady ~5.2 vblanks/s throughout, the same as idle, so the
+whole boot is only ~16 s of Amiga time (a real A500 needs ~1 min). The floppy
+emulation is already ~4× faster than real hardware; loading is slow in wall
+time because the emulator runs at ~10 % speed. Disk DMA is active ~20 % of the
+boot, and `floppyDataRead` + `diskCycle` cost only ~4 % of core 0 while it
+runs. The display pipeline dominates during loading too (~50 %), so P1 is also
+the main boot-time fix. Note: the OS rewrites CIA-A TOD during boot; sum only
+forward steps when measuring.
+- [ ] **Faster disk DMA — needs care.** `turboFloppy` 8 → 64 words per slot cut
+      the board's boot to the Workbench icons from 151.5 s to 132.7 s, but the
+      native PAL `wb13` case then never reaches Workbench (blank screen even at
+      vbl 2522). Find what breaks (sync search, DSKBLK timing vs trackdisk)
+      before raising it; at most ~20 % of boot time is at stake.
+- [ ] **Track-change cost.** Each cylinder/side change re-encodes a 12.8 KB
+      MFM track from the flash ADF on core 0 (~10 per 10 s during boot). Small
+      in the profile; revisit after P1.
 
 ### Done
 - [x] Musashi opcode pointer table → 16-bit handler index, descriptor table in
