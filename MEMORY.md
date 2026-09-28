@@ -249,3 +249,13 @@ ROM (exec 40.10). Native runner gained `OMEGA_ROM=<file>` / `OMEGA_DISASM=1`.
 - The pending Floppy change moves the `/CHNG` acknowledge from drive select to
   head step and reports `/DKRDY` on insert/eject, so runtime insertion is seen
   by a waiting Kickstart.
+- Capture-chain gotcha: after reflashing, the HDMI capture device can lose
+  lock and stay black even though the board is fine. Confirm scanout over SWD
+  (DVI `timing_state` counter advancing, `dump_image` of `sram_frames`), then
+  reset the capture device.
+
+**Workbench 1.3 top line (2026-09-28).** The extra-word HIRES layout (DDF
+0x3c-0xd0) anchored raster row 0 at DIWSTRT line 5 + 40 = line 45, but
+Intuition's screen begins at line 44 (0x2c), so the title bar's top padding
+line was dropped on every target. `OMEGA_DDF_EXTRA_UPPER_OVERSCAN` is now 39;
+only the `wb13` regression baselines (NTSC and PAL) changed, after review.
