@@ -24,7 +24,7 @@ rp2350-amiga/
 │   ├── psram.h / psram.c   Simple hardware_psram availability + read/write test
 │   ├── Memory.h / Memory.c PSRAM-backed chipRead*/chipWrite* (no 16 MB array)
 │   ├── Host.h / Host.c     SDL-free host: raster presentation and frame submission
-│   └── dvi_display.*      PicoDVI core-1 scanout from PSRAM RGB332 buffers
+│   └── dvi_display.*      PicoDVI core-1 scanout (WeAct: SRAM frames, full width)
 ├── native/                 Head-less PC runner (see native/README.md)
 ├── omega/                  Upstream Omega source (minimal diffs from original)
 │   ├── CPU.c               +#ifdef PICO_BUILD guard in cpu_pulse_reset
@@ -66,7 +66,7 @@ The RP2350 port uses 8 MB PSRAM (memory-mapped at 0x11000000) with this layout
 | 0x200000–0x27FFFF | Slow/Ranger RAM      | 0xC00000–0xC7FFFF |
 | 0x280000–0x47FFFF | DF0 MFM buffer (2MB) | (floppy drive 0)  |
 | 0x480000–0x4FFFFF | SD ROM cache (512KB) | (optional)        |
-| 0x500000–0x533FFF | DVI RGB332 buffers   | (when HDMI built) |
+| 0x500000–0x533FFF | DVI RGB332 buffers   | (Waveshare HDMI)  |
 | 0x540000–0x63FFFF | Raw video raster     | (host rendering)  |
 | 0x680000–0x77FFFF | Framebuffer 640×400  | (host output)     |
 
@@ -139,10 +139,17 @@ All RP2350-specific code in omega/ files uses:
 
 ### Display output
 `display_push_frame()` presents the emulated raster into the 640×400 ARGB32
-framebuffer, then queues it for PicoDVI. Core 1 converts completed frames to
-TMDS from double-buffered RGB332 data in PSRAM. The Waveshare RP2350-PiZero
-has HDMI on-board; WeAct uses an external Adafruit DVI breakout on GPIO11..18.
-The WeAct path is hardware-verified with the Kickstart 1.3 insert-disk screen.
+framebuffer, then queues it for PicoDVI (full-width DDF modes skip that pass
+and convert the raw raster directly). Core 1 encodes double-buffered RGB332
+frames to TMDS. The Waveshare RP2350-PiZero has HDMI on-board and uses
+pixel-doubled 320×200 frames in PSRAM. WeAct has HDMI on GPIO12..19 and scans
+out 640×200 at full width (no upscaling, so HIRES text keeps every pixel) with
+the RP2350 SIO TMDS encoder; its frames are in internal SRAM. Verified on
+hardware through the Kickstart boot screens and Workbench 1.3.
+
+Solid red DVI lines mean core 1 missed a scanline deadline. Keep core 1's
+per-line path free of PSRAM and flash accesses (no libc `memcpy`, no `const`
+tables in `.rodata`): the emulator saturates the shared QMI bus.
 
 ### Input
 Wire `pressKey(keyCode)` / `releaseKey(keyCode)` to TinyUSB HID keyboard events.

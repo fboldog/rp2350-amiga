@@ -36,8 +36,8 @@ header.
 - **Debug console**: UART1 TX=GPIO4/RX=GPIO5 at 115200 on WeAct; UART0
   TX/RX=GPIO0/1 at 115200 on Waveshare. Connect the debug probe's RX to
   GPIO4, TX to GPIO5, and join GND.
-- **Display**: PicoDVI via PIO0. WeAct uses an external Adafruit DVI
-  breakout on GPIO11..18: D0=11/12, CLK=13/14, D2=15/16, D1=17/18.
+- **Display**: PicoDVI via PIO0. WeAct uses Raspberry Pi's Pico DVI Sock
+  ordering on GPIO12..19: D0=12/13, CLK=14/15, D2=16/17, D1=18/19.
   Waveshare uses its on-board connector: D0=36/37, D1=34/35, D2=32/33,
   CLK=38/39. Both mappings use `invert_diffpairs=false`. If the WeAct output
   has stable blue/yellow false colors, reverse the D0 pair rather than changing
@@ -54,7 +54,7 @@ header.
 0x11200000  Slow/Ranger RAM (512 KB)
 0x11280000  Legacy/full-image DF0 MFM region (unused by streamed DF0)
 0x11480000  SD Kickstart cache (512 KB) / DF1 MFM buffer (2 MB)
-0x11500000  HDMI RGB332 scanout buffers (inside DF1 region when enabled)
+0x11500000  Waveshare HDMI RGB332 scanout buffers (inside DF1 region)
 0x11540000  Video DMA raster scratch (640×400 ARGB32)
 0x11680000  Framebuffer 640×400 ARGB32 (1 MB)
 0x11780000  Reserved
@@ -93,7 +93,7 @@ cmake --build build -j
 cmake -S . -B build-weact -G Ninja -DPICO_BOARD=weact_studio_rp2350b_core
 cmake --build build-weact -j
 
-# WeAct with the external Adafruit DVI breakout on GPIO11..18
+# WeAct with HDMI on GPIO12..19
 cmake -S . -B build-weact-hdmi -G Ninja \
   -DPICO_BOARD=weact_studio_rp2350b_core \
   -DOMEGA_ENABLE_HDMI=ON \
@@ -112,15 +112,27 @@ mounted DF0 starts ejected and the WeAct KEY button inserts it. Add
 then ejects or reinserts the mounted image.
 
 The HDMI build raises `clk_sys` to PicoDVI's serializer clock (252 MHz for
-NTSC or 270 MHz for PAL) and then retimes the SDK-managed PSRAM. The WeAct
-GPIO13/14 clock pair starts on an odd GPIO, so the local PicoDVI compatibility
-patch drives its two PWM channels from synchronised adjacent slices.
-Full-width emulator modes convert the native DMA raster directly to
-double-buffered 320×200 RGB332 scanout in PSRAM, avoiding a redundant 640×400
-ARGB presentation pass. These buffers share DF1's region, so HDMI builds keep
-DF1 disabled; DF0 remains available. Both cores use the shared cached PSRAM
-alias, core 1 stages one line in SRAM, and eight TMDS buffers absorb short QMI
-stalls. The DVI buffers show color bars during the first 1.5 seconds, then are
+NTSC or 270 MHz for PAL) and then retimes the SDK-managed PSRAM. The local
+PicoDVI compatibility patch drives a clock pair that starts on an odd GPIO from
+synchronised adjacent PWM slices.
+Full-width emulator modes convert the native DMA raster directly to RGB332
+scanout frames, avoiding a redundant 640×400 ARGB presentation pass.
+
+WeAct scans out at full width without upscaling: each of the 640 image
+columns becomes one 720-pixel DVI column, so HIRES (e.g. Workbench text) keeps
+every pixel. Core 1 drives the RP2350 SIO TMDS encoder at one symbol per pixel.
+Its two 640×200 RGB332 frames live in internal SRAM, not PSRAM: the emulator
+saturates the shared QMI bus, and 720-byte PSRAM (or flash) line fetches
+regularly missed the scanline deadline, which PicoDVI shows as solid red lines.
+Nothing in core 1's per-line path may execute from or read flash for the same
+reason. Four TMDS buffers suffice because the encoder no longer stalls.
+
+Waveshare keeps the pixel-doubled 320×200 path: its double-buffered RGB332
+frames share DF1's PSRAM region, so HDMI builds keep DF1 disabled (DF0 remains
+available), core 1 stages one line in SRAM, and eight TMDS buffers absorb
+short QMI stalls.
+
+The DVI buffers show color bars during the first 1.5 seconds, then are
 overwritten by emulator video.
 Core 0 waits for a core-1 acknowledgement after `dvi_start()` before beginning
 the emulator's heavy PSRAM traffic, preventing intermittent cold-start loss of
@@ -146,7 +158,7 @@ Video: NTSC (263 lines, 59.940 Hz)
 PSRAM: detected 8388608 bytes on GPIO0
 PSRAM: 1024-byte read/write test passed at 0x11000000
 ROM: flash 0x10200000, header=1111 opcode=4ef9 entry=00fc00d2
-DVI: PIO 720x480p60 (640x400 image doubled) emulator scanout on GPIO11..18 (shared cached PSRAM)
+DVI: PIO 720x480p60 full-width 640x400 emulator scanout on GPIO12..19 (SRAM frames)
 DF0: flash ADF mounted with 12798-byte SRAM track cache
 DF0: disk inserted at boot; KEY ejects/reinserts it
 Entering emulation loop
@@ -210,12 +222,12 @@ backends remain future work:
 
 | Output | Library | Notes |
 |---|---|---|
-| DVI/HDMI | [PicoDVI](https://github.com/Wren6991/PicoDVI) | Implemented and verified on WeAct |
+| DVI/HDMI | [PicoDVI](https://github.com/Wren6991/PicoDVI) | Implemented and verified on WeAct (full width) |
 | VGA | pico-vga-scanvideo | Needs resistor ladder, 3 GPIO per channel |
 | SPI TFT | st7789 / ili9341 | Easy hardware, 320×240 typical |
 
 The raw DMA raster is at `PSRAM_BASE + PSRAM_VIDEO_RASTER_OFFSET`. HDMI
-full-width modes downsample it directly into the RGB332 scanout buffers;
+full-width modes convert it directly into the RGB332 scanout buffers;
 narrow/wrapped modes retain the 640×400 ARGB presentation fallback at
 `PSRAM_BASE + PSRAM_FRAMEBUF_OFFSET`. Logical Amiga scanlines and LORES
 overscan positioning match the native test runner.
@@ -234,6 +246,9 @@ TinyUSB is included in the Pico SDK; add `tinyusb_host` to `target_link_librarie
 - **Host.c is fully replaced** by `src/host.c`.  All SDL2 code is removed.
 - **Musashi 68K** (`omega/m68k*.c`) keeps only the 68000 tables in Pico builds
   to reduce internal SRAM use; the native build retains the full tables.
+  Pico builds also replace the 256 KB opcode pointer table with a 16-bit
+  handler index per opcode (128 KB) and keep the opcode description table in
+  flash, freeing about 150 KB of SRAM for the WeAct HDMI frames.
 - **Chipset/CIA/DMA/Blitter** remain close to upstream, with Pico memory paths,
   quieter diagnostics, and the shared raster-position fixes called out above.
 - **Floppy.c** has a `PICO_BUILD` guard: the desktop `ADF2MFM(fd,...)` retains

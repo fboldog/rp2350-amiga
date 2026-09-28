@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
     long         iterations = (argc > 2) ? strtol(argv[2], NULL, 0) : 40000;
     long         dumpEvery  = (argc > 3) ? strtol(argv[3], NULL, 0) : 4000;
     long         insertAt   = (argc > 4) ? strtol(argv[4], NULL, 0) : 3000;
-    int          haveDisk   = 0;
+    int          haveImage  = 0;
 
     const char *romPath = getenv("OMEGA_ROM");
     if (getenv("OMEGA_DISASM")) disass = 1;
@@ -141,13 +141,20 @@ int main(int argc, char **argv) {
         } else {
             ADF2MFM(fd, floppyInit(0));
             close(fd);
-            haveDisk = 1;
-            // Disk is in the drive at power-on: set hasDisk and assert /CHNG=0
-            // so the ROM's initial drive probe detects it.  The insertAt loop
-            // is suppressed once hasDisk is already set.
-            df[0].hasDisk = 1;
-            df[0].pra &= 0xFB;   // /CHNG=0 (change: disk was in drive at power-on)
-            printf("  DF0: %s encoded to MFM — disk in drive at boot\n", adfPath);
+            haveImage = 1;
+            if (insertAt <= 0) {
+                // A non-positive insert time models media present at reset.
+                df[0].hasDisk = 1;
+                df[0].pra &= 0xFB;   // /CHNG=0 (media changed)
+                df[0].pra &= 0xDF;   // /DKRDY=0 (media ready)
+                printf("  DF0: %s encoded to MFM — disk in drive at boot\n",
+                       adfPath);
+            } else {
+                // Keep the encoded image available, but expose an empty drive
+                // until the emulation loop calls floppyInsert().
+                printf("  DF0: %s encoded to MFM — insert scheduled at %ld\n",
+                       adfPath, insertAt);
+            }
         }
     } else {
         floppyInit(0);
@@ -160,7 +167,7 @@ int main(int argc, char **argv) {
     // insert a Workbench disk" requester never opens.  The zero data after each
     // sync produces invalid sector headers so trackdisk returns TDERR_NoSecHdr
     // after its retry limit and the OS shows the insert-disk screen.
-    if (!haveDisk) {
+    if (!haveImage) {
         uint8_t *mfm = df[0].mfmData;
         for (int cyl = 0; cyl < 82; cyl++) {
             for (int side = 0; side < 2; side++) {
@@ -218,7 +225,7 @@ int main(int argc, char **argv) {
         // Kickstart only accepts a disk-change once the drive has finished
         // ID mode (df[0].idMode == 0).  Keep trying from insertAt onward
         // until floppyInsert latches hasDisk.
-        if (haveDisk && it >= insertAt && !df[0].hasDisk &&
+        if (haveImage && insertAt > 0 && it >= insertAt && !df[0].hasDisk &&
             (it % 200) == 0) {
             floppyInsert(0);
             if (df[0].hasDisk) {

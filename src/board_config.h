@@ -80,17 +80,17 @@
 // ---------------------------------------------------------------------------
 //  DVI / HDMI output   (differential pairs are {P = pin, N = pin+1})
 // ---------------------------------------------------------------------------
-// Both boards use PicoDVI's PIO serialiser. On WeAct, GPIO11..18 line up with
-// an external Adafruit DVI breakout; Waveshare uses its on-board connector.
+// WeAct uses Raspberry Pi's official Pico DVI Sock ordering on GPIO12..19.
+// Both boards use PicoDVI's proven PIO serialiser and rendering path.
 #if BOARD_HAS_DVI
 #if BOARD_WEACT_STUDIO_RP2350B_CORE
-#define BOARD_DVI_TMDS_D0_PIN    11    // pair 11/12  (blue/control)
-#define BOARD_DVI_TMDS_D1_PIN    17    // pair 17/18  (green)
-#define BOARD_DVI_TMDS_D2_PIN    15    // pair 15/16  (red)
-#define BOARD_DVI_TMDS_CLK_PIN   13    // pair 13/14
+#define BOARD_DVI_TMDS_D0_PIN    12    // pair 12/13  (blue/control)
+#define BOARD_DVI_TMDS_D1_PIN    18    // pair 18/19  (green)
+#define BOARD_DVI_TMDS_D2_PIN    16    // pair 16/17  (red)
+#define BOARD_DVI_TMDS_CLK_PIN   14    // pair 14/15
 #define BOARD_DVI_INVERT_DIFF    0
 #define BOARD_DVI_PIO_GPIO_BASE  0
-#define BOARD_DVI_PIN_RANGE      "GPIO11..18"
+#define BOARD_DVI_PIN_RANGE      "GPIO12..19"
 #elif BOARD_WAVESHARE_RP2350_PIZERO
 #define BOARD_DVI_TMDS_D0_PIN    36    // pair 36/37  (blue)
 #define BOARD_DVI_TMDS_D1_PIN    34    // pair 34/35  (green)

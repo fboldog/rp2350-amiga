@@ -140,6 +140,7 @@ def main():
     blocks.extend(rom_blocks)
 
     if args.adf0:
+        print(f"ADF: {args.adf0}")
         with open(args.adf0, 'rb') as f:
             adf0 = f.read()
         adf0_addr = FLASH_BASE + ADF0_FLASH_OFFSET

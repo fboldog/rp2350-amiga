@@ -11,8 +11,9 @@
 
 Toolchain: ARM GNU Toolchain 14.2.rel1 (aarch64-arm-none-eabi) + Pico SDK 2.3.1.
 Output `omega-amiga.uf2` builds for both Waveshare and WeAct RP2350B boards.
-On WeAct, PSRAM, flash Kickstart loading, emulation, UART, and external DVI on
-GPIO11..18 are verified through the Kickstart 1.3 insert-disk animation.
+On WeAct, PSRAM, flash Kickstart loading, emulation, UART, and full-width HDMI
+on GPIO12..19 are verified through the Kickstart 1.3 boot screens and
+Workbench 1.3.
 
 Core logic verified via `native/` head-less runner (2026-09-01): Kickstart 1.3 +
 `original2.adf` boot to the AmigaDOS CLI on a PC build of the same `omega/*.c`.

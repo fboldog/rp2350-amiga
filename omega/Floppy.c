@@ -483,6 +483,7 @@ void floppyInsert(int drive){
     if(df[drive].hasDisk){
         df[drive].hasDisk = 0;
         df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk removed)
+        df[drive].pra |= 0x20;      // /DKRDY=1 (no media ready)
         printf("Disk ejected from df%d:\n",drive);
     }else{
 #ifdef PICO_BUILD
@@ -491,6 +492,12 @@ void floppyInsert(int drive){
 #endif
         df[drive].hasDisk = 1;
         df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk inserted)
+        // The motor-control output may not change while Kickstart polls the
+        // hand screen, so floppySetState() may have no edge on which to
+        // recalculate readiness. Present the inserted medium immediately;
+        // a subsequent motor-off write restores /DKRDY=1.
+        df[drive].pra &= 0xDF;      // /DKRDY=0 (inserted medium ready)
+        df[drive].index = 0;
         printf("Disk inserted in df%d:\n",drive);
     }
     
@@ -545,22 +552,18 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
             
         case 0x70:
             driveSelected = 0;
-            df[0].pra |= 0x04;   // /CHNG ack: SEL asserted → clear /CHNG latch
             break;
 
         case 0x68:
             driveSelected = 1;
-            df[1].pra |= 0x04;
             break;
 
         case 0x58:
             driveSelected = 2;
-            df[2].pra |= 0x04;
             break;
 
         case 0x38:
             driveSelected = 3;
-            df[3].pra |= 0x04;
             break;
             
         default:
@@ -650,6 +653,11 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
         if(df[driveSelected].cylinder >79){    //not sure why sometimes the drive tries to go up to track 80.. with ks1.3
             df[driveSelected].cylinder = 79;
         }
+
+        // A real Amiga drive keeps /CHNG asserted after an insertion or
+        // ejection until the controller steps the head. Clearing it merely on
+        // drive selection makes a waiting Kickstart miss runtime insertion.
+        df[driveSelected].pra |= 0x04;
         
         //floppySync = 0;
         

@@ -222,3 +222,30 @@ ROM (exec 40.10). Native runner gained `OMEGA_ROM=<file>` / `OMEGA_DISASM=1`.
   point — continuing on the other machine.
 - Next for KS 3.1 remains implementing those two blitter modes. PicoDVI output
   was completed later and is no longer an open item.
+
+**WeAct full-width HDMI (2026-09-28).** Goal: no upscaling on WeAct HDMI
+(GPIO12..19, Pico DVI Sock ordering).
+- The old 360-wide doubled path sampled every second raster column, dropping
+  half of each HIRES pixel: Workbench 1.3 fonts looked broken. WeAct now uses
+  720-wide RGB332 lines, 640 image columns 1:1.
+- PicoDVI has no full-res 8bpp encoder. `tmds_encode_palette_data` is an
+  interpolator/LUT path and far too slow on core 1 (solid red screen). The
+  fix drives the RP2350 SIO TMDS encoder directly with pixel doubling off
+  (`dvi_encode_channel_fullres_8bpp`, `tmds_encode_sio_loop_poppop_ratio2`).
+- Red DVI lines = PicoDVI "late scanline". Measured over SWD: encode <=20 us,
+  but 720-byte PSRAM line copies took up to 116 us under emulator QMI load.
+  PSRAM already runs at its 133 MHz limit. Fix: both 640x200 frames in SRAM
+  (250 KB), made possible by a 16-bit Musashi opcode index (Pico builds) plus a
+  flash-resident `const` opcode descriptor table (~150 KB SRAM freed). WeAct
+  uses 4 TMDS buffers (heap is tight: ~17 KB spare after them).
+- Core 1 must not touch flash either: libc `memcpy` (runs from flash) and a
+  `static const` blank line (in `.rodata`) each caused red lines.
+- Handy debugging: `openocd ... -c init -c "echo [capture {mdw ADDR N}]"` reads
+  RAM without halting; `dump_image` of the SRAM frames renders what core 1 is
+  scanning out.
+- Gotcha: `build-weact-hdmi/` had been copied from the `rp2350-amiga-codex`
+  checkout and built that tree's sources. Check `CMAKE_HOME_DIRECTORY` in
+  CMakeCache.txt when builds "do nothing".
+- The pending Floppy change moves the `/CHNG` acknowledge from drive select to
+  head step and reports `/DKRDY` on insert/eject, so runtime insertion is seen
+  by a waiting Kickstart.

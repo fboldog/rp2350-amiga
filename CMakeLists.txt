@@ -227,11 +227,18 @@ target_compile_options(omega-amiga PRIVATE
 )
 
 if(OMEGA_ENABLE_HDMI)
-    target_compile_definitions(omega-amiga PRIVATE
-        DVI_VERTICAL_REPEAT=2
-        # Vertical repeat keeps a line owned by DMA for two physical rows.
+    if(PICO_BOARD STREQUAL "weact_studio_rp2350b_core")
+        # Full-width scanout reads its frames from SRAM, so encoding never
+        # stalls on QMI; the SRAM frames leave room for only four buffers.
+        set(OMEGA_DVI_TMDS_BUFFERS 4)
+    else()
         # Eight buffers absorb short encoder stalls caused by QMI traffic.
-        DVI_N_TMDS_BUFFERS=8
+        set(OMEGA_DVI_TMDS_BUFFERS 8)
+    endif()
+    target_compile_definitions(omega-amiga PRIVATE
+        # Vertical repeat keeps a line owned by DMA for two physical rows.
+        DVI_VERTICAL_REPEAT=2
+        DVI_N_TMDS_BUFFERS=${OMEGA_DVI_TMDS_BUFFERS}
         PICO_PIO_USE_GPIO_BASE=1
     )
 endif()

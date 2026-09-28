@@ -1971,7 +1971,15 @@ void m68k_op_unpk_16_mm(void);
 /* Build the opcode handler table */
 void m68ki_build_opcode_table(void);
 
+#ifdef PICO_BUILD
+extern unsigned short m68ki_instruction_index[0x10000]; /* opcode handler index */
+extern void (*m68ki_handler_ptrs[])(void);
+#define m68ki_call_instruction(ir) \
+	m68ki_handler_ptrs[m68ki_instruction_index[ir]]()
+#else
 extern void (*m68ki_instruction_jump_table[0x10000])(void); /* opcode handler jump table */
+#define m68ki_call_instruction(ir) m68ki_instruction_jump_table[ir]()
+#endif
 extern unsigned char m68ki_cycles[][0x10000];
 
 
