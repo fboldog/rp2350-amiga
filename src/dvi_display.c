@@ -13,6 +13,7 @@
 
 #include "dvi.h"
 #include "tmds_encode.h"
+#include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/structs/busctrl.h"
 #include "hardware/structs/sio.h"
@@ -38,32 +39,32 @@ static const struct dvi_timing amiga_dvi_timing = {
     .v_active_lines = 576,
     .bit_clk_khz = 270000,
 };
+#define DVI_ACTIVE_WIDTH   720u
+#define DVI_MODE_PREFIX    "720x576p50"
 #define SOURCE_HEIGHT      288u
 #define AMIGA_SOURCE_HEIGHT 200u
 #else
+// NTSC builds run clk_sys at 252 MHz, which is exactly VGA 640x480p60
+// (25.2 MHz pixels). PicoDVI's 720x480p60 timing needs 270 MHz; at 252 MHz it
+// produced a non-standard ~55.9 Hz mode that capture devices lock onto
+// unreliably. 640 active pixels also match the Amiga image without borders.
+#define DVI_ACTIVE_WIDTH   640u
+#define DVI_MODE_PREFIX    "640x480p60"
 #define SOURCE_HEIGHT      240u
 #define AMIGA_SOURCE_HEIGHT 200u
 #endif
 
 #if BOARD_WEACT_STUDIO_RP2350B_CORE
 #define DVI_FULL_WIDTH     1
-#define SOURCE_WIDTH       720u
+#define SOURCE_WIDTH       DVI_ACTIVE_WIDTH
 #define AMIGA_SOURCE_WIDTH 640u
-#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
-#define DVI_MODE_NAME      "720x576p50 full-width 640x400"
-#else
-#define DVI_MODE_NAME      "720x480p60 full-width 640x400"
-#endif
+#define DVI_MODE_NAME      DVI_MODE_PREFIX " full-width 640x400"
 typedef uint8_t dvi_pixel_t;
 #else
 #define DVI_FULL_WIDTH     0
-#define SOURCE_WIDTH       360u
+#define SOURCE_WIDTH       (DVI_ACTIVE_WIDTH / 2u)
 #define AMIGA_SOURCE_WIDTH 320u
-#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
-#define DVI_MODE_NAME      "720x576p50 (640x400 image doubled)"
-#else
-#define DVI_MODE_NAME      "720x480p60 (640x400 image doubled)"
-#endif
+#define DVI_MODE_NAME      DVI_MODE_PREFIX " (640x400 image doubled)"
 typedef uint8_t dvi_pixel_t;
 #endif
 
@@ -330,8 +331,13 @@ void dvi_display_init(void) {
 #if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
     dvi.timing = &amiga_dvi_timing;
 #else
-    dvi.timing = &dvi_timing_720x480p_60hz;
+    dvi.timing = &dvi_timing_640x480p_60hz;
 #endif
+    // PicoDVI serialises one TMDS bit per clk_sys cycle; any mismatch yields a
+    // non-standard mode that monitors and capture devices may reject.
+    if (dvi.timing->h_active_pixels != DVI_ACTIVE_WIDTH ||
+        clock_get_hz(clk_sys) != dvi.timing->bit_clk_khz * 1000u)
+        panic("DVI timing does not match clk_sys or scanout width");
     dvi.ser_cfg = (struct dvi_serialiser_cfg) {
         .pio = pio0,
         .sm_tmds = {0, 1, 2},

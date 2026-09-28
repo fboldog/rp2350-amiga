@@ -118,9 +118,16 @@ synchronised adjacent PWM slices.
 Full-width emulator modes convert the native DMA raster directly to RGB332
 scanout frames, avoiding a redundant 640×400 ARGB presentation pass.
 
+The DVI mode is standard: 640×480p60 (VGA, 25.2 MHz pixels, matching the
+252 MHz NTSC clock) or CEA 720×576p50 for PAL (270 MHz). Each stored image row
+is sent twice and black lines fill the remaining height. Firmware panics at
+startup if `clk_sys` does not match the mode's bit clock: PicoDVI's 720×480p60
+timing at 252 MHz produced an off-standard ~55.9 Hz mode that capture devices
+locked onto unreliably.
+
 WeAct scans out at full width without upscaling: each of the 640 image
-columns becomes one 720-pixel DVI column, so HIRES (e.g. Workbench text) keeps
-every pixel. Core 1 drives the RP2350 SIO TMDS encoder at one symbol per pixel.
+columns becomes one DVI pixel, so HIRES (e.g. Workbench text) keeps every
+pixel. Core 1 drives the RP2350 SIO TMDS encoder at one symbol per pixel.
 Its two 640×200 RGB332 frames live in internal SRAM, not PSRAM: the emulator
 saturates the shared QMI bus, and 720-byte PSRAM (or flash) line fetches
 regularly missed the scanline deadline, which PicoDVI shows as solid red lines.
@@ -158,7 +165,7 @@ Video: NTSC (263 lines, 59.940 Hz)
 PSRAM: detected 8388608 bytes on GPIO0
 PSRAM: 1024-byte read/write test passed at 0x11000000
 ROM: flash 0x10200000, header=1111 opcode=4ef9 entry=00fc00d2
-DVI: PIO 720x480p60 full-width 640x400 emulator scanout on GPIO12..19 (SRAM frames)
+DVI: PIO 640x480p60 full-width 640x400 emulator scanout on GPIO12..19 (SRAM frames)
 DF0: flash ADF mounted with 12798-byte SRAM track cache
 DF0: disk inserted at boot; KEY ejects/reinserts it
 Entering emulation loop

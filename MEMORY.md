@@ -259,3 +259,11 @@ ROM (exec 40.10). Native runner gained `OMEGA_ROM=<file>` / `OMEGA_DISASM=1`.
 Intuition's screen begins at line 44 (0x2c), so the title bar's top padding
 line was dropped on every target. `OMEGA_DDF_EXTRA_UPPER_OVERSCAN` is now 39;
 only the `wb13` regression baselines (NTSC and PAL) changed, after review.
+
+**NTSC DVI mode (2026-09-28).** NTSC builds ran PicoDVI's 720x480p60 timing
+(needs 270 MHz) at the 252 MHz NTSC clock, emitting a non-standard ~55.9 Hz
+mode; the capture device locked onto it unreliably. NTSC now uses VGA
+640x480p60 (exactly 252 MHz), which also fits the 640-wide image without side
+borders. Raising NTSC to 270 MHz was rejected: PSRAM would drop from 126 MHz
+(div 2) to 90 MHz (div 3). `dvi_display_init()` panics on any clk_sys/timing
+mismatch.
