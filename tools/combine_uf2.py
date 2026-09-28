@@ -82,29 +82,53 @@ def binary_to_uf2_blocks(data, base_addr):
     return blocks
 
 
+def block_family(blk):
+    flags = struct.unpack_from('<I', blk, 8)[0]
+    if not flags & UF2_FLAG_FAMILYID:
+        return None
+    return struct.unpack_from('<I', blk, 28)[0]
+
+
+def renumber(blk, blkno, total):
+    """Return blk with its block number and block count replaced."""
+    return blk[:20] + struct.pack('<II', blkno, total) + blk[28:]
+
+
 def write_uf2(firmware_blocks, appended_blocks, family_id, path):
-    """Preserve firmware blocks and append a separately numbered UF2 image."""
-    total = len(appended_blocks)
+    """Write firmware and appended data as one consistently numbered image."""
+    data_blocks = []
+    for addr, payload in appended_blocks:
+        hdr = struct.pack('<IIIIIII',
+                          UF2_MAGIC1,
+                          UF2_MAGIC2,
+                          UF2_FLAG_FAMILYID,
+                          addr,
+                          PAYLOAD_SIZE,
+                          0,
+                          0)
+        fam = struct.pack('<I', family_id)
+        blk = hdr + fam + payload + b'\x00' * (BLOCK_SIZE - 32 - PAYLOAD_SIZE - 4)
+        blk += struct.pack('<I', UF2_MAGIC3)
+        assert len(blk) == BLOCK_SIZE
+        data_blocks.append(blk)
+
+    # The RP2350 boot ROM takes numBlocks from the first block it accepts and
+    # reboots once blocks 0..numBlocks-1 have arrived. Every block of the
+    # application family must therefore share one sequence; separately
+    # numbered appended data was silently never written. Blocks of other
+    # families (e.g. the SDK's RP2350-E10 workaround block) keep their own
+    # numbering, and payloads are preserved byte-for-byte.
+    blocks = firmware_blocks + data_blocks
+    total = sum(1 for blk in blocks if block_family(blk) == family_id)
+    blkno = 0
     with open(path, 'wb') as f:
-        # RP2350 SDK UF2s can contain metadata/extension blocks.  Keep every
-        # firmware block byte-for-byte instead of reconstructing and losing it.
-        for blk in firmware_blocks:
+        for blk in blocks:
+            if block_family(blk) == family_id:
+                blk = renumber(blk, blkno, total)
+                blkno += 1
             f.write(blk)
-        for blkno, (addr, payload) in enumerate(appended_blocks):
-            hdr = struct.pack('<IIIIIII',
-                              UF2_MAGIC1,
-                              UF2_MAGIC2,
-                              UF2_FLAG_FAMILYID,
-                              addr,
-                              PAYLOAD_SIZE,
-                              blkno,
-                              total)
-            fam = struct.pack('<I', family_id)
-            blk = hdr + fam + payload + b'\x00' * (BLOCK_SIZE - 32 - PAYLOAD_SIZE - 4)
-            blk += struct.pack('<I', UF2_MAGIC3)
-            assert len(blk) == BLOCK_SIZE
-            f.write(blk)
-    print(f"Wrote {len(firmware_blocks)} firmware + {total} data blocks to {path}")
+    print(f"Wrote {len(firmware_blocks)} firmware + {len(data_blocks)} data "
+          f"blocks to {path} ({total} numbered in family 0x{family_id:08x})")
 
 
 def main():
