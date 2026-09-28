@@ -298,3 +298,9 @@ render RGB332 directly into the SRAM scanout frame. PAL boot to Workbench:
 ~250 s → 151.5 s → 93.5 s. Tried and dropped: hot code in SRAM (no gain, the
 bottleneck is PSRAM data; exhausted PAL SRAM) and turboFloppy 64 (breaks the
 native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
+- KEY insert on the hand screen: Kickstart takes ~7 s of Amiga time to notice
+  the disk; the hand screen is CPU-bound (~7 % speed), so ~100 s wall time.
+- Debugger hygiene: halting cores or setting watchpoints while PicoDVI runs,
+  then resetting through OpenOCD, left DMA/PIO wedged (core 1 stuck in
+  `dvi_dma_irq_handler`, once even a scratch-X overwrite). Only a power cycle
+  recovered it. Measure with non-halting reads (`mdw`, `DWT_PCSR`) instead.

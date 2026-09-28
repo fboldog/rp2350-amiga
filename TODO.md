@@ -191,6 +191,13 @@ How to measure (no halt, firmware keeps running):
       pair; row conversion (or MFM track encoding) could move to core 1.
 
 ### P2 – Emulation core
+Profile on the Kickstart 1.3 hand screen (NTSC, after the RGB332 render; the
+animation keeps the 68000 busy): `m68k_execute` 15.6 %, `dma_execute` 10.8 %,
+`evenCycle` 9.4 %, `chipReadLong` 9.2 %, `chipReadByte` 5.0 %, opcode handlers
+~15 %, `hostRasterWritten` 4.4 %. The emulator is CPU-bound there (~4.4 TOD
+ticks/s, ~7 % speed). After a KEY insert Kickstart needs ~7 s of Amiga time
+(trackdisk's change polling) to notice the disk, which is why AmigaDOS
+appears only ~2 min 12 s later.
 - [x] ~~**Hot code in SRAM.**~~ Tried 2026-09-28 and reverted: ~6 KB of the
       hottest functions (DMA slots, planar conversion, Copper, CIA,
       `m68k_execute`, chip RAM accessors) placed in `.time_critical` put 95 %
