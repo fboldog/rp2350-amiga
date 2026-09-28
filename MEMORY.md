@@ -267,3 +267,14 @@ mode; the capture device locked onto it unreliably. NTSC now uses VGA
 borders. Raising NTSC to 270 MHz was rejected: PSRAM would drop from 126 MHz
 (div 2) to 90 MHz (div 3). `dvi_display_init()` panics on any clk_sys/timing
 mismatch.
+
+**PAL boot screens / UF2 (2026-09-28).**
+- PAL lost capture lock during Kickstart's solid grey/white boot screens and
+  recovered at the AmigaDOS window. Not signal integrity (8 mA fast pads did
+  nothing) and not timing (`late_scanline_ctr` stayed 0). It was the content:
+  bright full-width image with black 40-pixel side columns. Borders now show
+  COLOR00 (per-frame `frame_border`, repainted by core 1 on change).
+- `combine_uf2.py` numbered appended ROM/ADF blocks separately from the
+  firmware in the same family; the RP2350 boot ROM stops after the first
+  block's numBlocks, so a new ADF was never written via BOOTSEL. Now one
+  sequence per family; other families (E10 workaround block) untouched.

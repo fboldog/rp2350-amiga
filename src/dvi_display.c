@@ -111,6 +111,9 @@ static uint32_t scanline_words[
 // Not const: .rodata lives in flash, and XIP reads on core 1 compete with the
 // emulator's PSRAM traffic on the shared QMI bus (late, red border lines).
 static uint32_t blank_words[count_of(scanline_words)];
+// Border colour (COLOR00) of each frame. Like a real Amiga, the areas around
+// the image show the border colour rather than black.
+static dvi_pixel_t frame_border[2];
 #if !DVI_USE_SIO_TMDS_ENCODER || DVI_SYMBOLS_PER_WORD != 2
 #error "Full-width DVI scanout requires the RP2350 SIO TMDS encoder"
 #endif
@@ -178,6 +181,8 @@ bool dvi_display_submit_frame(const uint32_t *argb_frame) {
 
     // Borders stay black after the first frame, so only update the image
     // rectangle. This avoids a full-frame write on subsequent frames.
+    // The presented frame's corner always holds the border colour.
+    frame_border[target] = argb_to_dvi_pixel(argb_frame[0]);
     for (uint y = 0; y < AMIGA_SOURCE_HEIGHT; ++y) {
         const uint32_t *src_row = argb_frame + (y * 2u) * SCREEN_W;
         dvi_pixel_t *dst_row = dvi_image_row(dst, y);
@@ -201,6 +206,7 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
         return false;
 
     const dvi_pixel_t border_pixel = argb_to_dvi_pixel(border);
+    frame_border[target] = border_pixel;
     const int first_source_y = y_offset / 2;
     const int source_rows = HOST_RASTER_H / source_step;
 
@@ -241,6 +247,9 @@ static void __not_in_flash_func(dvi_core1)(void) {
     multicore_fifo_push_blocking(0u);
     uint y = 0;
     int active_frame = 0;
+#if DVI_FULL_WIDTH
+    uint32_t border_words = 0;
+#endif
     for (;;) {
         if (y == 0) {
             int next = __atomic_load_n(&pending_frame, __ATOMIC_ACQUIRE);
@@ -252,13 +261,27 @@ static void __not_in_flash_func(dvi_core1)(void) {
                                  __ATOMIC_RELEASE);
                 __atomic_store_n(&pending_frame, -1, __ATOMIC_RELEASE);
             }
+#if DVI_FULL_WIDTH
+            // Repaint the side columns and the border line only when the
+            // border colour changes (at most once per frame).
+            const uint32_t words = frame_border[active_frame] * 0x01010101u;
+            if (words != border_words) {
+                border_words = words;
+                for (uint i = 0; i < count_of(blank_words); ++i)
+                    blank_words[i] = words;
+                for (uint i = 0; i < DVI_IMAGE_X0 / sizeof(uint32_t); ++i) {
+                    scanline_words[i] = words;
+                    scanline_words[count_of(scanline_words) - 1u - i] = words;
+                }
+            }
+#endif
         }
 
         uint32_t *tmds;
         queue_remove_blocking_u32(&dvi.q_tmds_free, &tmds);
 #if DVI_FULL_WIDTH
         // Only the image rows live in SRAM. Border columns of scanline_words
-        // are never written, and border rows encode an all-black line.
+        // and the border line hold the frame's border colour.
         const uint32_t *pixels = blank_words;
         const uint image_y = y - DVI_IMAGE_Y0;
         if (image_y < AMIGA_SOURCE_HEIGHT) {

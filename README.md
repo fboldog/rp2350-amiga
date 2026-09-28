@@ -120,7 +120,11 @@ scanout frames, avoiding a redundant 640×400 ARGB presentation pass.
 
 The DVI mode is standard: 640×480p60 (VGA, 25.2 MHz pixels, matching the
 252 MHz NTSC clock) or CEA 720×576p50 for PAL (270 MHz). Each stored image row
-is sent twice and black lines fill the remaining height. Firmware panics at
+is sent twice. Like a real Amiga, every area around the image (the PAL side
+columns and the rows above and below) shows the border colour COLOR00, never
+black: a solid bright boot screen framed by black side columns made the
+capture device lose lock during Kickstart's grey/white boot sequence. Firmware
+panics at
 startup if `clk_sys` does not match the mode's bit clock: PicoDVI's 720×480p60
 timing at 252 MHz produced an off-standard ~55.9 Hz mode that capture devices
 locked onto unreliably.
@@ -217,7 +221,10 @@ python3 tools/combine_uf2.py \
 ADF embedding remains optional. The combined Kickstart 1.3 + Workbench 1.3
 image was verified on WeAct with DF0 inserted at boot, and with KEY eject and
 reinsert events. A 256 KB Kickstart is mirrored into its 512 KB flash window by
-the combine tool.
+the combine tool. The tool numbers the firmware and appended blocks as one
+UF2 sequence: the RP2350 boot ROM reboots once it has received the number of
+blocks announced by the first block, so separately numbered ROM/ADF blocks
+were silently never written and the previous disk stayed in flash.
 
 Hold BOOTSEL and connect USB, then copy the generated combined UF2 to the
 `RPI-RP2` drive.
