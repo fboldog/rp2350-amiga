@@ -290,3 +290,11 @@ spare); NTSC keeps 200 lines and 4 buffers (~80 KB spare). The border stays
 COLOR00 by user choice, so Workbench has no visible screen outline (authentic).
 A PAL Workbench 1.3 boot takes ~4 min on device (~3.5 min after the AmigaDOS
 window appears); a long wait at the CLI is normal, not a hang.
+
+**Speed work (2026-09-28).** PC-sampling profile (DWT_PCSR over SWD) showed
+~70 % of core 0 in the display pipeline's PSRAM traffic, not the 68000.
+Fixes: skip the per-frame 1 MB raster clear (per-row written ranges), then
+render RGB332 directly into the SRAM scanout frame. PAL boot to Workbench:
+~250 s → 151.5 s → 93.5 s. Tried and dropped: hot code in SRAM (no gain, the
+bottleneck is PSRAM data; exhausted PAL SRAM) and turboFloppy 64 (breaks the
+native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.

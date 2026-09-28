@@ -131,7 +131,10 @@ locked onto unreliably.
 
 WeAct scans out at full width without upscaling: each of the 640 image
 columns becomes one DVI pixel, so HIRES (e.g. Workbench text) keeps every
-pixel. Core 1 drives the RP2350 SIO TMDS encoder at one symbol per pixel.
+pixel. For full-width fetch layouts the emulator converts each bitplane block
+to RGB332 straight into the free SRAM scanout frame (`hostRasterPixels()` /
+`hostRasterWritten()` in `src/Host.c`), so the display path does not touch
+PSRAM; other layouts fall back to the ARGB raster in PSRAM. Core 1 drives the RP2350 SIO TMDS encoder at one symbol per pixel.
 Its two 640×200 (NTSC) or 640×256 (PAL) RGB332 frames live in internal SRAM,
 not PSRAM: the emulator
 saturates the shared QMI bus, and 720-byte PSRAM (or flash) line fetches

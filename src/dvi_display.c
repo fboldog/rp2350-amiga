@@ -145,9 +145,7 @@ static inline dvi_pixel_t *dvi_image_row(dvi_pixel_t *frame, uint y) {
 }
 
 static inline uint8_t argb_to_dvi_pixel(uint32_t pixel) {
-    return (uint8_t)(((pixel >> 16) & 0xe0u) |
-                     ((pixel >> 11) & 0x1cu) |
-                     ((pixel >> 6) & 0x03u));
+    return dvi_rgb332(pixel);
 }
 
 static bool dvi_begin_submit(int *target_out, dvi_pixel_t **dst_out) {
@@ -172,6 +170,46 @@ static bool dvi_begin_submit(int *target_out, dvi_pixel_t **dst_out) {
 
 static void dvi_publish_frame(int target) {
     __atomic_store_n(&pending_frame, target, __ATOMIC_RELEASE);
+}
+
+#if DVI_FULL_WIDTH
+static int direct_target = -1;
+#endif
+
+bool dvi_display_direct_supported(void) {
+    return DVI_FULL_WIDTH;
+}
+
+int dvi_display_direct_height(void) {
+    return AMIGA_SOURCE_HEIGHT;
+}
+
+uint8_t *dvi_display_direct_acquire(void) {
+#if DVI_FULL_WIDTH
+    if (time_us_64() < boot_pattern_until_us)
+        return NULL;
+    // Core 1 takes a queued frame at its next frame boundary, so this waits
+    // at most one DVI frame. The other buffer is then free until published.
+    while (__atomic_load_n(&pending_frame, __ATOMIC_ACQUIRE) >= 0)
+        tight_loop_contents();
+    direct_target = __atomic_load_n(&displayed_frame, __ATOMIC_ACQUIRE) ^ 1;
+    source_frame_has_emulator[direct_target] = true;
+    return source_frames[direct_target];
+#else
+    return NULL;
+#endif
+}
+
+void dvi_display_direct_publish(uint32_t border) {
+#if DVI_FULL_WIDTH
+    if (direct_target < 0)
+        return;
+    frame_border[direct_target] = argb_to_dvi_pixel(border);
+    dvi_publish_frame(direct_target);
+    direct_target = -1;
+#else
+    (void)border;
+#endif
 }
 
 bool dvi_display_submit_frame(const uint32_t *argb_frame) {

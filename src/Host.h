@@ -50,19 +50,19 @@ typedef struct {
 
 extern Host_t host;
 
-// Raster pixels written this frame, as a [min, max) column range per row.
-// The RP2350 HDMI path reads only these ranges and shows the border colour
-// elsewhere, so it never has to clear the 1 MB PSRAM raster between frames.
-// Every raster write must be reported; writes along a row are contiguous.
+// Raster writes go through the host: hostRasterPixels() returns where the
+// planar converter writes `width` ARGB pixels for raster (row, x), and
+// hostRasterWritten() reports them afterwards. Writes along a row are
+// contiguous. On the RP2350 HDMI build the host either records the written
+// [min, max) columns per raster row, so the raster never needs clearing, or
+// converts the pixels straight to RGB332 into the SRAM scanout frame.
 #ifdef PICO_BUILD
-extern int16_t hostRasterRowMin[HOST_RASTER_H];
-extern int16_t hostRasterRowMax[HOST_RASTER_H];
-static inline void hostRasterWritten(int row, int x, int width) {
-    if (x < hostRasterRowMin[row]) hostRasterRowMin[row] = (int16_t)x;
-    if (x + width > hostRasterRowMax[row])
-        hostRasterRowMax[row] = (int16_t)(x + width);
-}
+uint32_t *hostRasterPixels(int row, int x);
+void hostRasterWritten(int row, int x, int width);
 #else
+static inline uint32_t *hostRasterPixels(int row, int x) {
+    return &((uint32_t *)host.pixels)[row * HOST_RASTER_W + x];
+}
 static inline void hostRasterWritten(int row, int x, int width) {
     (void)row; (void)x; (void)width;
 }

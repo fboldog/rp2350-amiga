@@ -53,6 +53,126 @@ static void hostBorderUnwrittenPixels(uint32_t border) {
     }
 }
 
+#if OMEGA_ENABLE_HDMI
+// Direct RGB332 rendering: for full-width fetch layouts on boards with SRAM
+// scanout frames, converted pixels go straight into the free scanout frame,
+// so the ARGB raster in PSRAM is neither written nor read. The layout (the
+// same mapping dvi_display_submit_raster() applies) is captured at frame
+// start.
+#define DIRECT_MAX_ROWS 256
+static bool direct_frame;         // this frame renders straight to RGB332
+static uint8_t *direct_image;     // acquired scanout frame, or NULL
+static int direct_first_row;      // image row of raster row 0
+static int direct_step;           // raster rows per image row
+static int direct_rotation;       // DDF row rotation in raster columns
+static int direct_height;         // image rows
+static int16_t direct_row_min[DIRECT_MAX_ROWS];
+static int16_t direct_row_max[DIRECT_MAX_ROWS];
+static uint32_t direct_block[32]; // one planar block of ARGB pixels
+
+static void hostDirectResetRows(void) {
+    for (int y = 0; y < DIRECT_MAX_ROWS; ++y) {
+        direct_row_min[y] = DVI_DIRECT_IMAGE_WIDTH;
+        direct_row_max[y] = 0;
+    }
+}
+
+static void hostDirectBegin(void) {
+    direct_frame = dvi_display_direct_supported() &&
+                   omegaDdfIsFullWidth(chipset.ddfstrt);
+    if (!direct_frame)
+        return;
+    const int alternate_rows =
+        host.displayIsLores &&
+        omegaLoresUsesAlternateRasterRows(chipset.diwstrt, chipset.diwstop);
+    direct_step = alternate_rows ? 2 : 1;
+    // dvi_display_submit_raster() skips y_offset / 2 image rows (64 / 2).
+    direct_first_row = host.displayIsLores && !alternate_rows ? 32 : 0;
+    direct_rotation = omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
+    direct_height = dvi_display_direct_height();
+    if (direct_height > DIRECT_MAX_ROWS)
+        direct_height = DIRECT_MAX_ROWS;
+}
+
+static inline void hostDirectConvert(uint8_t *dst, const uint32_t *src,
+                                     int y, int x, int count) {
+    for (int i = 0; i < count; ++i)
+        dst[x + i] = dvi_rgb332(src[i]);
+    if (x < direct_row_min[y]) direct_row_min[y] = (int16_t)x;
+    if (x + count > direct_row_max[y])
+        direct_row_max[y] = (int16_t)(x + count);
+}
+
+static void hostDirectCommit(int row, int x, int width) {
+    if (!direct_image) {
+        direct_image = dvi_display_direct_acquire();
+        if (!direct_image)
+            return; // boot pattern still shown
+    }
+    if (row % direct_step)
+        return;
+    const int y = direct_first_row + row / direct_step;
+    if (y >= direct_height)
+        return;
+    uint8_t *line = direct_image + y * DVI_DIRECT_IMAGE_WIDTH;
+    int image_x = x - direct_rotation;
+    if (image_x < 0)
+        image_x += HOST_RASTER_W;
+    int first = HOST_RASTER_W - image_x;
+    if (first > width)
+        first = width;
+    hostDirectConvert(line, direct_block, y, image_x, first);
+    if (first < width) // the block wraps around the rotated row
+        hostDirectConvert(line, direct_block + first, y, 0, width - first);
+}
+
+static void hostDirectFinish(void) {
+    if (!direct_image)
+        direct_image = dvi_display_direct_acquire(); // e.g. bitplanes off
+    if (direct_image) {
+        const uint8_t border = dvi_rgb332(internal.palette[0]);
+        for (int y = 0; y < direct_height; ++y) {
+            uint8_t *line = direct_image + y * DVI_DIRECT_IMAGE_WIDTH;
+            int written_min = direct_row_min[y];
+            int written_max = direct_row_max[y];
+            if (written_max <= written_min)
+                written_min = written_max = DVI_DIRECT_IMAGE_WIDTH;
+            memset(line, border, (size_t)written_min);
+            memset(line + written_max, border,
+                   (size_t)(DVI_DIRECT_IMAGE_WIDTH - written_max));
+        }
+        dvi_display_direct_publish(internal.palette[0]);
+        static bool first_frame_queued;
+        if (!first_frame_queued) {
+            first_frame_queued = true;
+            printf("DVI: first direct RGB332 emulator frame queued\n");
+        }
+    }
+    direct_image = NULL;
+    hostDirectResetRows();
+}
+#endif
+
+uint32_t *hostRasterPixels(int row, int x) {
+#if OMEGA_ENABLE_HDMI
+    if (direct_frame)
+        return direct_block;
+#endif
+    return &render_fb[row * HOST_RASTER_W + x];
+}
+
+void hostRasterWritten(int row, int x, int width) {
+#if OMEGA_ENABLE_HDMI
+    if (direct_frame) {
+        hostDirectCommit(row, x, width);
+        return;
+    }
+#endif
+    if (x < hostRasterRowMin[row]) hostRasterRowMin[row] = (int16_t)x;
+    if (x + width > hostRasterRowMax[row])
+        hostRasterRowMax[row] = (int16_t)(x + width);
+}
+
 // ── Amiga key-code table (same values as the SDL Host.c) ─────────────────
 static const uint8_t keyMapping[] = {
     0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,
@@ -131,6 +251,10 @@ void hostInit(void) {
     memset(fb, 0, SCREEN_W * SCREEN_H * sizeof(uint32_t));
     memset(render_fb, 0, HOST_RASTER_PIXELS * sizeof(uint32_t));
     hostResetRasterWritten();
+#if OMEGA_ENABLE_HDMI
+    hostDirectResetRows();
+    direct_frame = false;
+#endif
     printf("Host init: framebuffer at %p (%d×%d ARGB)\n",
            (void *)fb, SCREEN_W, SCREEN_H);
 }
@@ -139,6 +263,14 @@ void hostDisplay(void) {
     // Mouse / joystick: stub – wire up USB HID here.
     // For now, leave joy0dat alone so Workbench won't crash on NULL ptr.
 #if OMEGA_ENABLE_HDMI
+    if (direct_frame) {
+        hostDirectFinish();
+        // The ARGB raster was not written; older contents are stale.
+        raster_has_stale_pixels = true;
+        hostResetRasterWritten();
+        hostDirectBegin();
+        return;
+    }
     if (omegaDdfIsFullWidth(chipset.ddfstrt)) {
         const uint32_t border = internal.palette[0];
         const int alternate_rows =
@@ -159,6 +291,7 @@ void hostDisplay(void) {
         // No 1 MB raster clear: the next frame reads only what it writes.
         raster_has_stale_pixels = true;
         hostResetRasterWritten();
+        hostDirectBegin();
         return;
     }
 #endif
@@ -169,4 +302,7 @@ void hostDisplay(void) {
     hostPresentFrame(fb, render_fb);
     display_push_frame();
     hostResetRasterWritten();
+#if OMEGA_ENABLE_HDMI
+    hostDirectBegin();
+#endif
 }

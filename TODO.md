@@ -175,12 +175,16 @@ How to measure (no halt, firmware keeps running):
       the Workbench icons ~250 s → 151.5 s. New top costs:
       `hiresPlanar2Chunky` 35.2 %, `dvi_display_submit_raster` 19.7 %,
       `dma_execute` 14.6 %, `m68k_execute` 4.4 %.
-- [ ] **Render straight to RGB332.** Keep an 8-bit mirror of the palette
-      (updated on COLORxx writes) so `*Planar2Chunky` and sprites write bytes,
-      not ARGB32. Either shrink the raster to 8 bpp (4× less traffic) or,
-      better, write rows directly into the SRAM DVI back buffer, applying the
-      row mapping (`y_offset`, alternate rows, DDF rotation) at render time.
-      This removes PSRAM from the display path entirely.
+- [x] **Render straight to RGB332.** For full-width fetch layouts on WeAct,
+      the DMA write sites (`hostRasterPixels()` / `hostRasterWritten()`) hand
+      each 16/32-pixel ARGB block to the host, which converts it to RGB332
+      directly into the free SRAM scanout frame, applying the raster-row
+      mapping (LORES offset, alternate rows, DDF rotation) captured at frame
+      start. Unwritten image pixels get COLOR00 at vblank. The PSRAM raster is
+      untouched; narrow layouts, Waveshare and native keep the ARGB paths.
+      Result (PAL, WeAct): boot to the Workbench icons 151.5 s → 93.5 s;
+      just after reaching Workbench 5.9 → 11.1 vblanks/s.
+      Verified on NTSC and PAL hardware.
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [ ] **Use core 1's spare time.** Scanout uses ~20 µs of each ~64 µs line
