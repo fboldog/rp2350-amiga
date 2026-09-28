@@ -193,6 +193,21 @@ How to measure (no halt, firmware keeps running):
       Verified identical to the bit loops on 400,000 random blocks. Results:
       NTSC KEY insert → AmigaDOS 78.8 s → 64.3 s; PAL boot to the Workbench
       icons 86.8 s → 82.1 s; idle Workbench 14.2 vblanks/s.
+- [x] **Narrow fetch layouts on the direct path.** DDFSTRT >= 0x40 screens
+      (e.g. the KS 2.04 insert screen) used the old presentation path (1 MB
+      framebuffer fill, raster copy and clear, 400-row readback) and ran at
+      ~2.1 vblanks/s, so the disk animation looked frozen. They now render
+      straight to RGB332 with hostPresentFrame()'s mapping (row offset
+      (HOST_CONTENT_Y - viewport) / 2, column - HOST_FETCH_LEAD clipped to
+      [HOST_VISIBLE_X0, HOST_VISIBLE_X1)): ~5 vblanks/s, animation visible.
+      Layouts needing the wrapped-fetch reconstruction keep the old path.
+- [x] **NTSC shows 240 rows** (the full 640x480 mode) instead of 200, so
+      overscan screens such as xsysinfo are no longer cut off.
+- [ ] **Colour depth.** RGB332 cannot represent some Amiga colours (e.g. the
+      KS 2.04 disk shutter $998877 shows as olive; blue has 4 levels). Options:
+      store palette indices and expand per line on core 1 (per-line palette
+      snapshots for Copper changes), or allocate the 256 codes per frame from
+      the 4096 Amiga colours with RGB332 as the overflow fallback (HAM).
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [ ] **Use core 1's spare time.** Scanout uses ~20 µs of each ~64 µs line

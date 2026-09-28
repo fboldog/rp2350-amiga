@@ -53,7 +53,9 @@ static const struct dvi_timing amiga_dvi_timing = {
 #define DVI_ACTIVE_WIDTH   640u
 #define DVI_MODE_PREFIX    "640x480p60"
 #define SOURCE_HEIGHT      240u
-#define AMIGA_SOURCE_HEIGHT 200u
+// Use every row of the 480-line mode: overscan screens (e.g. xsysinfo) run
+// to the end of the NTSC frame, beyond 200 lines.
+#define AMIGA_SOURCE_HEIGHT 240u
 #endif
 
 #if BOARD_WEACT_STUDIO_RP2350B_CORE

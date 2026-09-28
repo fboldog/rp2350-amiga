@@ -66,6 +66,7 @@ static uint8_t *direct_image;     // acquired scanout frame, or NULL
 static int direct_first_row;      // image row of raster row 0
 static int direct_step;           // raster rows per image row
 static int direct_rotation;       // DDF row rotation in raster columns
+static bool direct_narrow;        // narrow fetch layout (presentation mapping)
 static int direct_height;         // image rows
 static int16_t direct_row_min[DIRECT_MAX_ROWS];
 static int16_t direct_row_max[DIRECT_MAX_ROWS];
@@ -79,11 +80,33 @@ static void hostDirectResetRows(void) {
 }
 
 static void hostDirectBegin(void) {
+    const bool full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
+    // Narrow layouts that need hostPresentFrame()'s wrapped-fetch
+    // reconstruction (pixels moved between lines) keep the ARGB path.
+    direct_narrow = !full_width &&
+        !omegaDiwCrossesVerticalBank(chipset.diwstrt, chipset.diwstop);
     direct_frame = dvi_display_direct_supported() &&
-                   omegaDdfIsFullWidth(chipset.ddfstrt);
+                   (full_width || direct_narrow);
     hostDirectActive = direct_frame;
     if (!direct_frame)
         return;
+    direct_height = dvi_display_direct_height();
+    if (direct_height > DIRECT_MAX_ROWS)
+        direct_height = DIRECT_MAX_ROWS;
+    if (direct_narrow) {
+        // hostPresentFrame(): raster row sy lands on framebuffer line
+        // HOST_CONTENT_Y + 2 * sy - viewport_y_offset, and columns
+        // [HOST_VISIBLE_X0, HOST_VISIBLE_X1) come from raster column
+        // x + HOST_FETCH_LEAD.
+        const int viewport_y_offset =
+            (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
+             omegaDiwVerticalStart(chipset.diwstrt) < 64)
+            ? HOST_CONTENT_Y : OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
+        direct_step = 1;
+        direct_first_row = (HOST_CONTENT_Y - viewport_y_offset) / 2;
+        direct_rotation = 0;
+        return;
+    }
     const int alternate_rows =
         host.displayIsLores &&
         omegaLoresUsesAlternateRasterRows(chipset.diwstrt, chipset.diwstop);
@@ -91,9 +114,6 @@ static void hostDirectBegin(void) {
     // dvi_display_submit_raster() skips y_offset / 2 image rows (64 / 2).
     direct_first_row = host.displayIsLores && !alternate_rows ? 32 : 0;
     direct_rotation = omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
-    direct_height = dvi_display_direct_height();
-    if (direct_height > DIRECT_MAX_ROWS)
-        direct_height = DIRECT_MAX_ROWS;
 }
 
 static inline void hostDirectCopy(uint8_t *line, const uint8_t *pixels,
@@ -114,9 +134,22 @@ static void hostDirectPlace(int row, int x, const uint8_t *pixels, int width) {
     if (row % direct_step)
         return;
     const int y = direct_first_row + row / direct_step;
-    if (y >= direct_height)
+    if (y < 0 || y >= direct_height)
         return;
     uint8_t *line = direct_image + y * DVI_DIRECT_IMAGE_WIDTH;
+    if (direct_narrow) {
+        int image_x = x - HOST_FETCH_LEAD;
+        int first = 0, count = width;
+        if (image_x < HOST_VISIBLE_X0) {
+            first = HOST_VISIBLE_X0 - image_x;
+            image_x = HOST_VISIBLE_X0;
+        }
+        if (image_x + (count - first) > HOST_VISIBLE_X1)
+            count = first + HOST_VISIBLE_X1 - image_x;
+        if (count > first)
+            hostDirectCopy(line, pixels + first, y, image_x, count - first);
+        return;
+    }
     int image_x = x - direct_rotation;
     if (image_x < 0)
         image_x += HOST_RASTER_W;

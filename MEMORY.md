@@ -311,3 +311,7 @@ native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
 - Table-driven c2p to RGB332 (2026-09-28): NTSC KEY insert → AmigaDOS
   64 s (from 116 s at the start of the day), PAL boot to Workbench 82 s
   (from ~250 s). Remaining big costs: per-slot chipset emulation (~30 %).
+- KS 2.04 insert screen uses DDFSTRT 0x40 (narrow): it ran the old
+  presentation path at ~2 vblanks/s (animation looked frozen) until narrow
+  layouts got the direct path. Its shutter colour $998877 turns olive in
+  RGB332 — quantization, not a bug. NTSC now shows 240 rows (xsysinfo).
