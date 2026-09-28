@@ -706,6 +706,7 @@ static void hiresDisplayPrefetch(void) {
     uint32_t *pixbuff = (uint32_t *)host.pixels;
     hiresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX],
                        p1, p2, p3, p4);
+    hostRasterWritten(host.rasterRow, host.rasterX, 16);
     host.rasterX += 16;
 }
 
@@ -1102,6 +1103,7 @@ void loresPlane1(void){
     }else{
         loresPlanar2Chunky(&pixbuff[host.rasterRow * HOST_RASTER_W + host.rasterX], chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
     }
+    hostRasterWritten(host.rasterRow, host.rasterX, 32);
     host.rasterX += 32;
     
 }
@@ -1232,6 +1234,7 @@ void hiresPlane1(){
     uint32_t* pixbuff = (uint32_t*)host.pixels;
     uint32_t *line = &pixbuff[raster_row * HOST_RASTER_W + host.rasterX];
     hiresPlanar2Chunky(line, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+    hostRasterWritten(raster_row, host.rasterX, 16);
     host.rasterX += 16;
     return;
 }

@@ -44,7 +44,7 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 ## Phase 2 – Display output (DVI COMPLETE ON WEACT)
 
 PicoDVI is implemented for Waveshare's on-board connector and the WeAct board
-with an external Adafruit breakout on GPIO11..18. The WeAct path is verified
+on GPIO12..19. The WeAct path is verified
 with stable, correctly positioned Kickstart 1.3 video. VGA and SPI TFT remain
 alternative future backends.
 
@@ -64,9 +64,10 @@ alternative future backends.
 ### Option C: DVI/HDMI via PicoDVI
 - [x] Fetch and patch PicoDVI `libdvi` through CMake
 - [x] Configure board-specific serialiser pins and PIO GPIO bases
-- [x] Use 720×480p60 at 252 MHz for NTSC and 720×576p50 at 270 MHz for PAL
-- [x] Present Omega's 640×400 ARGB32 framebuffer through double-buffered
-      RGB332 frames in PSRAM
+- [x] Use standard 640×480p60 at 252 MHz for NTSC and 720×576p50 at 270 MHz
+      for PAL
+- [x] WeAct: full-width 640×200 (NTSC) / 640×256 (PAL) RGB332 frames in SRAM,
+      COLOR00 borders; Waveshare: pixel-doubled RGB332 frames in PSRAM
 - [x] Run TMDS encoding and scanout on core 1, with startup acknowledgement
 - [ ] Repeat the hardware test on Waveshare with a compatible PSRAM fitted
 
@@ -127,42 +128,106 @@ Omega has audio register stubs but no PCM output.
 
 ---
 
-## Phase 6 – CPU / memory performance (do only if profiling shows a need)
+## Phase 6 – Performance (profiled 2026-09-28)
 
-Musashi at 250 MHz ≈ 10–12× an A500's 68000, so this is a "later" item. The
-likely real costs on RP2350 are XIP-cache misses on the interpreter hot path
-and QSPI round-trips to chip RAM in PSRAM — not the interpreter itself.
-Decided against swapping Musashi for an Emu68-style JIT: Emu68 is an AArch64
-JIT that needs ~30 host regs + an MMU + an RWX cache in fast RAM, none of which
-exist on Cortex-M33 (see MEMORY.md). Measure before touching any of this.
+**Baseline:** WeAct, PAL build, idle Workbench 1.3: CIA-A TOD advanced 39 ticks
+in 10 s, i.e. ~3.9 emulated vblanks/s vs 50 on an A500 (~8 % of real speed,
+~900 clk_sys cycles per DMA slot + CPU slice). A PAL Workbench boot takes ~4 min.
 
-- [ ] **Profile first.** Add a cycle counter (DWT CYCCNT / `systick`) around
-      `cpu_execute()` vs `dma_execute()` vs `hostDisplay()` for a WB boot, and
-      count `chipRead*/chipWrite*` calls by address range. Confirm it is
-      CPU/memory-bound before optimizing.
-- [ ] **Keep Musashi's tables in SRAM** (they already are by default —
-      `m68ki_instruction_jump_table` 256 KB @ 0x2000_9b88, `m68ki_cycles`
-      192 KB @ 0x2004_9e68). Guard against a future refactor pushing them to
-      flash; the `m68ki_cpu` register struct (272 B) is already SRAM-resident.
-- [ ] **Run the Musashi hot path from SRAM**, not XIP flash. Tag the dispatch
-      loop + the most common opcode handlers (MOVE, ADD/SUB, Bcc, JSR/RTS,
-      LEA, CMP, Tcc, ANDI/ORI to CCR) with `__not_in_flash_func(...)` so
-      interpreter dispatch does not stall on XIP-cache misses. Watch SRAM
-      budget — only ~40–50 KB headroom; move the hottest handlers only, by
-      profile.
-- [ ] **SRAM window over low chip RAM.** The 68k SSP/USP stacks, the exception
-      vector table (0x0000–0x03FF) and hot Exec structures all cluster in low
-      chip RAM. Back the first 64–128 KB of chip RAM with an SRAM array and
-      keep the rest in PSRAM; add an `addr < BOARD_CHIPRAM_SRAM_WINDOW`
-      branch to `chipRead*/chipWrite*` and `CHIPRAM_BASE_PTR` users
-      (`omega/Chipset.c` chipramW, `omega/DMA.c` disk DMA). One compare+branch
-      per access vs. a saved QSPI transaction on the hottest region.
-- [ ] **Consider const Musashi tables in flash.** If SRAM is tight after the
-      above, pre-generate `m68ki_instruction_jump_table` / `m68ki_cycles` as
-      `const` (XIP-cached reads) to reclaim ~448 KB SRAM for the chip-RAM
-      window. Requires baking the tables at build time instead of
-      `m68k_build_opcode_table()` at boot.
-- [ ] Re-profile after each step; stop when WB feels responsive.
+**Profile** (4000 core-0 PC samples via `DWT_PCSR`, same state):
+
+| Share | Function | Work |
+|---|---|---|
+| 34.6 % | `hostClearRaster` | clear the 1 MB ARGB32 raster in PSRAM every frame |
+| 23.6 % | `hiresPlanar2Chunky` | write ARGB32 pixels into that PSRAM raster |
+| 11.2 % | `dvi_display_submit_raster` | read it back, convert to RGB332 |
+| 10.5 % | `dma_execute` | per-slot chipset dispatch |
+| ~7 % | `hiresPlane1`, `plane2..5` | bitplane fetch slots |
+| 3.0 % | `m68k_execute` | the 68000 itself |
+| ~3 % | `eclock_execute`, `CIAExecute` | CIA timers every slot |
+| 1.6 % | `copperExecute` | Copper |
+
+~70 % of core 0 is the display pipeline's PSRAM traffic; the CPU is not the
+bottleneck yet. Re-profile after each step: the ranking will change.
+
+Neither Omega nor Musashi has a JIT; Musashi is a table-dispatched
+interpreter. An Emu68-style JIT was ruled out: Emu68 targets AArch64 and needs
+an MMU, many host registers and a large RWX translation cache, none of which a
+Cortex-M33 with ~11–80 KB of free SRAM provides. Prefer SRAM-resident hot
+handlers and cheaper memory paths (P2).
+
+How to measure (no halt, firmware keeps running):
+- Speed: read `CIAA.tod` (address via `arm-none-eabi-gdb -batch -ex "p/x
+  (int)&CIAA.tod" <elf>`) twice over SWD, 10 s apart.
+- Profile: `mww 0xE000EDFC` with TRCENA (bit 24) set, then read
+  `mdw 0xE000101C` (`DWT_PCSR`) a few thousand times in one OpenOCD session and
+  bucket the samples with `arm-none-eabi-nm -n` / `addr2line`.
+- [ ] Add both as a script (`tools/profile_pc.py`) so every change is measured.
+- [ ] Also profile a Workbench *boot* (disk-heavy) separately from idle.
+
+### P1 – Display pipeline (~70 %)
+- [x] **Stop clearing the 1 MB PSRAM raster every frame** (was 34.6 %). The
+      DMA write sites report a written `[min, max)` column range per raster row
+      (`hostRasterWritten()`); the HDMI raster path reads only those pixels and
+      shows COLOR00 elsewhere, so no clear is needed. The presentation
+      fallback border-fills unwritten pixels once after such frames.
+      Result (PAL, WeAct): idle Workbench 3.9 → 5.9 vblanks/s (≈1.5×); boot to
+      the Workbench icons ~250 s → 151.5 s. New top costs:
+      `hiresPlanar2Chunky` 35.2 %, `dvi_display_submit_raster` 19.7 %,
+      `dma_execute` 14.6 %, `m68k_execute` 4.4 %.
+- [ ] **Render straight to RGB332.** Keep an 8-bit mirror of the palette
+      (updated on COLORxx writes) so `*Planar2Chunky` and sprites write bytes,
+      not ARGB32. Either shrink the raster to 8 bpp (4× less traffic) or,
+      better, write rows directly into the SRAM DVI back buffer, applying the
+      row mapping (`y_offset`, alternate rows, DDF rotation) at render time.
+      This removes PSRAM from the display path entirely.
+- [ ] **Optional frame skip.** Don't render/clear frames that will not be
+      presented (e.g. render 1 of N); make N a build or runtime option.
+- [ ] **Use core 1's spare time.** Scanout uses ~20 µs of each ~64 µs line
+      pair; row conversion (or MFM track encoding) could move to core 1.
+
+### P2 – Emulation core
+- [ ] **Hot code in SRAM.** All 287 KB of `.text` runs from XIP flash and
+      shares the 16 KB XIP cache with every chip-RAM access to PSRAM. Place
+      `dma_execute`, the DMA slot functions, `*Planar2Chunky`, Copper, CIA,
+      `m68k_execute` and the hottest opcode handlers (by profile) in RAM with
+      `__not_in_flash_func`. SRAM budget: ~80 KB spare on NTSC, ~11 KB on PAL,
+      more once P1 lands.
+- [ ] **Chip RAM fast path in `chipRead*`/`chipWrite*`.** Chip RAM is the
+      most common target but is tested last, after ~8 range compares (ROM,
+      autoconfig, custom registers, Gayle, slow RAM, CIAs). Test
+      `address < 0x200000` first.
+- [ ] **Cut per-slot overhead.** The main loop calls `dma_execute()` and
+      `m68k_execute(16)` for every DMA slot. Hoist per-line state out of
+      `dma_execute()` (plane mask, display-window test), add a fast path for
+      slots with no DMA, and run CIA/E-clock work every 10 slots instead of
+      every slot. Keep the native regression suite green.
+- [ ] **SRAM window over low chip RAM** (vectors, stacks, hot Exec data) once
+      SRAM is available; one compare per access saves a QSPI round trip.
+
+### P3 – Clocks and memory
+- [ ] **PAL PSRAM clock.** PAL's 270 MHz forces PSRAM to div 3 (90 MHz) vs
+      126 MHz on NTSC. Try div 2 (135 MHz, 1.5 % over APS6404 spec) with a
+      soak test, or decouple clk_sys from the DVI bit clock (next item).
+- [ ] **HSTX DVI.** GPIO12..19 are HSTX pins. HSTX's hardware TMDS encoder
+      and separate `clk_hstx` would free core 1 entirely and let clk_sys and
+      the PSRAM divider be chosen for the emulator.
+- [ ] **Kickstart in PSRAM vs flash.** ROM fetches come from flash XIP;
+      measure whether a PSRAM copy (126 MHz) is faster.
+
+### P4 – Floppy / boot time
+- [ ] **Faster disk DMA.** `turboFloppy` moves 8 words per slot; completing a
+      whole DSKLEN block at once would cut emulated load time. Check trackdisk
+      and non-DOS loaders still work.
+- [ ] **Track-change cost.** Each head step re-encodes a 12.8 KB MFM track from
+      the flash ADF into SRAM on core 0; measure during boot and consider a
+      multi-track cache or encoding on core 1.
+
+### Done
+- [x] Musashi opcode pointer table → 16-bit handler index, descriptor table in
+      flash, per-handler cycle counts (~210 KB SRAM freed; verified identical
+      for all 65,536 opcodes).
+- [x] Profiling method established (see above).
 
 ---
 

@@ -25,6 +25,34 @@ Host_t host;
 static uint32_t *fb;        // presented SCREEN_W * SCREEN_H image
 static uint32_t *render_fb; // intermediate DMA beam raster
 
+int16_t hostRasterRowMin[HOST_RASTER_H];
+int16_t hostRasterRowMax[HOST_RASTER_H];
+// Set while render_fb may hold stale pixels outside the written ranges.
+static bool raster_has_stale_pixels;
+
+static void hostResetRasterWritten(void) {
+    for (int row = 0; row < HOST_RASTER_H; ++row) {
+        hostRasterRowMin[row] = HOST_RASTER_W;
+        hostRasterRowMax[row] = 0;
+    }
+}
+
+// The presentation fallback expects every unwritten raster pixel to hold
+// the border colour. Restore that after frames that skipped the clear.
+static void hostBorderUnwrittenPixels(uint32_t border) {
+    for (int row = 0; row < HOST_RASTER_H; ++row) {
+        uint32_t *line = &render_fb[row * HOST_RASTER_W];
+        int written_min = hostRasterRowMin[row];
+        int written_max = hostRasterRowMax[row];
+        if (written_max <= written_min)
+            written_min = written_max = HOST_RASTER_W;
+        for (int x = 0; x < written_min; ++x)
+            line[x] = border;
+        for (int x = written_max; x < HOST_RASTER_W; ++x)
+            line[x] = border;
+    }
+}
+
 // ── Amiga key-code table (same values as the SDL Host.c) ─────────────────
 static const uint8_t keyMapping[] = {
     0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,
@@ -102,6 +130,7 @@ void hostInit(void) {
     host.displayIsLores = 0;
     memset(fb, 0, SCREEN_W * SCREEN_H * sizeof(uint32_t));
     memset(render_fb, 0, HOST_RASTER_PIXELS * sizeof(uint32_t));
+    hostResetRasterWritten();
     printf("Host init: framebuffer at %p (%d×%d ARGB)\n",
            (void *)fb, SCREEN_W, SCREEN_H);
 }
@@ -120,16 +149,24 @@ void hostDisplay(void) {
         const int y_offset = host.displayIsLores && !alternate_rows ? 64 : 0;
         static bool first_frame_queued;
         if (dvi_display_submit_raster(
-                render_fb, border, source_step, y_offset,
+                render_fb, hostRasterRowMin, hostRasterRowMax,
+                border, source_step, y_offset,
                 omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop)) &&
             !first_frame_queued) {
             first_frame_queued = true;
             printf("DVI: first direct-raster emulator frame queued\n");
         }
-        hostClearRaster(render_fb, border);
+        // No 1 MB raster clear: the next frame reads only what it writes.
+        raster_has_stale_pixels = true;
+        hostResetRasterWritten();
         return;
     }
 #endif
+    if (raster_has_stale_pixels) {
+        hostBorderUnwrittenPixels(internal.palette[0]);
+        raster_has_stale_pixels = false;
+    }
     hostPresentFrame(fb, render_fb);
     display_push_frame();
+    hostResetRasterWritten();
 }

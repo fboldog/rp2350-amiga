@@ -206,6 +206,8 @@ bool dvi_display_submit_frame(const uint32_t *argb_frame) {
 }
 
 bool dvi_display_submit_raster(const uint32_t *argb_raster,
+                               const int16_t *row_min,
+                               const int16_t *row_max,
                                uint32_t border,
                                int source_step,
                                int y_offset,
@@ -229,13 +231,25 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
             continue;
         }
 
-        const uint32_t *src_row =
-            argb_raster + source_y * source_step * SCREEN_W;
+        const int raster_row = source_y * source_step;
+        const int written_min = row_min[raster_row];
+        const unsigned written_width =
+            (unsigned)(row_max[raster_row] - written_min);
+        if (row_max[raster_row] <= written_min) {
+            for (uint x = 0; x < AMIGA_SOURCE_WIDTH; ++x)
+                dst_row[x] = border_pixel;
+            continue;
+        }
+        const uint32_t *src_row = argb_raster + raster_row * SCREEN_W;
         for (int x = 0; x < AMIGA_SOURCE_WIDTH; ++x) {
             int source_x = x * (DVI_FULL_WIDTH ? 1 : 2) + row_rotation;
             if (source_x >= SCREEN_W)
                 source_x -= SCREEN_W;
-            dst_row[x] = argb_to_dvi_pixel(src_row[source_x]);
+            // Pixels outside this frame's written range are stale; the
+            // raster is no longer cleared between frames.
+            dst_row[x] = (unsigned)(source_x - written_min) < written_width
+                       ? argb_to_dvi_pixel(src_row[source_x])
+                       : border_pixel;
         }
     }
 
