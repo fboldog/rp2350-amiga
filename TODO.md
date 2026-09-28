@@ -206,12 +206,19 @@ appears only ~2 min 12 s later.
       waiting on PSRAM *data*. It also exhausted PAL's SRAM (PicoDVI's TMDS
       `malloc` failed until the buffers were made static). Revisit only after
       P1, and for opcode handlers only if the CPU becomes the bottleneck.
-- [ ] **Chip RAM fast path in `chipRead*`/`chipWrite*`.** Chip RAM is the
-      most common target but is tested last, after ~8 range compares (ROM,
-      autoconfig, custom registers, Gayle, slow RAM, CIAs). Test
-      `address < 0x200000` first.
-- [ ] **Cut per-slot overhead.** The main loop calls `dma_execute()` and
-      `m68k_execute(16)` for every DMA slot. Hoist per-line state out of
+- [x] **Chip RAM fast path + ROM-first instruction fetch.** `chipRead*` /
+      `chipWrite*` test chip RAM first and use one load/store plus REV
+      instead of byte accesses; Musashi's prefetch uses `chipFetch*`
+      (ROM first) via `M68K_SEPARATE_READS` on Pico builds.
+- [x] **CPU slices.** The main loop runs `m68k_execute(16 * N)` after every
+      N DMA slots (`OMEGA_CPU_SLICE_SLOTS`, default 4) instead of
+      `m68k_execute(16)` per slot. Same CPU:DMA cycle ratio; the CPU sees
+      chipset state at N-slot (~1.1 µs) granularity. Watch beam-racing
+      software; set the constant to 1 to restore per-slot interleaving.
+      Results (NTSC, KEY pressed with the hand screen up 30 s → AmigaDOS
+      window): 116.1 s → 93.5 s (memory/fetch) → 78.8 s (slices). PAL boot to
+      the Workbench icons: 93.5 s → 86.8 s.
+- [ ] **Remaining per-slot overhead.** Hoist per-line state out of
       `dma_execute()` (plane mask, display-window test), add a fast path for
       slots with no DMA, and run CIA/E-clock work every 10 slots instead of
       every slot. Keep the native regression suite green.

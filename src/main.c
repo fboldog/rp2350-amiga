@@ -41,6 +41,7 @@
 #endif
 
 #include "../omega/CPU.h"
+#include "../omega/m68k.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
 #include "../omega/DMA.h"
@@ -53,6 +54,11 @@
 // 313 scanlines × 227 DMA cycles/line × 2 (odd+even) ≈ 142 246 cycles/frame
 // We batch 200 DMA+CPU pairs per main-loop iteration, matching the original.
 #define DMA_CPU_BATCH 200
+#ifndef OMEGA_CPU_SLICE_SLOTS
+#define OMEGA_CPU_SLICE_SLOTS 4
+#endif
+_Static_assert(DMA_CPU_BATCH % OMEGA_CPU_SLICE_SLOTS == 0,
+               "the DMA batch must hold whole CPU slices");
 
 // ── Flash locations for ADF images (optional) ─────────────────────────────
 // Place standard raw ADF images in flash at these absolute addresses.
@@ -332,9 +338,14 @@ int main(void) {
 
     // ── Main loop ─────────────────────────────────────────────────────────
     for (;;) {
-        for (int i = 0; i < DMA_CPU_BATCH; ++i) {
-            dma_execute();
-            cpu_execute();
+        // Run the 68000 in slices of several DMA slots: entering Musashi for
+        // 16 cycles every slot spent more time in call overhead than in the
+        // 1-3 instructions it ran. The CPU:DMA cycle ratio is unchanged; the
+        // CPU just observes chipset state at slice granularity.
+        for (int i = 0; i < DMA_CPU_BATCH; i += OMEGA_CPU_SLICE_SLOTS) {
+            for (int slot = 0; slot < OMEGA_CPU_SLICE_SLOTS; ++slot)
+                dma_execute();
+            m68k_execute(16 * OMEGA_CPU_SLICE_SLOTS);
         }
 #if OMEGA_ENABLE_FLASH_FLOPPY && BOARD_HAS_USER_BUTTON
         disk_button_poll();

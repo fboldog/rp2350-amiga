@@ -65,7 +65,12 @@
  * and m68k_read_pcrelative_xx() for PC-relative addressing.
  * If off, all read requests from the CPU will be redirected to m68k_read_xx()
  */
+#ifdef PICO_BUILD
+/* RP2350: instruction fetches take a ROM-first path (chipFetch*). */
+#define M68K_SEPARATE_READS         OPT_ON
+#else
 #define M68K_SEPARATE_READS         OPT_OFF
+#endif
 
 /* If ON, the CPU will call m68k_write_32_pd() when it executes move.l with a
  * predecrement destination EA mode instead of m68k_write_32().
@@ -177,6 +182,14 @@
 #define m68k_read_memory_8(A) cpu_read_byte(A)
 #define m68k_read_memory_16(A) cpu_read_word(A)
 #define m68k_read_memory_32(A) cpu_read_long(A)
+
+#ifdef PICO_BUILD
+#define m68k_read_immediate_16(A) chipFetchWord(A)
+#define m68k_read_immediate_32(A) chipFetchLong(A)
+#define m68k_read_pcrelative_8(A) cpu_read_byte(A)
+#define m68k_read_pcrelative_16(A) cpu_read_word(A)
+#define m68k_read_pcrelative_32(A) cpu_read_long(A)
+#endif
 
 #define m68k_read_disassembler_16(A) cpu_read_word_dasm(A)
 #define m68k_read_disassembler_32(A) cpu_read_long_dasm(A)

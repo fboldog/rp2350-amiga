@@ -304,3 +304,7 @@ native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
   then resetting through OpenOCD, left DMA/PIO wedged (core 1 stuck in
   `dvi_dma_irq_handler`, once even a scratch-X overwrite). Only a power cycle
   recovered it. Measure with non-halting reads (`mdw`, `DWT_PCSR`) instead.
+- CPU path (2026-09-28): chip-RAM-first accessors with REV loads, ROM-first
+  instruction fetch, and 4-slot CPU slices cut KEY-insert → AmigaDOS from
+  116 s to 79 s (NTSC). Measure KEY timing with the press *after* the hand
+  screen has been up a while; an early press is picked up almost at once.

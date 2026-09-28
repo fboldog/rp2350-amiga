@@ -58,6 +58,9 @@ void memory_clear_chipram(void);
 unsigned int chipReadByte(unsigned int address);
 unsigned int chipReadWord(unsigned int address);
 unsigned int chipReadLong(unsigned int address);
+// Instruction fetch for Musashi's prefetch (RP2350): ROM first, then chip RAM.
+unsigned int chipFetchWord(unsigned int address);
+unsigned int chipFetchLong(unsigned int address);
 
 void chipWriteByte(unsigned int address, unsigned int value);
 void chipWriteWord(unsigned int address, unsigned int value);
