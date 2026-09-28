@@ -8,6 +8,7 @@
 #include "Host.h"
 #include "Presentation.h"
 #include "psram.h"
+#include "../omega/DisplayLayout.h"
 #if OMEGA_ENABLE_HDMI
 #include "dvi_display.h"
 #endif
@@ -108,6 +109,27 @@ void hostInit(void) {
 void hostDisplay(void) {
     // Mouse / joystick: stub – wire up USB HID here.
     // For now, leave joy0dat alone so Workbench won't crash on NULL ptr.
+#if OMEGA_ENABLE_HDMI
+    if (omegaDdfIsFullWidth(chipset.ddfstrt)) {
+        const uint32_t border = internal.palette[0];
+        const int alternate_rows =
+            host.displayIsLores &&
+            omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
+                                               chipset.diwstop);
+        const int source_step = alternate_rows ? 2 : 1;
+        const int y_offset = host.displayIsLores && !alternate_rows ? 64 : 0;
+        static bool first_frame_queued;
+        if (dvi_display_submit_raster(
+                render_fb, border, source_step, y_offset,
+                omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop)) &&
+            !first_frame_queued) {
+            first_frame_queued = true;
+            printf("DVI: first direct-raster emulator frame queued\n");
+        }
+        hostClearRaster(render_fb, border);
+        return;
+    }
+#endif
     hostPresentFrame(fb, render_fb);
     display_push_frame();
 }

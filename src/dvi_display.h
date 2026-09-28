@@ -9,3 +9,11 @@ void dvi_display_start(void);
 // Convert and queue one completed 640x400 ARGB emulator frame. Returns false
 // when the previous frame is still waiting for the next DVI frame boundary.
 bool dvi_display_submit_frame(const uint32_t *argb_frame);
+
+// Fast path for full-width Amiga modes: present the DMA beam raster directly,
+// avoiding the intermediate 640x400 ARGB framebuffer in PSRAM.
+bool dvi_display_submit_raster(const uint32_t *argb_raster,
+                               uint32_t border,
+                               int source_step,
+                               int y_offset,
+                               int row_rotation);

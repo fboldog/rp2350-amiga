@@ -17,7 +17,7 @@ PSRAM through the Pico SDK.
 | ROM from microSD, with flash fallback | ⏸ implemented, build-disabled by default |
 | Musashi 68K CPU core | ✅ |
 | Custom chipset + CIA + DMA | ✅ |
-| Floppy (DF0/DF1 from flash ADF) | ⏸ implemented, build-disabled by default |
+| Floppy (DF0 raw flash ADF + SRAM track cache) | ✅ verified; build-disabled by default |
 | Framebuffer in PSRAM | ✅ implemented |
 | HDMI output | ✅ verified on WeAct; build-disabled by default |
 | USB HID keyboard/mouse | ⬜ Phase 2 |
@@ -52,7 +52,7 @@ header.
 ```
 0x11000000  Chip RAM (2 MB)
 0x11200000  Slow/Ranger RAM (512 KB)
-0x11280000  DF0 MFM floppy buffer (2 MB)
+0x11280000  Legacy/full-image DF0 MFM region (unused by streamed DF0)
 0x11480000  SD Kickstart cache (512 KB) / DF1 MFM buffer (2 MB)
 0x11500000  HDMI RGB332 scanout buffers (inside DF1 region when enabled)
 0x11540000  Video DMA raster scratch (640×400 ARGB32)
@@ -95,7 +95,10 @@ cmake --build build-weact -j
 
 # WeAct with the external Adafruit DVI breakout on GPIO11..18
 cmake -S . -B build-weact-hdmi -G Ninja \
-  -DPICO_BOARD=weact_studio_rp2350b_core -DOMEGA_ENABLE_HDMI=ON
+  -DPICO_BOARD=weact_studio_rp2350b_core \
+  -DOMEGA_ENABLE_HDMI=ON \
+  -DOMEGA_ENABLE_FLASH_FLOPPY=ON \
+  -DOMEGA_DF0_INSERT_AT_BOOT=ON
 cmake --build build-weact-hdmi -j
 ```
 
@@ -103,16 +106,22 @@ HDMI and SD-card reading are temporarily disabled by the `OFF` defaults of
 `OMEGA_ENABLE_HDMI` and `OMEGA_ENABLE_SDCARD`. They are excluded from the
 source and link dependency lists, not merely skipped at runtime.
 Flash-backed ADF loading is also disabled by default for bring-up; enable it
-with `-DOMEGA_ENABLE_FLASH_FLOPPY=ON` after HDMI is stable.
+with `-DOMEGA_ENABLE_FLASH_FLOPPY=ON` after HDMI is stable. By default the
+mounted DF0 starts ejected and the WeAct KEY button inserts it. Add
+`-DOMEGA_DF0_INSERT_AT_BOOT=ON` to boot the disk without a button press; KEY
+then ejects or reinserts the mounted image.
 
 The HDMI build raises `clk_sys` to PicoDVI's serializer clock (252 MHz for
 NTSC or 270 MHz for PAL) and then retimes the SDK-managed PSRAM. The WeAct
 GPIO13/14 clock pair starts on an odd GPIO, so the local PicoDVI compatibility
 patch drives its two PWM channels from synchronised adjacent slices.
-Completed emulator frames are converted from 640×400 ARGB to double-buffered
-RGB332 scanout in PSRAM. These buffers share DF1's region, so HDMI builds keep
-DF1 disabled; DF0 remains available. Core 1 reads them through the uncached
-PSRAM alias, stages one line in SRAM, and has priority during TMDS scanout.
+Full-width emulator modes convert the native DMA raster directly to
+double-buffered 320×200 RGB332 scanout in PSRAM, avoiding a redundant 640×400
+ARGB presentation pass. These buffers share DF1's region, so HDMI builds keep
+DF1 disabled; DF0 remains available. Both cores use the shared cached PSRAM
+alias, core 1 stages one line in SRAM, and eight TMDS buffers absorb short QMI
+stalls. The DVI buffers show color bars during the first 1.5 seconds, then are
+overwritten by emulator video.
 Core 0 waits for a core-1 acknowledgement after `dvi_start()` before beginning
 the emulator's heavy PSRAM traffic, preventing intermittent cold-start loss of
 the DVI signal.
@@ -137,10 +146,11 @@ Video: NTSC (263 lines, 59.940 Hz)
 PSRAM: detected 8388608 bytes on GPIO0
 PSRAM: 1024-byte read/write test passed at 0x11000000
 ROM: flash 0x10200000, header=1111 opcode=4ef9 entry=00fc00d2
-DVI: PIO 720x480p60 (640x400 image doubled) emulator scanout on GPIO11..18 (uncached PSRAM)
-DF0/DF1: flash ADF loading disabled
+DVI: PIO 720x480p60 (640x400 image doubled) emulator scanout on GPIO11..18 (shared cached PSRAM)
+DF0: flash ADF mounted with 12798-byte SRAM track cache
+DF0: disk inserted at boot; KEY ejects/reinserts it
 Entering emulation loop
-DVI: first emulator frame queued
+DVI: first direct-raster emulator frame queued
 ```
 
 ### Load Kickstart from microSD
@@ -160,12 +170,11 @@ At boot the firmware mounts the card through SPI1 and loads a valid 256 KB or
 `BOARD_SD_ROM_PATH` in `src/board_config.h` to select another ROM. If the card,
 filesystem, or file cannot be read, the firmware uses the ROM embedded in flash.
 
-The SD ROM cache overlaps DF1 because the current full-disk MFM representation
-uses almost all 8 MB of PSRAM. Consequently DF1 is disabled when an SD ROM is
-active; DF0 remains available. ADF files are not streamed from SD yet: the
-RP2350 path still reads an ADF from flash and expands the complete disk into its
-2 MB MFM buffer. Direct SD-backed ADF operation will require a track-sized
-read/encode cache rather than a normal file pointer.
+The SD ROM cache overlaps DF1, so DF1 is disabled when an SD ROM is active;
+DF0 remains available. Flash-backed DF0 keeps its raw ADF in flash and encodes
+only the active 12,798-byte MFM track into internal SRAM. ADF files are not yet
+read from SD, but that path can reuse the same track cache once sector reads
+replace the current memory-mapped flash source.
 
 ### Flash with Kickstart ROM
 
@@ -186,9 +195,10 @@ python3 tools/combine_uf2.py \
     --adf0 sd_card/adf/amiga-os-134-workbench.adf
 ```
 
-ADF embedding remains optional and is omitted from the verified HDMI bring-up
-image. A 256 KB Kickstart is mirrored into its 512 KB flash window by the
-combine tool.
+ADF embedding remains optional. The combined Kickstart 1.3 + Workbench 1.3
+image was verified on WeAct with DF0 inserted at boot, and with KEY eject and
+reinsert events. A 256 KB Kickstart is mirrored into its 512 KB flash window by
+the combine tool.
 
 Hold BOOTSEL and connect USB, then copy the generated combined UF2 to the
 `RPI-RP2` drive.
@@ -204,11 +214,11 @@ backends remain future work:
 | VGA | pico-vga-scanvideo | Needs resistor ladder, 3 GPIO per channel |
 | SPI TFT | st7789 / ili9341 | Easy hardware, 320×240 typical |
 
-The framebuffer is at `PSRAM_BASE + PSRAM_FRAMEBUF_OFFSET` in 640×400 ARGB32.
-The host presentation stage clips the raw DMA raster, doubles logical Amiga
-scanlines, and anchors full-width LORES overscan at visible beam line 44. This
-keeps the complete Kickstart 1.3 hand/floppy animation centered instead of
-clipping its lower portion. The behavior is shared with the native test runner.
+The raw DMA raster is at `PSRAM_BASE + PSRAM_VIDEO_RASTER_OFFSET`. HDMI
+full-width modes downsample it directly into the RGB332 scanout buffers;
+narrow/wrapped modes retain the 640×400 ARGB presentation fallback at
+`PSRAM_BASE + PSRAM_FRAMEBUF_OFFSET`. Logical Amiga scanlines and LORES
+overscan positioning match the native test runner.
 
 ## Phase 2: USB HID
 
@@ -226,8 +236,9 @@ TinyUSB is included in the Pico SDK; add `tinyusb_host` to `target_link_librarie
   to reduce internal SRAM use; the native build retains the full tables.
 - **Chipset/CIA/DMA/Blitter** remain close to upstream, with Pico memory paths,
   quieter diagnostics, and the shared raster-position fixes called out above.
-- **Floppy.c** has a `PICO_BUILD` guard: the desktop `ADF2MFM(fd,...)` still
-  compiles on Linux/macOS; `ADF2MFM_from_mem(buf,size,...)` is used on RP2350.
+- **Floppy.c** has a `PICO_BUILD` guard: the desktop `ADF2MFM(fd,...)` retains
+  full-image conversion, while RP2350 DF0 uses a one-track SRAM MFM cache over
+  the raw flash ADF.
 - **CPU.c** has a `PICO_BUILD` guard in `cpu_pulse_reset()` to call
   `memory_clear_chipram()` instead of the `low16Meg` loop.
 - **FatFs** is configured read-only and provides optional FAT16/FAT32 ROM

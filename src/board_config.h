@@ -35,6 +35,9 @@
 #define BOARD_HAS_DVI        1
 #define BOARD_HAS_SDCARD     0
 #define BOARD_HAS_PIO_USB    0
+#define BOARD_HAS_USER_BUTTON 1
+#define BOARD_USER_BUTTON_PIN 23
+#define BOARD_USER_BUTTON_ACTIVE_LOW 1
 #elif defined(OMEGA_BOARD_WAVESHARE)
 #define BOARD_WAVESHARE_RP2350_PIZERO 1
 #define BOARD_NAME "Waveshare RP2350-PiZero"
@@ -47,6 +50,7 @@
 #define BOARD_HAS_DVI        1
 #define BOARD_HAS_SDCARD     1
 #define BOARD_HAS_PIO_USB    1
+#define BOARD_HAS_USER_BUTTON 0
 #else
 #error "Select a supported board through CMake PICO_BOARD"
 #endif
@@ -80,7 +84,7 @@
 // an external Adafruit DVI breakout; Waveshare uses its on-board connector.
 #if BOARD_HAS_DVI
 #if BOARD_WEACT_STUDIO_RP2350B_CORE
-#define BOARD_DVI_TMDS_D0_PIN    11    // pair 11/12  (blue)
+#define BOARD_DVI_TMDS_D0_PIN    11    // pair 11/12  (blue/control)
 #define BOARD_DVI_TMDS_D1_PIN    17    // pair 17/18  (green)
 #define BOARD_DVI_TMDS_D2_PIN    15    // pair 15/16  (red)
 #define BOARD_DVI_TMDS_CLK_PIN   13    // pair 13/14

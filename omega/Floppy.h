@@ -32,6 +32,8 @@
 #include "CIA.h"
 #include "Chipset.h"
 
+#define FLOPPY_MFM_TRACK_SIZE 12798
+#define FLOPPY_ADF_SIZE       (80u * 2u * 11u * 512u)
 
 
 typedef struct{
@@ -44,7 +46,7 @@ typedef struct{
     int cylinder;
     int side;
 #ifdef PICO_BUILD
-    uint8_t *mfmData;           // pointer into PSRAM (set by floppyInit)
+    uint8_t *mfmData;           // PSRAM full image or SRAM active-track cache
 #else
     uint8_t mfmData[12798*82*2]; // trackSize * tracks * sides
 #endif
@@ -68,10 +70,14 @@ void encodeBlock(uint8_t* source, uint8_t* destination,int size);
 uint8_t addClockBits(uint8_t previous, uint8_t value);
 void ADF2MFM(int fd, uint8_t* mfm);                        // desktop: fd = file descriptor
 void ADF2MFM_from_mem(const uint8_t* adf, uint32_t size, uint8_t* mfm); // RP2350: from buffer
+#ifdef PICO_BUILD
+// Mount a raw flash/SD ADF behind DF0's one-track SRAM MFM cache. The drive
+// remains logically empty until floppyInsert() is called.
+int floppyMountADF(int drive, const uint8_t *adf, uint32_t size);
+#endif
 
 
 
 
 
 #endif /* Floppy_h */
-

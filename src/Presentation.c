@@ -15,6 +15,10 @@ static void fillPixels(uint32_t *pixels, int count, uint32_t color) {
         pixels[i] = color;
 }
 
+void hostClearRaster(uint32_t *render_fb, uint32_t border) {
+    fillPixels(render_fb, HOST_RASTER_PIXELS, border);
+}
+
 static void duplicateScanline(uint32_t *fb, int y) {
     memcpy(&fb[(y + 1) * SCREEN_W], &fb[y * SCREEN_W],
            SCREEN_W * sizeof(uint32_t));
@@ -81,7 +85,7 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
             }
             duplicateScanline(fb, y_offset + y * 2);
         }
-        fillPixels(render_fb, HOST_RASTER_PIXELS, border);
+        hostClearRaster(render_fb, border);
         return;
     }
 
@@ -141,5 +145,5 @@ void hostPresentFrame(uint32_t *fb, uint32_t *render_fb) {
         }
     }
 
-    fillPixels(render_fb, HOST_RASTER_PIXELS, border);
+    hostClearRaster(render_fb, border);
 }

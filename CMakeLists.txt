@@ -20,6 +20,7 @@ set_property(CACHE PICO_BOARD PROPERTY STRINGS
 option(OMEGA_ENABLE_HDMI "Build the PicoDVI output" OFF)
 option(OMEGA_ENABLE_SDCARD "Build microSD/FatFs Kickstart loading" OFF)
 option(OMEGA_ENABLE_FLASH_FLOPPY "Load ADF images embedded in flash" OFF)
+option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OFF)
 
 # Match the small hardware_psram test project: describe the physical PSRAM to
 # the SDK and let its startup code configure QMI before main().
@@ -155,6 +156,7 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_ENABLE_HDMI=$<BOOL:${OMEGA_ENABLE_HDMI}>
     OMEGA_ENABLE_SDCARD=$<BOOL:${OMEGA_ENABLE_SDCARD}>
     OMEGA_ENABLE_FLASH_FLOPPY=$<BOOL:${OMEGA_ENABLE_FLASH_FLOPPY}>
+    OMEGA_DF0_INSERT_AT_BOOT=$<BOOL:${OMEGA_DF0_INSERT_AT_BOOT}>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
 )
 
@@ -227,9 +229,9 @@ target_compile_options(omega-amiga PRIVATE
 if(OMEGA_ENABLE_HDMI)
     target_compile_definitions(omega-amiga PRIVATE
         DVI_VERTICAL_REPEAT=2
-        # Vertical repeat keeps a line owned by DMA for two physical rows;
-        # three buffers prevent the encoder starving on every second row.
-        DVI_N_TMDS_BUFFERS=3
+        # Vertical repeat keeps a line owned by DMA for two physical rows.
+        # Eight buffers absorb short encoder stalls caused by QMI traffic.
+        DVI_N_TMDS_BUFFERS=8
         PICO_PIO_USE_GPIO_BASE=1
     )
 endif()
@@ -242,4 +244,5 @@ message(STATUS "PSRAM:      ${PSRAM_SIZE_BYTES} bytes, CS GPIO${PSRAM_CS_PIN}")
 message(STATUS "HDMI:       ${OMEGA_ENABLE_HDMI}")
 message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD}")
 message(STATUS "Flash ADF:  ${OMEGA_ENABLE_FLASH_FLOPPY}")
+message(STATUS "DF0 at boot:${OMEGA_DF0_INSERT_AT_BOOT}")
 message(STATUS "Console:    ${OMEGA_STDIO_DESCRIPTION}")

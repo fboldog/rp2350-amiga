@@ -16,6 +16,7 @@
 #include "Floppy.h"
 #include "Chipset.h"
 #include "Memory.h"
+#include <string.h>
 
 #ifndef PICO_BUILD
 #include <unistd.h>
@@ -305,6 +306,74 @@ void ADF2MFM_from_mem(const uint8_t* adf, uint32_t size, uint8_t* mfm) {
         }
     }
 }
+
+// Encode one cylinder side into a 12,798-byte MFM track. This is the RP2350
+// streaming path: the raw ADF remains in flash and only the selected track is
+// retained in internal SRAM.
+static int ADF2MFM_track_from_mem(const uint8_t *adf, uint32_t size,
+                                  int track, int side, uint8_t *mfm) {
+    if (!adf || !mfm || track < 0 || track >= 80 || side < 0 || side > 1)
+        return 0;
+
+    uint8_t lowlevelSector[544];
+    int s = 0;
+
+    for (int sector = 0; sector < 11; sector++) {
+        uint32_t source_offset =
+            (uint32_t)(((track * 2 + side) * 11 + sector) * 512);
+        if (source_offset + 512u > size)
+            return 0;
+
+        lowlevelSector[0] = 0x00;
+        lowlevelSector[1] = 0x00;
+        lowlevelSector[2] = 0xA1;
+        lowlevelSector[3] = 0xA1;
+        lowlevelSector[4] = 0xFF;
+        lowlevelSector[5] = (uint8_t)((track << 1) | side);
+        lowlevelSector[6] = (uint8_t)sector;
+        lowlevelSector[7] = (uint8_t)(11 - sector);
+        memset(&lowlevelSector[8], 0, 24);
+        memcpy(&lowlevelSector[32], adf + source_offset, 512);
+
+        mfm[s+0] = 0xAA; mfm[s+1] = 0xAA;
+        mfm[s+2] = 0xAA; mfm[s+3] = 0xAA;
+        mfm[s+4] = 0x44; mfm[s+5] = 0x89;
+        mfm[s+6] = 0x44; mfm[s+7] = 0x89;
+
+        encodeBlock(&lowlevelSector[4],  &mfm[s+8],  4);
+        encodeBlock(&lowlevelSector[8],  &mfm[s+16], 16);
+        encodeBlock(&lowlevelSector[32], &mfm[s+64], 512);
+
+        uint8_t hcheck[4] = {0,0,0,0};
+        for (unsigned i = 8; i < 48; i += 4) {
+            hcheck[0] ^= mfm[s+i];   hcheck[1] ^= mfm[s+i+1];
+            hcheck[2] ^= mfm[s+i+2]; hcheck[3] ^= mfm[s+i+3];
+        }
+        memcpy(&lowlevelSector[24], hcheck, sizeof(hcheck));
+        encodeBlock(&lowlevelSector[24], &mfm[s+48], 4);
+
+        uint8_t dcheck[4] = {0,0,0,0};
+        for (unsigned i = 64; i < 1088; i += 4) {
+            dcheck[0] ^= mfm[s+i];   dcheck[1] ^= mfm[s+i+1];
+            dcheck[2] ^= mfm[s+i+2]; dcheck[3] ^= mfm[s+i+3];
+        }
+        memcpy(&lowlevelSector[28], dcheck, sizeof(dcheck));
+        encodeBlock(&lowlevelSector[28], &mfm[s+56], 4);
+
+        for (int i = 8; i < 1088; i++)
+            mfm[s+i] = addClockBits(mfm[s+i-1], mfm[s+i]);
+        s += 1088;
+    }
+
+    mfm[s]   = addClockBits(mfm[s-1], 0);
+    mfm[s+1] = 0xA8; mfm[s+2] = 0x55;
+    mfm[s+3] = 0x55; mfm[s+4] = 0xAA;
+    for (int i = 5; i < 700; i++)
+        mfm[s+i] = addClockBits(mfm[s+i-1], 0);
+    memset(&mfm[s + 700], 0,
+           FLOPPY_MFM_TRACK_SIZE - (unsigned)(s + 700));
+    return 1;
+}
 //*******************************
 
 
@@ -313,6 +382,50 @@ int floppySync = 0;
 int driveSelected=0;
 Fd_t df[4];
 
+#ifdef PICO_BUILD
+// The flash-backed DF0 path uses only the selected side in internal SRAM.
+// This removes the 2 MB MFM image and steady-state floppy traffic from PSRAM.
+static uint8_t df0_track_cache[FLOPPY_MFM_TRACK_SIZE]
+    __attribute__((aligned(4)));
+static const uint8_t *df0_adf;
+static uint32_t df0_adf_size;
+static int df0_cached_cylinder = -1;
+static int df0_cached_side = -1;
+
+static int floppyEnsureTrackCached(int drive) {
+    if (drive != 0 || !df0_adf)
+        return 0;
+    if (df0_cached_cylinder == df[0].cylinder &&
+        df0_cached_side == df[0].side)
+        return 1;
+    if (!ADF2MFM_track_from_mem(df0_adf, df0_adf_size,
+                                df[0].cylinder, df[0].side,
+                                df0_track_cache))
+        return 0;
+    df0_cached_cylinder = df[0].cylinder;
+    df0_cached_side = df[0].side;
+    return 1;
+}
+
+int floppyMountADF(int drive, const uint8_t *adf, uint32_t size) {
+    if (drive != 0 || !adf || size != FLOPPY_ADF_SIZE)
+        return 0;
+    df0_adf = adf;
+    df0_adf_size = size;
+    df0_cached_cylinder = -1;
+    df0_cached_side = -1;
+    df[0].mfmData = df0_track_cache;
+    df[0].hasDisk = 0;
+
+    // Before insertion expose an invalid header rather than mounted data, so
+    // Kickstart can finish its no-disk retry and display the hand screen.
+    memset(df0_track_cache, 0, sizeof(df0_track_cache));
+    df0_track_cache[0] = 0x44;
+    df0_track_cache[1] = 0x89;
+    return 1;
+}
+#endif
+
 void floppyIndexReset(){
     
        df[driveSelected].index = 4;
@@ -320,8 +433,21 @@ void floppyIndexReset(){
 }
 
 uint8_t floppyDataRead(){ //this function should be called by the DMA
-    
-    int position   = (df[driveSelected].cylinder * (12798 * 2)) + (df[driveSelected].side  * 12798) + df[driveSelected].index;
+
+#ifdef PICO_BUILD
+    int streamed = driveSelected == 0 && df0_adf;
+    if (streamed && df[0].hasDisk && !floppyEnsureTrackCached(0))
+        return 0;
+    int position = streamed
+        ? df[driveSelected].index
+        : (df[driveSelected].cylinder * (FLOPPY_MFM_TRACK_SIZE * 2)) +
+          (df[driveSelected].side * FLOPPY_MFM_TRACK_SIZE) +
+          df[driveSelected].index;
+#else
+    int position = (df[driveSelected].cylinder * (FLOPPY_MFM_TRACK_SIZE * 2)) +
+                   (df[driveSelected].side * FLOPPY_MFM_TRACK_SIZE) +
+                   df[driveSelected].index;
+#endif
     
     df[driveSelected].index +=1;
 
@@ -359,6 +485,10 @@ void floppyInsert(int drive){
         df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk removed)
         printf("Disk ejected from df%d:\n",drive);
     }else{
+#ifdef PICO_BUILD
+        if (drive == 0 && df0_adf && !floppyEnsureTrackCached(0))
+            return;
+#endif
         df[drive].hasDisk = 1;
         df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk inserted)
         printf("Disk inserted in df%d:\n",drive);
@@ -383,6 +513,12 @@ uint8_t* floppyInit(int drive){
         0, 0   // drives 2/3 unsupported on RP2350 (insufficient PSRAM)
     };
     df[drive].mfmData = (drive < 2) ? psram_ptr(psram_offsets[drive]) : NULL;
+    if (drive == 0) {
+        df0_adf = NULL;
+        df0_adf_size = 0;
+        df0_cached_cylinder = -1;
+        df0_cached_side = -1;
+    }
 #endif
     return df[drive].mfmData;
 }

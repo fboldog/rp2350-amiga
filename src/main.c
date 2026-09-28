@@ -16,8 +16,8 @@
 //   placed at flash offset 0x200000 (absolute 0x10200000).  See README.md.
 //
 // Floppy placement:
-//   ADF images are MFM-encoded at startup from flash.  Place up to two ADF
-//   files at flash offsets defined by ADF0_FLASH_BASE / ADF1_FLASH_BASE.
+//   Raw ADF images live in flash. DF0 encodes only its active track into an
+//   SRAM cache; place images at ADF0_FLASH_BASE / ADF1_FLASH_BASE.
 
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
@@ -55,8 +55,7 @@
 #define DMA_CPU_BATCH 200
 
 // ── Flash locations for ADF images (optional) ─────────────────────────────
-// Place standard raw ADF images in flash at these absolute addresses. They are
-// expanded into each drive's MFM buffer during startup when the feature is on.
+// Place standard raw ADF images in flash at these absolute addresses.
 // Leave them 0 / unprogrammed to boot without a floppy.
 #define ADF0_FLASH_BASE  0x10280000u   // flash offset 0x280000
 #define ADF1_FLASH_BASE  0x10480000u   // flash offset 0x480000
@@ -81,22 +80,93 @@ void __attribute__((naked)) isr_hardfault(void) {
 
 // ── Load floppy images from flash into PSRAM ──────────────────────────────
 // The ADF2MFM_from_flash variant reads from XIP flash instead of a file.
-static void load_floppy_from_flash(int drive, uint32_t flash_abs_addr) {
+static bool load_floppy_from_flash(int drive, uint32_t flash_abs_addr) {
     const uint8_t *adf_data = (const uint8_t *)flash_abs_addr;
 
     // Verify the first sector starts with a valid AmigaDOS block.
     // First two bytes of an OFS ADF should be 0x00 0x00 (T_HEADER).
     // If the flash is blank (0xFF) there is no disk.
-    if (adf_data[0] == 0xFF && adf_data[1] == 0xFF) return;
+    if (adf_data[0] == 0xFF && adf_data[1] == 0xFF) return false;
 
+    if (drive == 0) {
+        if (!floppyMountADF(0, adf_data, FLOPPY_ADF_SIZE))
+            return false;
+        printf("DF0: flash ADF mounted with %u-byte SRAM track cache\n",
+               FLOPPY_MFM_TRACK_SIZE);
+        return true;
+    }
+
+    // Non-streaming fallback for DF1 in non-HDMI builds.
     uint8_t *mfm_buf = floppyInit(drive);
-    if (!mfm_buf) return;
-
-    // ADF standard size: 80 cylinders × 2 sides × 11 sectors × 512 B
-    const uint32_t adf_size = 80 * 2 * 11 * 512;  // 901 120 bytes
-    ADF2MFM_from_mem(adf_data, adf_size, mfm_buf);
-    printf("DF%d: loaded from flash 0x%08lx\n", drive, (unsigned long)flash_abs_addr);
+    if (!mfm_buf) return false;
+    ADF2MFM_from_mem(adf_data, FLOPPY_ADF_SIZE, mfm_buf);
+    df[drive].hasDisk = 1;
+    df[drive].pra &= 0xFB;
+    printf("DF%d: loaded from flash 0x%08lx\n", drive,
+           (unsigned long)flash_abs_addr);
+    return true;
 }
+
+#if OMEGA_ENABLE_FLASH_FLOPPY && BOARD_HAS_USER_BUTTON
+static bool df0_image_ready;
+static bool disk_button_raw;
+static bool disk_button_stable;
+static bool disk_insert_pending;
+static uint32_t disk_button_change_us;
+
+static bool disk_button_pressed(void) {
+    bool level = gpio_get(BOARD_USER_BUTTON_PIN);
+#if BOARD_USER_BUTTON_ACTIVE_LOW
+    return !level;
+#else
+    return level;
+#endif
+}
+
+static void disk_button_init(void) {
+    gpio_init(BOARD_USER_BUTTON_PIN);
+    gpio_set_dir(BOARD_USER_BUTTON_PIN, GPIO_IN);
+#if BOARD_USER_BUTTON_ACTIVE_LOW
+    gpio_pull_up(BOARD_USER_BUTTON_PIN);
+#else
+    gpio_pull_down(BOARD_USER_BUTTON_PIN);
+#endif
+    disk_button_raw = disk_button_pressed();
+    disk_button_stable = disk_button_raw;
+    disk_button_change_us = time_us_32();
+    printf("DF0: KEY GPIO%u inserts/ejects the mounted disk\n",
+           BOARD_USER_BUTTON_PIN);
+}
+
+static void disk_button_poll(void) {
+    bool pressed = disk_button_pressed();
+    uint32_t now = time_us_32();
+    if (pressed != disk_button_raw) {
+        disk_button_raw = pressed;
+        disk_button_change_us = now;
+    }
+    if (pressed != disk_button_stable &&
+        (uint32_t)(now - disk_button_change_us) >= 30000u) {
+        disk_button_stable = pressed;
+        if (pressed && df0_image_ready) {
+            if (df[0].hasDisk) {
+                floppyInsert(0);
+            } else {
+                disk_insert_pending = true;
+                printf("DF0: insertion requested\n");
+            }
+        }
+    }
+
+    // Kickstart ignores disk changes until the 32-pulse drive-ID sequence is
+    // complete. Retain an early button press and apply it as soon as valid.
+    if (disk_insert_pending && !df[0].hasDisk && df[0].idMode == 0) {
+        floppyInsert(0);
+        if (df[0].hasDisk)
+            disk_insert_pending = false;
+    }
+}
+#endif
 
 static void prepare_empty_df0(void) {
     // Kickstart still needs a real, empty DF0 device when no ADF is loaded.
@@ -225,7 +295,26 @@ int main(void) {
     for (int drive = 0; drive < 4; ++drive)
         floppyInit(drive);
 #if OMEGA_ENABLE_FLASH_FLOPPY
-    load_floppy_from_flash(0, ADF0_FLASH_BASE);
+    bool df0_loaded = load_floppy_from_flash(0, ADF0_FLASH_BASE);
+#if BOARD_HAS_USER_BUTTON
+    df0_image_ready = df0_loaded;
+    disk_button_init();
+#if OMEGA_DF0_INSERT_AT_BOOT
+    if (df0_loaded) {
+        df[0].hasDisk = 1;
+        df[0].pra &= 0xFB;
+        printf("DF0: disk inserted at boot; KEY ejects/reinserts it\n");
+    }
+#else
+    if (df0_loaded)
+        printf("DF0: no disk inserted; press KEY after Kickstart starts\n");
+#endif
+#else
+    if (df0_loaded) {
+        df[0].hasDisk = 1;
+        df[0].pra &= 0xFB;
+    }
+#endif
 #if OMEGA_ENABLE_HDMI
     (void)sd_rom_active;
     printf("DF1: disabled (its PSRAM region holds HDMI scanout buffers)\n");
@@ -247,6 +336,9 @@ int main(void) {
             dma_execute();
             cpu_execute();
         }
+#if OMEGA_ENABLE_FLASH_FLOPPY && BOARD_HAS_USER_BUTTON
+        disk_button_poll();
+#endif
         // hostDisplay is called exactly once per VBL by the DMA engine.  It
         // converts the intermediate beam raster into the 640x400 output.
     }

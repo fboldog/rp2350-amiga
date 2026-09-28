@@ -2,7 +2,7 @@
 //
 // PicoDVI performs TMDS encoding on core 1 and serialises three data lanes
 // with PIO. Core 0 converts completed emulator frames to double-buffered
-// RGB332 in PSRAM; core 1 changes buffers only at a DVI frame boundary.
+// RGB332 in cached PSRAM; core 1 changes buffers only at a DVI frame boundary.
 
 #include "dvi_display.h"
 #include "board_config.h"
@@ -13,7 +13,6 @@
 #include "dvi.h"
 #include "tmds_encode.h"
 #include "hardware/dma.h"
-#include "hardware/regs/addressmap.h"
 #include "hardware/structs/busctrl.h"
 #include "hardware/sync.h"
 #include "pico/multicore.h"
@@ -64,16 +63,10 @@ _Static_assert(DVI_FRAME1_OFFSET + DVI_FRAME_STRIDE <= PSRAM_FRAMEBUF_OFFSET,
 
 static struct dvi_inst dvi;
 static uint8_t *source_frames[2];
+static bool source_frame_has_emulator[2];
 static volatile int displayed_frame;
 static volatile int pending_frame;
-
-static uint8_t *dvi_psram_uncached_ptr(uint32_t offset) {
-    // The producer and consumer run on different cores. Use RP2350's
-    // no-cache/no-allocate XIP alias so a completed frame becomes visible to
-    // core 1 immediately and scanout does not evict emulator working data.
-    uintptr_t cached = (uintptr_t)psram_ptr(offset);
-    return (uint8_t *)(cached + XIP_NOCACHE_NOALLOC_BASE - XIP_BASE);
-}
+static uint64_t boot_pattern_until_us;
 
 static inline uint8_t argb_to_rgb332(uint32_t pixel) {
     return (uint8_t)(((pixel >> 16) & 0xe0u) |
@@ -81,19 +74,45 @@ static inline uint8_t argb_to_rgb332(uint32_t pixel) {
                      ((pixel >> 6) & 0x03u));
 }
 
-bool dvi_display_submit_frame(const uint32_t *argb_frame) {
-    // Never overwrite a buffer that is displayed or already queued. With two
-    // buffers, dropping a late producer frame is safer than tearing scanout.
+static bool dvi_begin_submit(int *target_out, uint8_t **dst_out) {
+    // Keep the diagnostic pattern visible long enough to distinguish DVI
+    // bring-up from emulator video on a monitor or capture device.
+    if (time_us_64() < boot_pattern_until_us)
+        return false;
+
     if (__atomic_load_n(&pending_frame, __ATOMIC_ACQUIRE) >= 0)
         return false;
 
     int target = __atomic_load_n(&displayed_frame, __ATOMIC_ACQUIRE) ^ 1;
     uint8_t *dst = source_frames[target];
+    if (!source_frame_has_emulator[target]) {
+        memset(dst, 0, SOURCE_WIDTH * SOURCE_HEIGHT);
+        source_frame_has_emulator[target] = true;
+    }
+    *target_out = target;
+    *dst_out = dst;
+    return true;
+}
+
+static void dvi_publish_frame(int target) {
+    __atomic_store_n(&pending_frame, target, __ATOMIC_RELEASE);
+}
+
+bool dvi_display_submit_frame(const uint32_t *argb_frame) {
+    // Never overwrite a buffer that is displayed or already queued. With two
+    // buffers, dropping a late producer frame is safer than tearing scanout.
+    int target;
+    uint8_t *dst;
+    if (!dvi_begin_submit(&target, &dst))
+        return false;
+
+    // Both cores use RP2350's shared cached alias, so the producer and scanout
+    // observe the same cache lines without a full-frame maintenance walk.
     const uint x0 = (SOURCE_WIDTH - AMIGA_SOURCE_WIDTH) / 2u;
     const uint y0 = (SOURCE_HEIGHT - AMIGA_SOURCE_HEIGHT) / 2u;
 
-    // Both frames were cleared at startup and their borders stay black, so
-    // only update the image rectangle. This avoids a full-frame PSRAM write.
+    // Borders stay black after the first frame, so only update the image
+    // rectangle. This avoids a full-frame PSRAM write on subsequent frames.
     for (uint y = 0; y < AMIGA_SOURCE_HEIGHT; ++y) {
         const uint32_t *src_row = argb_frame + (y * 2u) * SCREEN_W;
         uint8_t *dst_row = dst + (y0 + y) * SOURCE_WIDTH + x0;
@@ -101,7 +120,45 @@ bool dvi_display_submit_frame(const uint32_t *argb_frame) {
             dst_row[x] = argb_to_rgb332(src_row[x * 2u]);
     }
 
-    __atomic_store_n(&pending_frame, target, __ATOMIC_RELEASE);
+    dvi_publish_frame(target);
+    return true;
+}
+
+bool dvi_display_submit_raster(const uint32_t *argb_raster,
+                               uint32_t border,
+                               int source_step,
+                               int y_offset,
+                               int row_rotation) {
+    int target;
+    uint8_t *dst;
+    if (!dvi_begin_submit(&target, &dst))
+        return false;
+
+    const uint x0 = (SOURCE_WIDTH - AMIGA_SOURCE_WIDTH) / 2u;
+    const uint y0 = (SOURCE_HEIGHT - AMIGA_SOURCE_HEIGHT) / 2u;
+    const uint8_t border332 = argb_to_rgb332(border);
+    const int first_source_y = y_offset / 2;
+    const int source_rows = HOST_RASTER_H / source_step;
+
+    for (int y = 0; y < AMIGA_SOURCE_HEIGHT; ++y) {
+        uint8_t *dst_row = dst + (y0 + (uint)y) * SOURCE_WIDTH + x0;
+        int source_y = y - first_source_y;
+        if (source_y < 0 || source_y >= source_rows) {
+            memset(dst_row, border332, AMIGA_SOURCE_WIDTH);
+            continue;
+        }
+
+        const uint32_t *src_row =
+            argb_raster + source_y * source_step * SCREEN_W;
+        for (int x = 0; x < AMIGA_SOURCE_WIDTH; ++x) {
+            int source_x = x * 2 + row_rotation;
+            if (source_x >= SCREEN_W)
+                source_x -= SCREEN_W;
+            dst_row[x] = argb_to_rgb332(src_row[source_x]);
+        }
+    }
+
+    dvi_publish_frame(target);
     return true;
 }
 
@@ -142,9 +199,9 @@ static void __not_in_flash_func(dvi_core1)(void) {
         queue_remove_blocking_u32(&dvi.q_tmds_free, &tmds);
         const uint32_t *source = (const uint32_t *)(
             source_frames[active_frame] + y * SOURCE_WIDTH);
-        // Each RGB channel encoder traverses its input separately. Copying the
-        // line once means 360 uncached PSRAM bytes rather than three passes,
-        // and keeps the time-critical TMDS work entirely in SRAM.
+        // Copy once into SRAM before the three channel encoders traverse it.
+        // Cached sequential reads are required to keep TMDS encoding ahead of
+        // scanout. DF0 track reads stay in SRAM, avoiding competing PSRAM IO.
         for (uint i = 0; i < count_of(scanline_words); ++i)
             scanline_words[i] = source[i];
         const uint32_t *pixels = scanline_words;
@@ -165,8 +222,10 @@ static void __not_in_flash_func(dvi_core1)(void) {
 }
 
 void dvi_display_init(void) {
-    source_frames[0] = dvi_psram_uncached_ptr(DVI_FRAME0_OFFSET);
-    source_frames[1] = dvi_psram_uncached_ptr(DVI_FRAME1_OFFSET);
+    source_frames[0] = psram_ptr(DVI_FRAME0_OFFSET);
+    source_frames[1] = psram_ptr(DVI_FRAME1_OFFSET);
+    source_frame_has_emulator[0] = false;
+    source_frame_has_emulator[1] = false;
     displayed_frame = 0;
     pending_frame = -1;
 
@@ -196,9 +255,34 @@ void dvi_display_init(void) {
     multicore_launch_core1(dvi_core1);
 }
 
+static void dvi_fill_boot_pattern(uint8_t *frame) {
+    static const uint8_t bars[8] = {
+        0xe0, // red
+        0xfc, // yellow
+        0x1c, // green
+        0x1f, // cyan
+        0x03, // blue
+        0xe3, // magenta
+        0xff, // white
+        0x00, // black
+    };
+
+    for (uint y = 0; y < SOURCE_HEIGHT; ++y) {
+        for (uint x = 0; x < SOURCE_WIDTH; ++x) {
+            uint8_t pixel = bars[(x * count_of(bars)) / SOURCE_WIDTH];
+            // White frame makes cropping and vertical stability obvious.
+            if (x < 4u || x >= SOURCE_WIDTH - 4u ||
+                y < 4u || y >= SOURCE_HEIGHT - 4u)
+                pixel = 0xff;
+            frame[y * SOURCE_WIDTH + x] = pixel;
+        }
+    }
+}
+
 void dvi_display_start(void) {
-    memset(source_frames[0], 0, SOURCE_WIDTH * SOURCE_HEIGHT);
-    memset(source_frames[1], 0, SOURCE_WIDTH * SOURCE_HEIGHT);
+    dvi_fill_boot_pattern(source_frames[0]);
+    dvi_fill_boot_pattern(source_frames[1]);
+    boot_pattern_until_us = time_us_64() + 1500000u;
 
     // Frame presentation performs large PSRAM writes on core 0. Give scanout
     // and its DMA channels priority so those writes cannot starve PicoDVI.
@@ -212,6 +296,6 @@ void dvi_display_start(void) {
 
     multicore_fifo_push_blocking(0u);
     multicore_fifo_pop_blocking();
-    printf("DVI: PIO %s emulator scanout on %s (uncached PSRAM)\n",
+    printf("DVI: PIO %s emulator scanout on %s (shared cached PSRAM)\n",
            DVI_MODE_NAME, BOARD_DVI_PIN_RANGE);
 }
