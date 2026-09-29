@@ -34,8 +34,8 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
 // Copper palette changes, even mid-line, keep their exact 12-bit colours.
 #define DVI_DIRECT_IMAGE_WIDTH 640
 #define DVI_MAX_ROWS 256
-#define DVI_MAX_SEGMENTS 640
-#define DVI_MAX_PALETTE_LOG 448
+#define DVI_MAX_SEGMENTS 1024
+#define DVI_MAX_PALETTE_LOG 1024
 // Segment: image columns [x0, x1) of one row, drawn after `pos` palette-log
 // entries; HAM decodes the pixels as HAM codes.
 #define DVI_SEGMENT(x0, x1, pos, ham) \

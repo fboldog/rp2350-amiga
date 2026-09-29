@@ -81,7 +81,15 @@ static uint8_t *source_frames[2];
 static bool source_frame_has_emulator[2];
 // Indexed frames carry colour numbers plus this record; the others RGB332.
 static bool frame_indexed[2];
-static dvi_indexed_frame_t frame_records[2];
+// The records live in PSRAM (cached alias), which frees ~9.6 KB of SRAM and
+// lets the limits grow (RemGame filled the former 448-entry palette log).
+// Core 1 writes them and its scanout interrupt reads them, both through the
+// one shared XIP cache, so they stay coherent. They are small and read
+// sequentially, so scanout mostly hits the cache.
+#define frame_records ((dvi_indexed_frame_t *)(BOARD_PSRAM_BASE + \
+                                              BOARD_MAP_DVI_RECORDS_OFFSET))
+_Static_assert(2u * sizeof(dvi_indexed_frame_t) <= BOARD_MAP_DVI_RECORDS_SIZE,
+               "frame records overrun their PSRAM area");
 // Frame handshake, one atomic word: bit 0 is the displayed buffer, bit 1 set
 // means the other buffer holds a finished frame waiting for the next DVI
 // frame boundary (the scanout interrupt swaps at line 0). A finished frame

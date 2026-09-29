@@ -67,6 +67,7 @@ The RP2350 port uses 8 MB PSRAM (memory-mapped at 0x11000000) with this layout
 | 0x480000–0x4FFFFF | SD ROM cache (512KB) | (optional)        |
 | 0x540000–0x63FFFF | Raw video raster     | (host rendering)  |
 | 0x680000–0x77FFFF | Framebuffer 640×400  | (host output)     |
+| 0x780000–0x787FFF | HDMI frame records   | palette logs and pixel runs of the two indexed frames (cached) |
 
 ROM is read-only in flash at 0x10200000 (absolute). `src/Memory.c:memory_init()`
 validates it by checking `rom_base[0] == 0x11`.

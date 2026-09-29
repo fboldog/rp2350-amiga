@@ -133,12 +133,15 @@ Workbench 1.3): 240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s, 320 MHz
 PSRAM took 82.1 s. The CPU clock matters more than the PSRAM clock.
 
 The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
-each fetched bitplane block, palette changes and frame begin/end into a 32 KB
+each fetched bitplane block, palette changes and frame begin/end into a
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`). The ring is 32 KB on NTSC and 16 KB on PAL (PAL's larger
-frames and their records leave no room for more; 32 KB had only moved PAL
-from 20.1 to 20.5 shown frames/s). Everything core 1
+`src/Host.c`). The ring takes the SRAM that is left: 44 KB on NTSC, 24 KB on
+PAL (`RING_WORDS`; any size works, positions run over twice the ring size).
+Core 1 reads each message in place and copies out only one that wraps. On
+idle Workbench the larger rings show 32.3 of 33.8 emulated frames/s on NTSC
+(was 27.0 of 35.0 with 32 KB) and 21.6 of 28.4 on PAL (was 20.5 of 29.1
+with 16 KB); drawing more frames costs core 0 ~3 %. Everything core 1
 executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
 traffic once delayed the line interrupt past its deadline and stopped the
 DMA chain.
@@ -171,8 +174,10 @@ register number (0..31, 32..63 extra half-brite) or, on HAM runs, the raw
 6-bit HAM code. Core 1 converts each bitplane block to those numbers
 (`hostDirectHires()`/`hostDirectLores()`, HAM included) and keeps a record
 per frame (`dvi_indexed_frame_t`): the palette at frame begin, a log of every
-colour change (up to 448), and for each row the runs of pixels it drew with
-the log position before them (up to 640). Scanout replays the log in drawing
+colour change (up to 1024), and for each row the runs of pixels it drew with
+the log position before them (up to 1024). The records live in PSRAM at
+0x780000 (32 KB reserved), read and written through the XIP cache that both
+cores share, which keeps ~9.6 KB of SRAM free for the ring at ~1 % speed. Scanout replays the log in drawing
 order and expands each row to RGB888 with the 12-bit colours doubled to 8 bits
 (0xF → 0xFF), so Copper palette changes (the Kickstart 2.04 rainbow, border
 gradients) keep their exact colours even mid-line; a row's undrawn columns

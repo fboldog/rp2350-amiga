@@ -83,17 +83,19 @@ enum {
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
      (uint32_t)(extra) << 23)
 
-// Power of two. Core 1 waits for a pending frame to be shown while core 0
-// keeps queueing; when the ring is full core 0 stalls until the swap. A
-// bigger ring lets emulation run further ahead of the display (idle
-// Workbench shown/emulated, NTSC: 22/32 fps with 8 KB, 27/32 with 32 KB).
-// PAL's frames are larger and its ring gained little beyond 16 KB (29.8/20.1
-// vs 29.4/20.5); that SRAM holds the indexed frame records instead.
+// Core 1 waits for a pending frame to be shown while core 0 keeps queueing;
+// when the ring is full core 0 stalls until the swap. A bigger ring lets
+// emulation run further ahead of the display (idle Workbench shown/emulated,
+// NTSC: 22/32 fps with 8 KB, 27/32 with 32 KB). Any size works: positions
+// run over [0, 2 * RING_WORDS), so the ring takes the SRAM that is left.
+#ifndef RING_WORDS
 #if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
-#define RING_WORDS 4096u  // 16 KB
+#define RING_WORDS 6144u  // 24 KB
 #else
-#define RING_WORDS 8192u  // 32 KB
+#define RING_WORDS 11264u // 44 KB
 #endif
+#endif
+#define RING_SPAN (2u * RING_WORDS)
 // Ring fill at which core 1 stops waiting for the pending frame's swap and
 // skips drawing the new frame. The default skips once core 0 can no longer
 // queue the largest message (17 words), i.e. just before it would stall;
@@ -104,8 +106,22 @@ enum {
 #define OMEGA_RING_SKIP_WORDS (RING_WORDS - 17u)
 #endif
 static uint32_t ring[RING_WORDS];
-static volatile uint32_t ring_head; // words produced (core 0)
-static volatile uint32_t ring_tail; // words consumed (core 1)
+static volatile uint32_t ring_head; // produce position (core 0)
+static volatile uint32_t ring_tail; // consume position (core 1)
+
+static inline uint32_t ringAdvance(uint32_t pos, uint32_t words) {
+    pos += words;
+    return pos >= RING_SPAN ? pos - RING_SPAN : pos;
+}
+
+static inline uint32_t ringFill(uint32_t head, uint32_t tail) {
+    return head >= tail ? head - tail : head + RING_SPAN - tail;
+}
+
+// Ring slot of position pos (< RING_SPAN).
+static inline uint32_t ringSlot(uint32_t pos) {
+    return pos >= RING_WORDS ? pos - RING_WORDS : pos;
+}
 static uint32_t palette_generation_sent = ~0u;
 
 // ── Core 0: producer ──────────────────────────────────────────────────────
@@ -113,12 +129,21 @@ static inline void ringPush(const uint32_t *words, uint32_t count) {
     uint32_t head = ring_head;
     // Wait for room: core 1 converts faster than the emulator fetches, so
     // this only waits after a burst.
-    while (head - __atomic_load_n(&ring_tail, __ATOMIC_ACQUIRE) + count >
-           RING_WORDS)
+    while (ringFill(head, __atomic_load_n(&ring_tail, __ATOMIC_ACQUIRE)) +
+           count > RING_WORDS)
         tight_loop_contents();
-    for (uint32_t i = 0; i < count; ++i)
-        ring[(head + i) & (RING_WORDS - 1u)] = words[i];
-    __atomic_store_n(&ring_head, head + count, __ATOMIC_RELEASE);
+    uint32_t slot = ringSlot(head);
+    if (slot + count <= RING_WORDS) {
+        for (uint32_t i = 0; i < count; ++i)
+            ring[slot + i] = words[i];
+    } else {
+        for (uint32_t i = 0; i < count; ++i) {
+            ring[slot] = words[i];
+            if (++slot == RING_WORDS)
+                slot = 0;
+        }
+    }
+    __atomic_store_n(&ring_head, ringAdvance(head, count), __ATOMIC_RELEASE);
     __sev(); // wake core 1 from __wfe()
 }
 
@@ -237,9 +262,7 @@ static int c1_height;              // image rows
     __not_in_flash_func(name)
 static uint16_t c1_palette[32];   // current colours, 0x0RGB
 
-static inline uint32_t c1Word(uint32_t index) {
-    return ring[index & (RING_WORDS - 1u)];
-}
+
 
 // Table-driven planar-to-index: c2p_spread[b] holds the 8 pixels of plane
 // byte b as bytes 0/1 (leftmost pixel = bit 7 = lowest byte), so OR-ing the
@@ -397,7 +420,7 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     // queueing; if the ring gets close to full first, skip this frame so
     // the emulator never stalls. A finished frame is never discarded.
     while (dvi_display_frame_pending() &&
-           ring_head - ring_tail < OMEGA_RING_SKIP_WORDS)
+           ringFill(ring_head, ring_tail) < OMEGA_RING_SKIP_WORDS)
         tight_loop_contents();
     c1_image = dvi_display_frame_pending()
              ? NULL
@@ -425,10 +448,10 @@ static void C1_FUNC(c1End)(uint16_t border) {
 }
 
 // Takes the new colours and logs the changed ones for the frame being drawn.
-static void C1_FUNC(c1Palette)(uint32_t tail) {
+static void C1_FUNC(c1Palette)(const uint32_t *pairs) {
     dvi_indexed_frame_t *rec = c1_record;
     for (uint32_t i = 0; i < 16u; ++i) {
-        const uint32_t pair = c1Word(tail + 1u + i);
+        const uint32_t pair = pairs[i];
         for (uint32_t k = 0; k < 2u; ++k) {
             const uint32_t reg = 2u * i + k;
             const uint16_t colour = (uint16_t)(pair >> (16u * k));
@@ -451,38 +474,50 @@ void C1_FUNC(hostCore1Loop)(void) {
         while ((head = __atomic_load_n(&ring_head, __ATOMIC_ACQUIRE)) == tail)
             __wfe();
         while (tail != head) {
-            const uint32_t header = c1Word(tail);
+            // Messages are read in place; only one that wraps around the
+            // end of the ring is first copied out (17 words: the longest).
+            uint32_t slot = ringSlot(tail);
+            const uint32_t *msg = &ring[slot];
+            uint32_t wrapped[17];
+            if (slot + 17u > RING_WORDS) {
+                for (uint32_t i = 0; i < 17u; ++i) {
+                    wrapped[i] = ring[slot];
+                    if (++slot == RING_WORDS)
+                        slot = 0;
+                }
+                msg = wrapped;
+            }
+            const uint32_t header = msg[0];
             const int type = (int)(header & 0xfu);
             const int row = (int)((header >> 4) & 0x1ffu);
             const int x = (int)((header >> 13) & 0x3ffu);
             uint32_t length;
             switch (type) {
             case MSG_HIRES:
-                c1Hires(row, x, c1Word(tail + 1u), c1Word(tail + 2u));
+                c1Hires(row, x, msg[1], msg[2]);
                 length = 3;
                 break;
             case MSG_LORES:
-                c1Lores(row, x, c1Word(tail + 1u), c1Word(tail + 2u),
-                        c1Word(tail + 3u), (header >> 23) & 1u);
+                c1Lores(row, x, msg[1], msg[2], msg[3], (header >> 23) & 1u);
                 length = 4;
                 break;
             case MSG_PALETTE:
-                c1Palette(tail);
+                c1Palette(&msg[1]);
                 length = 17;
                 break;
             case MSG_BEGIN:
-                c1Begin(c1Word(tail + 1u), c1Word(tail + 2u));
+                c1Begin(msg[1], msg[2]);
                 length = 3;
                 break;
             case MSG_END:
-                c1End((uint16_t)c1Word(tail + 1u));
+                c1End((uint16_t)msg[1]);
                 length = 2;
                 break;
             default:
                 panic("host: bad core-1 ring message %08lx",
                       (unsigned long)header);
             }
-            tail += length;
+            tail = ringAdvance(tail, length);
             __atomic_store_n(&ring_tail, tail, __ATOMIC_RELEASE);
         }
     }

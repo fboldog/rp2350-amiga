@@ -217,6 +217,22 @@ How to measure (no halt, firmware keeps running):
       deadline (60 % of core 1, lost HDMI sync); fixed by re-arming the DMA
       channel before expanding and a branchless, pair-wise HAM decode (18 %).
       PAL went back to a 16 KB ring for the frame records (~470 B SRAM left).
+- [x] **Frame records in PSRAM; rings take the rest of SRAM.** The two
+      `dvi_indexed_frame_t` records moved to PSRAM (0x780000, cached alias,
+      coherent through the shared XIP cache): ~9.6 KB SRAM back for ~1 %
+      speed, and the limits grew to 1024 runs / 1024 palette changes
+      (RemGame filled the 448-entry log with sprite colours). The ring no
+      longer needs a power-of-two size: PAL 16 → 24 KB, NTSC 32 → 44 KB.
+      Idle Workbench emulated/shown: PAL 29.1/20.5 → 28.4/21.6 (boot 45.7 →
+      47.6 s), NTSC 35.0/27.0 → 33.8/32.3 (45.7 → 46.6 s). ~2 KB SRAM left.
+- [x] ~~**PSRAM framebuffer.**~~ Measured and dropped (2026-09-29). Reading
+      a frame from PSRAM is free with one continuous XIP stream per frame
+      started at vertical blanking (no underruns even under the KS 2.04
+      animation); per-row DMA reads cost 18 % emulation and the XIP stream
+      restarted per row missed 27 % of row deadlines under load. Writing
+      the frames is the problem: core-1 writes cost 14 % emulation, DMA
+      copies (paced or not) also stall the HSTX DMA (RGB888: the 8-word FIFO
+      holds ~0.3 µs) and dropped display frames (51-59/s).
 - [ ] **Smaller frames.** Colour numbers need at most 6 bits; packing 16-colour
       screens at 4 bits per pixel would free ~80 KB per frame (HAM/EHB rows
       still need a byte) — room for a larger PAL ring or a third frame.
