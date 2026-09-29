@@ -294,9 +294,13 @@ forward steps when measuring.
       native PAL `wb13` case then never reaches Workbench (blank screen even at
       vbl 2522). Find what breaks (sync search, DSKBLK timing vs trackdisk)
       before raising it; at most ~20 % of boot time is at stake.
-- [ ] **Track-change cost.** Each cylinder/side change re-encodes a 12.8 KB
-      MFM track from the flash ADF on core 0 (~10 per 10 s during boot). Small
-      in the profile; revisit after P1.
+- [x] ~~**Floppy on core 1.**~~ Not worth it (measured 2026-09-29, PAL
+      320 MHz, disk-heavy boot phase 8-35 s after reset, 135k PC samples): all
+      floppy code is 2.0 % of core 0 (`floppyDataRead` 1.0 %, `diskCycle`
+      0.8 %, drive state 0.1 %); MFM track encoding does not register. Disk
+      data must also be answered within the emulated DMA slot, so moving it
+      would cost more in synchronisation than it saves. Boot time follows the
+      emulator speed (`dma_run` 19 %, bitplane slots ~22 %, `m68k_*` ~20 %).
 
 ### Done
 - [x] Musashi opcode pointer table → 16-bit handler index, descriptor table in
