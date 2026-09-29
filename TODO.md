@@ -210,8 +210,16 @@ How to measure (no halt, firmware keeps running):
       the 4096 Amiga colours with RGB332 as the overflow fallback (HAM).
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
-- [ ] **Use core 1's spare time.** Scanout uses ~20 µs of each ~64 µs line
-      pair; row conversion (or MFM track encoding) could move to core 1.
+- [x] **Pixel conversion on core 1.** Core 0 enqueues bitplane blocks,
+      palette changes and frame begin/end into an 8 KB SPSC ring; core 1
+      converts between its line interrupts. PAL 320 MHz: boot to the
+      Workbench icons 53.9 → 48.0 s; idle Workbench 23.0 → 26.9 emulated
+      vblanks/s (~17.5 frames/s shown: when a frame is still waiting for the
+      display and the ring fills first, core 1 skips drawing one). All of
+      core 1's thread code must stay in RAM (see README).
+- [ ] **Show more of the emulated frames.** A larger ring (NTSC has ~32 KB
+      heap spare, PAL ~12 KB) or converting lines ahead would let core 1 wait
+      for the swap without skipping.
 
 ### P2 – Emulation core
 Profile on the Kickstart 1.3 hand screen (NTSC, after the RGB332 render; the
@@ -241,11 +249,15 @@ appears only ~2 min 12 s later.
       Results (NTSC, KEY pressed with the hand screen up 30 s → AmigaDOS
       window): 116.1 s → 93.5 s (memory/fetch) → 78.8 s (slices). PAL boot to
       the Workbench icons: 93.5 s → 86.8 s.
-- [ ] **Remaining per-slot overhead.** Hoist per-line state out of
-      `dma_execute()` (plane mask, display-window test), add a fast path for
-      slots with no DMA, and skip `copperExecute()` cheaply while the Copper
-      waits. (CIA work already runs only every 5th slot.) Keep the native
-      regression suite green.
+- [x] **Per-slot overhead, part 1.** Display-window, fetch-window end and
+      plane masks are cached per line behind a dirty flag set by the
+      DIW/DDF/BPLCON0/DMACON handlers; VPOSR is set once per line; the E-clock
+      counter is inlined; `dma_run(n)` batches slots with the line-end and
+      fetch-end work in separate functions. Native frames bit-identical.
+      PAL 320 MHz: boot (first AmigaDOS/WB frame) 64.7 → 52.9 s, idle 17.9 →
+      22.9 vblanks/s.
+- [ ] **Per-slot overhead, part 2.** A fast path for slots with no DMA and a
+      cheap skip of `copperExecute()` while the Copper waits.
 - [ ] **SRAM window over low chip RAM** (vectors, stacks, hot Exec data) once
       SRAM is available; one compare per access saves a QSPI round trip.
 
@@ -259,9 +271,11 @@ appears only ~2 min 12 s later.
       240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s. Long-term stability at
       320 MHz / 1.20 V not yet soak-tested. USB needs an external 48 MHz
       clock (GPIN0/GPIO20) or a multiple-of-48 `clk_sys`.
-- [x] **Frame pacing.** The emulator no longer waits for core 1 to take a
-      frame: one atomic state word lets it take back an unshown frame. Idle
-      Workbench 16.7 (capped at 50/3) → 17.9 vblanks/s; boot 66.7 → 64.7 s.
+- [x] **Frame pacing.** The emulator no longer waits for the display
+      (idle Workbench had been capped at 50/3 vblanks/s). The first version
+      took back unshown frames, which could stop frames from ever being
+      shown; the core-1 version never takes a finished frame back (see the
+      pixel conversion item).
 - [ ] **Kickstart in PSRAM vs flash.** ROM fetches come from flash XIP;
       measure whether a PSRAM copy (126 MHz) is faster.
 

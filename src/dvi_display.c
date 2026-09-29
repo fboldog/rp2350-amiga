@@ -17,6 +17,7 @@
 #include "hardware/structs/busctrl.h"
 #include "hardware/structs/hstx_ctrl.h"
 #include "hardware/structs/hstx_fifo.h"
+#include "hardware/structs/timer.h"
 #include "hardware/sync.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
@@ -75,21 +76,41 @@ static uint8_t sram_frames[2][DVI_FRAME_BYTES] __attribute__((aligned(4)));
 
 static uint8_t *source_frames[2];
 static bool source_frame_has_emulator[2];
-// Frame handshake between the emulator (core 0) and scanout (core 1), one
-// atomic word: bit 0 is the displayed buffer, bit 1 set means the other
-// buffer holds a finished frame waiting for the next DVI frame boundary.
-// The emulator never waits: it takes back an unshown frame and draws over
-// it, so the display always shows the newest finished frame.
+// Frame handshake, one atomic word: bit 0 is the displayed buffer, bit 1 set
+// means the other buffer holds a finished frame waiting for the next DVI
+// frame boundary (the scanout interrupt swaps at line 0). A finished frame
+// is never taken back: renderers claim the back buffer only when nothing is
+// pending (core 1 waits briefly for the swap, the ARGB path drops a frame).
 #define FRAME_PENDING 2u
 static volatile uint32_t frame_state;
+// Emulator frames actually shown (swapped in at line 0); read over SWD to
+// measure the display update rate.
+volatile uint32_t dvi_frames_shown;
 
-// Claims the buffer that is not displayed (taking back an unshown frame).
-static int dvi_claim_back_buffer(void) {
+// Everything core 1 calls from its thread loop runs from RAM: a flash (XIP)
+// fetch can stall behind core 0's PSRAM traffic long enough to delay the
+// per-line DMA interrupt past its deadline, which stops scanout for good.
+bool __not_in_flash_func(dvi_display_frame_pending)(void) {
+    return (__atomic_load_n(&frame_state, __ATOMIC_ACQUIRE) &
+            FRAME_PENDING) != 0;
+}
+
+// Claims the buffer that is not displayed. Callers first make sure no frame
+// is pending, so this never discards a finished frame.
+static int __not_in_flash_func(dvi_claim_back_buffer)(void) {
     const uint32_t old = __atomic_fetch_and(&frame_state, ~FRAME_PENDING,
                                             __ATOMIC_ACQ_REL);
     return (int)(old & 1u) ^ 1;
 }
 static uint64_t boot_pattern_until_us;
+// Boot pattern end as a raw 32-bit timer value, for the flash-free check.
+static volatile uint32_t boot_pattern_until_lo;
+static volatile bool boot_pattern_armed;
+
+static inline bool __not_in_flash_func(boot_pattern_showing)(void) {
+    return !boot_pattern_armed ||
+           (int32_t)(timer_hw->timerawl - boot_pattern_until_lo) < 0;
+}
 // Border colour (COLOR00) of each frame. Like a real Amiga, the areas around
 // the image show the border colour rather than black.
 static uint8_t frame_border[2];
@@ -105,6 +126,10 @@ static bool dvi_begin_submit(int *target_out, uint8_t **dst_out) {
     if (time_us_64() < boot_pattern_until_us)
         return false;
 
+    // Never overwrite a finished frame that has not been shown yet: drop
+    // this one instead (the ARGB paths submit whole frames at vblank).
+    if (dvi_display_frame_pending())
+        return false;
     int target = dvi_claim_back_buffer();
     uint8_t *dst = source_frames[target];
     if (!source_frame_has_emulator[target]) {
@@ -116,7 +141,7 @@ static bool dvi_begin_submit(int *target_out, uint8_t **dst_out) {
     return true;
 }
 
-static void dvi_publish_frame(int target) {
+static void __not_in_flash_func(dvi_publish_frame)(int target) {
     // Only the claimed back buffer is ever published; core 1 cannot switch
     // buffers until the pending bit is set.
     (void)target;
@@ -129,22 +154,22 @@ uint32_t dvi_display_bit_clock_khz(void) {
     return MODE_BIT_CLK_KHZ;
 }
 
-int dvi_display_direct_height(void) {
+int __not_in_flash_func(dvi_display_direct_height)(void) {
     return AMIGA_SOURCE_HEIGHT;
 }
 
-uint8_t *dvi_display_direct_acquire(void) {
-    if (time_us_64() < boot_pattern_until_us)
+uint8_t *__not_in_flash_func(dvi_display_direct_acquire)(void) {
+    if (boot_pattern_showing())
         return NULL;
     direct_target = dvi_claim_back_buffer();
     source_frame_has_emulator[direct_target] = true;
     return source_frames[direct_target];
 }
 
-void dvi_display_direct_publish(uint32_t border) {
+void __not_in_flash_func(dvi_display_direct_publish_rgb332)(uint8_t border) {
     if (direct_target < 0)
         return;
-    frame_border[direct_target] = dvi_rgb332(border);
+    frame_border[direct_target] = border;
     dvi_publish_frame(direct_target);
     direct_target = -1;
 }
@@ -318,8 +343,10 @@ static void __not_in_flash_func(hstx_program_next)(uint index) {
         if ((state & FRAME_PENDING) &&
             __atomic_compare_exchange_n(&frame_state, &state,
                                         (state & 1u) ^ 1u, false,
-                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
             hstx_active_frame = (int)((state & 1u) ^ 1u);
+            dvi_frames_shown++;
+        }
         hstx_border_word = frame_border[hstx_active_frame] * 0x01010101u;
         border_line[BORDER_LINE_COLOUR_WORD] = hstx_border_word;
     }
@@ -444,8 +471,9 @@ static void dvi_core1(void) {
     multicore_fifo_pop_blocking();
     hstx_start();
     multicore_fifo_push_blocking(0u);
-    for (;;)
-        __wfi();
+    // Between line interrupts, convert the emulator's bitplane blocks into
+    // the scanout frame (src/Host.c).
+    hostCore1Loop();
 }
 
 void dvi_display_init(void) {
@@ -503,6 +531,8 @@ void dvi_display_start(void) {
     dvi_fill_boot_pattern(source_frames[0]);
     dvi_fill_boot_pattern(source_frames[1]);
     boot_pattern_until_us = time_us_64() + 1500000u;
+    boot_pattern_until_lo = (uint32_t)boot_pattern_until_us;
+    boot_pattern_armed = true;
 
     // Frame presentation performs large PSRAM writes on core 0. Give scanout
     // and its DMA channels priority so those writes cannot starve it.

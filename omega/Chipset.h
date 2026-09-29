@@ -519,6 +519,7 @@ typedef struct{
     uint16_t* chipramW; //word addressed
     uint32_t palette[64]; //internally store the palette colours in rgba32, 32 colours (+32 extra half bright)
     uint8_t palette332[64]; // same palette as RGB332 (3-3-2) for direct HDMI rendering
+    uint32_t paletteGeneration; // bumped on every palette332 write
     int bitplaneMask;
     
     int eClockCounter;  //aproximates a 700,000Hz timer

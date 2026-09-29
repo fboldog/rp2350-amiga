@@ -73,6 +73,9 @@ static inline void hostRasterWritten(int row, int x, int width) {
 // hostRasterPixels()/hostRasterWritten() (HAM still uses the ARGB path).
 #if defined(PICO_BUILD) && OMEGA_ENABLE_HDMI
 extern int hostDirectActive;
+// Core 1 work loop (never returns): converts the enqueued blocks into the
+// scanout frame. Started by dvi_display.c after HSTX scanout is running.
+void hostCore1Loop(void);
 void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
                      uint16_t p3, uint16_t p4);
 void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,

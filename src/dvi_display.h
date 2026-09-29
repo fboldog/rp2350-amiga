@@ -31,11 +31,14 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
 #define DVI_DIRECT_IMAGE_WIDTH 640
 // Image rows of the direct frame (240 NTSC, 256 PAL).
 int dvi_display_direct_height(void);
-// Waits (at most one DVI frame) for the back buffer and returns its
-// 640-pixel-stride image, or NULL while the boot pattern is still shown.
+// True while a finished frame waits for the next DVI frame boundary.
+bool dvi_display_frame_pending(void);
+// Claims the back buffer and returns its 640-pixel-stride image, or NULL
+// while the boot pattern is still shown. Call only when no frame is
+// pending. Called on core 1.
 uint8_t *dvi_display_direct_acquire(void);
-// Queues the acquired frame with the given ARGB border colour.
-void dvi_display_direct_publish(uint32_t border);
+// Queues the acquired frame with the given RGB332 border colour.
+void dvi_display_direct_publish_rgb332(uint8_t border);
 
 static inline uint8_t dvi_rgb332(uint32_t argb) {
     return (uint8_t)(((argb >> 16) & 0xe0u) |

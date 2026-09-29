@@ -713,90 +713,120 @@ static void hiresDisplayPrefetch(void) {
     host.rasterX += 16;
 }
 
-void dma_execute(){
-    
-    chipset.vposr   = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
-    chipset.vhposr  = internal.vPos << 8;
-    chipset.vhposr |= internal.hPos;
+int dmaLineStateDirty = 1;
+
+// Per-line display state. It only changes at a line boundary or when one of
+// the registers listed in DMA.h is written, so it is recomputed then instead
+// of on every slot. OR-ing unchanged plane masks again is a no-op, so the
+// accumulated masks are identical to per-slot recomputation.
+static void dmaUpdateLineState(void) {
     uint8_t enabledPlanes = enabledBitplaneMask();
     int dmaEnabled = (chipset.dmaconr & 0x300) == 0x300;
     int displayWindowActive = displayWindowContainsLine(internal.vPos);
     bitplaneLine.enabledMask |= enabledPlanes;
     if (dmaEnabled && displayWindowActive)
         bitplaneLine.fetchEligibleMask |= enabledPlanes;
-    
 
-    // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
     if(chipset.bplcon0 & 0x8000){
         // The 0x3c full-width window consumes one more word than the narrower
         // 0x40 fetch window. The latter's right-edge word is supplied by
         // hiresDisplayPrefetch() without changing its stride.
         bitplaneLine.lastCycle = chipset.ddfstop +
             omegaDdfHiresFetchTail(chipset.ddfstrt, chipset.ddfstop);
-        DMAHires[internal.hPos]();
     }else{
         // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
         bitplaneLine.lastCycle =
             chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
-        DMALores[internal.hPos]();
     }
+    dmaLineStateDirty = 0;
+}
 
-    if (internal.hPos == bitplaneLine.lastCycle) {
-        bitplaneLine.fetchWindowComplete = 1;
-        bitplaneLine.pointerAtFetchCompletion[0] = chipset.bpl1pt;
-        bitplaneLine.pointerAtFetchCompletion[1] = chipset.bpl2pt;
-        bitplaneLine.pointerAtFetchCompletion[2] = chipset.bpl3pt;
-        bitplaneLine.pointerAtFetchCompletion[3] = chipset.bpl4pt;
-        if (bitplaneLine.fetchedMask != 0) {
-            lastFetchedMask = bitplaneLine.fetchedMask;
-            applyBitplaneModulo(bitplaneLine.fetchedMask);
+// End of a line (rare): kept out of the per-slot path so dma_run() stays
+// small and saves few registers.
+static void __attribute__((noinline)) dmaEndOfLine(void) {
+    // Denise still presents the next HIRES word at the right edge even
+    // though Agnus does not consume it as part of the line stride. Peek
+    // at it for display only; do not advance any bitplane pointer.
+    hiresDisplayPrefetch();
+
+    internal.hPos = 0;
+    internal.vPos +=1;
+    CIATODEvent(&CIAB);
+
+    advanceBitplanePointers();
+    resetBitplaneLine();
+    dmaLineStateDirty = 1;  // new line: masks cleared, vPos changed
+
+    //VBL Time
+    if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
+        internal.vPos = 0;
+        copperWaitPosition = 0;
+
+        //Reset Copper.
+        putChipReg16[COPJMP1](0);
+        CIATODEvent(&CIAA);
+
+        //need to generate a vbl int
+        putChipReg16[INTREQ](0x8020);
+
+        host.rasterRow = 0;
+        host.rasterX = 0;
+
+        hostDisplay(); //Call the host to update the display.
+    }
+}
+
+// Fetch-window end (rare, once per line).
+static void __attribute__((noinline)) dmaFetchWindowComplete(void) {
+    bitplaneLine.fetchWindowComplete = 1;
+    bitplaneLine.pointerAtFetchCompletion[0] = chipset.bpl1pt;
+    bitplaneLine.pointerAtFetchCompletion[1] = chipset.bpl2pt;
+    bitplaneLine.pointerAtFetchCompletion[2] = chipset.bpl3pt;
+    bitplaneLine.pointerAtFetchCompletion[3] = chipset.bpl4pt;
+    if (bitplaneLine.fetchedMask != 0) {
+        lastFetchedMask = bitplaneLine.fetchedMask;
+        applyBitplaneModulo(bitplaneLine.fetchedMask);
+    }
+}
+
+// Runs `slots` DMA slots (one colour clock each). Batching avoids a call and
+// register save per slot from the main loop.
+void dma_run(int slots){
+    while (slots-- > 0) {
+        // VPOSR only changes with the line.
+        if (internal.hPos == 0)
+            chipset.vposr = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
+        chipset.vhposr  = internal.vPos << 8;
+        chipset.vhposr |= internal.hPos;
+        if (dmaLineStateDirty)
+            dmaUpdateLineState();
+
+        // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
+        if(chipset.bplcon0 & 0x8000){
+            DMAHires[internal.hPos]();
+        }else{
+            DMALores[internal.hPos]();
         }
-    }
 
-    eclock_execute(&chipset);   // CIA timers
+        if (internal.hPos == bitplaneLine.lastCycle)
+            dmaFetchWindowComplete();
 
-    internal.hPos++;
-    
-
-    
-    
-    //end of line reached! 227 colour clocks have executed
-    if(internal.hPos > 0xE3){
-        // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
-
-        // Denise still presents the next HIRES word at the right edge even
-        // though Agnus does not consume it as part of the line stride. Peek
-        // at it for display only; do not advance any bitplane pointer.
-        hiresDisplayPrefetch();
-
-        internal.hPos = 0;
-        internal.vPos +=1;
-        CIATODEvent(&CIAB);
-        
-        advanceBitplanePointers();
-        resetBitplaneLine();
-        
-        //VBL Time
-        if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
-            internal.vPos = 0;
-            copperWaitPosition = 0;
-
-            //Reset Copper.
-            putChipReg16[COPJMP1](0);
-            CIATODEvent(&CIAA);
-            
-            
-            //need to generate a vbl int
-            putChipReg16[INTREQ](0x8020);
-            
-            host.rasterRow = 0;
-            host.rasterX = 0;
-            
-            
-            hostDisplay(); //Call the host to update the display.
+        // CIA timers: the E clock ticks every fifth slot (eclock_execute(),
+        // inlined).
+        if (--internal.eClockCounter < 0) {
+            internal.eClockCounter = 4;
+            CIAExecute(&CIAA);
+            CIAExecute(&CIAB);
         }
-        
+
+        //end of line reached! 227 colour clocks have executed
+        if (++internal.hPos > 0xE3)
+            dmaEndOfLine();
     }
+}
+
+void dma_execute(){
+    dma_run(1);
 }
 
 

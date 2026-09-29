@@ -130,12 +130,22 @@ Workbench 1.3): 240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s, 320 MHz
 66.7 s (64.7 s with the frame pacing below); the old 270 MHz with 90 MHz
 PSRAM took 82.1 s. The CPU clock matters more than the PSRAM clock.
 
-The emulator never waits for the display: the frame handshake is one atomic
-word (displayed buffer + pending flag). If the previous frame has not been
-shown yet, the emulator takes it back and draws over it, and core 1 switches
-to the pending frame at line 0. Waiting instead locked the emulator to whole
-fractions of the display rate (idle Workbench capped at 50/3 = 16.7 frames/s;
-17.9 without the wait).
+The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
+each fetched bitplane block, palette changes and frame begin/end into an 8 KB
+single-producer/single-consumer ring of 32-bit words; core 1 converts them
+into the frame between its line interrupts (`hostCore1Loop()` in
+`src/Host.c`), so Copper palette changes still reach the right pixels. HAM
+blocks are converted on core 0 and sent as ready pixels. Everything core 1
+executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
+traffic once delayed the line interrupt past its deadline and stopped the
+DMA chain.
+
+The frame handshake is one atomic word (displayed buffer + pending flag);
+core 1 switches to the pending frame at line 0. A finished frame is never
+taken back. If it has not been shown when the next frame starts, core 1
+waits for the swap (≤ one display frame) while core 0 keeps queueing, and
+skips drawing that frame only if the ring gets 3/4 full, so the emulator never
+waits for the display. `dvi_frames_shown` counts the frames actually shown.
 
 The DVI mode is standard: 640×480p60 (VGA, 25.2 MHz pixels, 252 MHz) for
 NTSC or CEA 720×576p50 (270 MHz) for PAL. Each stored image row is sent

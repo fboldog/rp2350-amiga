@@ -326,8 +326,7 @@ int main(void) {
         // 1-3 instructions it ran. The CPU:DMA cycle ratio is unchanged; the
         // CPU just observes chipset state at slice granularity.
         for (int i = 0; i < DMA_CPU_BATCH; i += OMEGA_CPU_SLICE_SLOTS) {
-            for (int slot = 0; slot < OMEGA_CPU_SLICE_SLOTS; ++slot)
-                dma_execute();
+            dma_run(OMEGA_CPU_SLICE_SLOTS);
             m68k_execute(16 * OMEGA_CPU_SLICE_SLOTS);
         }
 #if OMEGA_ENABLE_FLASH_FLOPPY

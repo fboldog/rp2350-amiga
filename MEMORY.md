@@ -344,3 +344,21 @@ native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
   back unshown frames. Idle 17.9 fps.
 - Benchmark tooling: scratchpad `poll.py` (boot-to-first-AmigaDOS/WB frame via
   SWD frame dumps; reads `frame_state` bit 0) and `tod.sh` (CIA-A TOD delta).
+- Per-slot DMA work (2026-09-29): cached per-line state (dirty flag from the
+  DIW/DDF/BPLCON0/DMACON handlers), VPOSR per line, inlined E-clock,
+  `dma_run(n)` batching. Native frames stayed bit-identical.
+- Core-1 pixel conversion: 8 KB SPSC ring (bitplane blocks, palette via
+  `internal.paletteGeneration`, frame begin/end); core 1 owns the frame.
+  Two traps hit on the way: (1) claiming the back buffer at frame begin took
+  back the just-published frame, so frames were almost never shown (also true
+  of the lazy-claim version in commit 450aa60); (2) any flash code on core 1
+  (veneers, libc memset/memcpy, time_us_64, even GCC turning loops into
+  memset) can stall behind PSRAM traffic and make the HSTX line IRQ miss its
+  deadline, killing the DMA chain (line counter stuck, no HDMI signal). Use
+  `C1_FUNC` (RAM + no-tree-loop-distribute-patterns) and check with objdump
+  that core-1 code only calls RAM.
+- Benchmarking: use a strict Workbench detector (title bar + empty left
+  area) and `dvi_frames_shown`; earlier "first AmigaDOS/WB frame" numbers
+  caught different screens across builds. PAL 320 MHz now: WB icons 48.0 s,
+  idle 26.9 emulated / ~17.5 shown fps. A hung chip (SWD reads fail) was
+  recovered with `-f target/rp2350-rescue.cfg`.
