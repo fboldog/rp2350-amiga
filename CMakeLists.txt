@@ -15,6 +15,11 @@ option(OMEGA_ENABLE_HDMI "Build the HSTX HDMI output" OFF)
 option(OMEGA_ENABLE_SDCARD "Build microSD/FatFs Kickstart loading" OFF)
 option(OMEGA_ENABLE_FLASH_FLOPPY "Load ADF images embedded in flash" OFF)
 option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OFF)
+# HDMI builds only: HSTX runs from PLL_USB, so clk_sys is independent of the
+# video mode. PSRAM runs at clk_sys / ceil(clk_sys / 133 MHz).
+# 320 MHz (PSRAM at 107 MHz) boots fastest; 266 MHz gives PSRAM 133 MHz; a
+# multiple of 48 MHz (e.g. 240) would let USB run from PLL_SYS.
+set(OMEGA_SYS_CLK_KHZ 320000 CACHE STRING "clk_sys in kHz for HDMI builds")
 
 # Match the small hardware_psram test project: describe the physical PSRAM to
 # the SDK and let its startup code configure QMI before main().
@@ -109,6 +114,7 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_ENABLE_FLASH_FLOPPY=$<BOOL:${OMEGA_ENABLE_FLASH_FLOPPY}>
     OMEGA_DF0_INSERT_AT_BOOT=$<BOOL:${OMEGA_DF0_INSERT_AT_BOOT}>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
+    OMEGA_SYS_CLK_KHZ=${OMEGA_SYS_CLK_KHZ}u
 )
 
 
@@ -122,7 +128,7 @@ target_link_libraries(omega-amiga
 
 if(OMEGA_ENABLE_HDMI)
     target_link_libraries(omega-amiga pico_multicore hardware_vreg
-                          hardware_irq hardware_resets)
+                          hardware_irq hardware_resets hardware_pll)
 endif()
 
 if(OMEGA_ENABLE_SDCARD)
@@ -166,6 +172,7 @@ message(STATUS "Board:       ${PICO_BOARD}")
 message(STATUS "SDK path:    ${PICO_SDK_PATH}")
 message(STATUS "Build type:  ${CMAKE_BUILD_TYPE}")
 message(STATUS "Video mode:  ${OMEGA_VIDEO_MODE}")
+message(STATUS "Sys clock:   ${OMEGA_SYS_CLK_KHZ} kHz (HDMI builds)")
 message(STATUS "PSRAM:      ${PSRAM_SIZE_BYTES} bytes, CS GPIO${PSRAM_CS_PIN}")
 message(STATUS "HDMI:       ${OMEGA_ENABLE_HDMI}")
 message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD}")

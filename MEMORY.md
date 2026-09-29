@@ -333,3 +333,14 @@ native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
 - Only DF0 is supported. DF1-DF3 remain in `df[4]` purely as unconnected
   drives for Kickstart's drive-ID probe (their `pra`/`idMode` from
   floppyInit); `mfmData` is NULL for them and floppyDataRead returns 0.
+- Clocks (2026-09-29): HSTX moved to PLL_USB (retuned to 252/270 MHz,
+  clk_hstx = /2), so clk_sys is the `OMEGA_SYS_CLK_KHZ` option, default
+  320 MHz (PSRAM 107 MHz). CPU clock beats PSRAM clock: 266/133 79.4 s vs
+  320/107 66.7 s PAL boot. USB/ADC clocks are stopped; USB later needs a
+  48 MHz oscillator on GPIO20 (GPIN0) or clk_sys = n*48 MHz.
+- Frame pacing: acquiring the back buffer used to spin until core 1 took the
+  previous frame, quantising the emulator to 50/n fps (idle stuck at 16.7).
+  Now one atomic word (bit 0 displayed, bit 1 pending); the emulator takes
+  back unshown frames. Idle 17.9 fps.
+- Benchmark tooling: scratchpad `poll.py` (boot-to-first-AmigaDOS/WB frame via
+  SWD frame dumps; reads `frame_state` bit 0) and `tod.sh` (CIA-A TOD delta).

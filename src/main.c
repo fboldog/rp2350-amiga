@@ -22,8 +22,10 @@
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
 #include "hardware/structs/scb.h"
+#include "hardware/structs/qmi.h"
 
 #if OMEGA_ENABLE_HDMI
+#include "hardware/pll.h"
 #include "hardware/psram.h"
 #include "hardware/vreg.h"
 #include "pico/multicore.h"
@@ -211,31 +213,40 @@ static bool load_kickstart_from_sd(void) {
 
 #if OMEGA_ENABLE_HDMI
 static void prepare_hdmi_clock(void) {
-#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
-    const uint32_t dvi_clock_khz = 270000u;
-#else
-    const uint32_t dvi_clock_khz = 252000u;
-#endif
-
-    // HSTX runs from clk_sys / 2 at half the TMDS bit rate (two bits per
-    // clk_hstx cycle), so clk_sys is the bit rate. Raise the core voltage
-    // before overclocking, then recalculate and apply the SDK PSRAM timing
-    // for the faster QMI clock before touching external memory.
+    // HSTX gets its clock from PLL_USB, retuned to the TMDS bit rate, so
+    // clk_sys can be chosen for the emulator (OMEGA_SYS_CLK_KHZ) and PSRAM
+    // runs close to its 133 MHz limit. PLL_USB no longer provides 48 MHz:
+    // clk_peri moves to PLL_SYS and the unused USB and ADC clocks stop.
     vreg_set_voltage(VREG_VOLTAGE_1_20);
     sleep_ms(10);
-    if (!set_sys_clock_khz(dvi_clock_khz, true))
-        panic("Unable to select the HDMI system clock");
+    if (!set_sys_clock_khz(OMEGA_SYS_CLK_KHZ, true))
+        panic("Unable to select the system clock");
+    const uint32_t sys_hz = clock_get_hz(clk_sys);
+    // clk_peri (UART, SPI) stays at or below 150 MHz; its divider is 1..3.
+    const uint32_t peri_div = (sys_hz + 150000000u - 1u) / 150000000u;
+    if (!clock_configure(clk_peri, 0,
+                         CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+                         sys_hz, sys_hz / peri_div))
+        panic("Unable to move clk_peri to PLL_SYS");
+    clock_stop(clk_usb);
+    clock_stop(clk_adc);
+    uint vco_hz, post_div1, post_div2;
+    if (!check_sys_clock_hz(dvi_display_bit_clock_khz() * 1000u,
+                            &vco_hz, &post_div1, &post_div2))
+        panic("No PLL_USB setting for the HDMI bit rate");
+    pll_init(pll_usb, 1, vco_hz, post_div1, post_div2);
     if (psram_configure_params(PICO_DEFAULT_PSRAM_MAX_FREQ,
                                PICO_DEFAULT_PSRAM_MAX_SELECT,
                                PICO_DEFAULT_PSRAM_MIN_DESELECT) != PICO_OK ||
         psram_reinitialize() != PICO_OK)
-        panic("Unable to retime PSRAM for HDMI");
+        panic("Unable to retime PSRAM for the system clock");
 }
 #endif
 
 int main(void) {
     // 1. Clock and stdio. Normal builds retain the SDK's 150 MHz startup
-    // clock; HDMI builds select their video bit clock and retime PSRAM.
+    // clock; HDMI builds select OMEGA_SYS_CLK_KHZ, drive HSTX from PLL_USB
+    // and retime PSRAM.
 #if OMEGA_ENABLE_HDMI
     prepare_hdmi_clock();
 #endif
@@ -243,6 +254,14 @@ int main(void) {
                          BOARD_UART_TX_PIN, BOARD_UART_RX_PIN);
     printf("\n\nOmega/RP2350 – Amiga emulator\n");
     printf("Sys clock: %lu kHz\n", (unsigned long)(clock_get_hz(clk_sys) / 1000));
+#if OMEGA_ENABLE_HDMI
+    printf("PSRAM clock: %lu kHz (QMI divisor %lu)\n",
+           (unsigned long)(clock_get_hz(clk_sys) / 1000 /
+                           ((qmi_hw->m[1].timing & QMI_M1_TIMING_CLKDIV_BITS) >>
+                            QMI_M1_TIMING_CLKDIV_LSB)),
+           (unsigned long)((qmi_hw->m[1].timing & QMI_M1_TIMING_CLKDIV_BITS) >>
+                           QMI_M1_TIMING_CLKDIV_LSB));
+#endif
     printf("Video: %s (%d lines, %.3f Hz)\n",
            OMEGA_VIDEO_NAME, OMEGA_VIDEO_FRAME_LINES,
            (double)OMEGA_VIDEO_RATE_NUMERATOR /

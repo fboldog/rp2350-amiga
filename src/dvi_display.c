@@ -75,8 +75,20 @@ static uint8_t sram_frames[2][DVI_FRAME_BYTES] __attribute__((aligned(4)));
 
 static uint8_t *source_frames[2];
 static bool source_frame_has_emulator[2];
-static volatile int displayed_frame;
-static volatile int pending_frame;
+// Frame handshake between the emulator (core 0) and scanout (core 1), one
+// atomic word: bit 0 is the displayed buffer, bit 1 set means the other
+// buffer holds a finished frame waiting for the next DVI frame boundary.
+// The emulator never waits: it takes back an unshown frame and draws over
+// it, so the display always shows the newest finished frame.
+#define FRAME_PENDING 2u
+static volatile uint32_t frame_state;
+
+// Claims the buffer that is not displayed (taking back an unshown frame).
+static int dvi_claim_back_buffer(void) {
+    const uint32_t old = __atomic_fetch_and(&frame_state, ~FRAME_PENDING,
+                                            __ATOMIC_ACQ_REL);
+    return (int)(old & 1u) ^ 1;
+}
 static uint64_t boot_pattern_until_us;
 // Border colour (COLOR00) of each frame. Like a real Amiga, the areas around
 // the image show the border colour rather than black.
@@ -93,10 +105,7 @@ static bool dvi_begin_submit(int *target_out, uint8_t **dst_out) {
     if (time_us_64() < boot_pattern_until_us)
         return false;
 
-    if (__atomic_load_n(&pending_frame, __ATOMIC_ACQUIRE) >= 0)
-        return false;
-
-    int target = __atomic_load_n(&displayed_frame, __ATOMIC_ACQUIRE) ^ 1;
+    int target = dvi_claim_back_buffer();
     uint8_t *dst = source_frames[target];
     if (!source_frame_has_emulator[target]) {
         memset(dst, 0, DVI_FRAME_BYTES);
@@ -108,10 +117,17 @@ static bool dvi_begin_submit(int *target_out, uint8_t **dst_out) {
 }
 
 static void dvi_publish_frame(int target) {
-    __atomic_store_n(&pending_frame, target, __ATOMIC_RELEASE);
+    // Only the claimed back buffer is ever published; core 1 cannot switch
+    // buffers until the pending bit is set.
+    (void)target;
+    __atomic_fetch_or(&frame_state, FRAME_PENDING, __ATOMIC_RELEASE);
 }
 
 static int direct_target = -1;
+
+uint32_t dvi_display_bit_clock_khz(void) {
+    return MODE_BIT_CLK_KHZ;
+}
 
 int dvi_display_direct_height(void) {
     return AMIGA_SOURCE_HEIGHT;
@@ -120,11 +136,7 @@ int dvi_display_direct_height(void) {
 uint8_t *dvi_display_direct_acquire(void) {
     if (time_us_64() < boot_pattern_until_us)
         return NULL;
-    // Core 1 takes a queued frame at its next frame boundary, so this waits
-    // at most one DVI frame. The other buffer is then free until published.
-    while (__atomic_load_n(&pending_frame, __ATOMIC_ACQUIRE) >= 0)
-        tight_loop_contents();
-    direct_target = __atomic_load_n(&displayed_frame, __ATOMIC_ACQUIRE) ^ 1;
+    direct_target = dvi_claim_back_buffer();
     source_frame_has_emulator[direct_target] = true;
     return source_frames[direct_target];
 }
@@ -301,13 +313,13 @@ static void __not_in_flash_func(hstx_program_next)(uint index) {
     hstx_next_line = line + 1u == MODE_V_TOTAL_LINES ? 0u : line + 1u;
 
     if (line == 0u) {
-        int next = __atomic_load_n(&pending_frame, __ATOMIC_ACQUIRE);
-        if (next >= 0) {
-            hstx_active_frame = next;
-            // Publish the new consumer before freeing the old buffer.
-            __atomic_store_n(&displayed_frame, next, __ATOMIC_RELEASE);
-            __atomic_store_n(&pending_frame, -1, __ATOMIC_RELEASE);
-        }
+        // Switch to the pending frame unless core 0 just took it back.
+        uint32_t state = __atomic_load_n(&frame_state, __ATOMIC_ACQUIRE);
+        if ((state & FRAME_PENDING) &&
+            __atomic_compare_exchange_n(&frame_state, &state,
+                                        (state & 1u) ^ 1u, false,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            hstx_active_frame = (int)((state & 1u) ^ 1u);
         hstx_border_word = frame_border[hstx_active_frame] * 0x01010101u;
         border_line[BORDER_LINE_COLOUR_WORD] = hstx_border_word;
     }
@@ -406,7 +418,7 @@ static void hstx_configure(void) {
 
 static void hstx_start(void) {
     hstx_init_line_buffers();
-    hstx_active_frame = __atomic_load_n(&displayed_frame, __ATOMIC_ACQUIRE);
+    hstx_active_frame = (int)(frame_state & 1u);
     hstx_next_line = 0;
     for (uint index = 0; index < 2u; ++index) {
         dma_channel_config c = dma_channel_get_default_config(hstx_dma[index]);
@@ -441,17 +453,19 @@ void dvi_display_init(void) {
     source_frames[1] = sram_frames[1];
     source_frame_has_emulator[0] = false;
     source_frame_has_emulator[1] = false;
-    displayed_frame = 0;
-    pending_frame = -1;
+    frame_state = 0;
 
-    // Two bits leave per clk_hstx cycle, so clk_hstx = bit rate / 2
-    // (126 MHz NTSC, 135 MHz PAL); the HSTX divider is 1..3.
-    const uint32_t sys_hz = clock_get_hz(clk_sys);
-    const uint32_t hstx_hz = MODE_BIT_CLK_KHZ * 500u;
-    if (sys_hz != hstx_hz * 2u ||
+    // main.c runs PLL_USB at the TMDS bit rate. Two bits leave per clk_hstx
+    // cycle, so clk_hstx = PLL_USB / 2 (126 MHz NTSC, 135 MHz PAL), and
+    // clk_sys stays free for the emulator.
+    const uint32_t bit_hz = MODE_BIT_CLK_KHZ * 1000u;
+    const uint32_t pll_usb_khz =
+        frequency_count_khz(CLOCKS_FC0_SRC_VALUE_PLL_USB_CLKSRC_PRIMARY);
+    if (pll_usb_khz + 1000u < MODE_BIT_CLK_KHZ ||
+        pll_usb_khz > MODE_BIT_CLK_KHZ + 1000u ||
         !clock_configure(clk_hstx, 0,
-                         CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLK_SYS,
-                         sys_hz, hstx_hz))
+                         CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB,
+                         bit_hz, bit_hz / 2u))
         panic("HSTX clock does not match the DVI mode");
     // The SDK's runtime init leaves HSTX in reset; release it once its
     // clock runs, before core 1 configures it.

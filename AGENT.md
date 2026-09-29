@@ -88,8 +88,9 @@ ninja
 The default values of `OMEGA_ENABLE_HDMI`, `OMEGA_ENABLE_SDCARD` and
 `OMEGA_ENABLE_FLASH_FLOPPY` are `OFF`; disabled subsystems are omitted from the
 source and link lists. Pico SDK `hardware_psram` performs QMI setup before
-`main()`. HDMI builds switch to 252 MHz NTSC or 270 MHz PAL and immediately
-retime PSRAM with the public SDK API.
+`main()`. HDMI builds switch `clk_sys` to `OMEGA_SYS_CLK_KHZ` (default
+320 MHz), retune `PLL_USB` to the TMDS bit rate for HSTX, move `clk_peri` to
+`PLL_SYS`, and immediately retime PSRAM with the public SDK API.
 
 If `PICO_SDK_PATH` is unset, configure fetches Pico SDK 2.3.1 into the build
 tree. An explicit SDK checkout can still be selected with

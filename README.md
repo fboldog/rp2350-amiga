@@ -2,8 +2,8 @@
 
 Port of [Omega](https://github.com/h5n1xp/Omega) (bare-metal 68K + Amiga chipset emulator)
 to the **RP2350B**, targeting the **WeAct Studio RP2350B Core**. Normal builds
-use the default 150 MHz clock; HDMI builds run at the TMDS bit rate (252 MHz
-NTSC or 270 MHz PAL) and retime PSRAM through the Pico SDK.
+use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
+`OMEGA_SYS_CLK_KHZ` (default 320 MHz) and retime PSRAM through the Pico SDK.
 
 ## Status
 
@@ -115,9 +115,27 @@ one scanline at a time. Core 1 only services one DMA interrupt per line
 (copying the next 640-pixel image row into that channel's line buffer) and
 swaps frames at line 0, so no scanline can be late.
 
-`clk_hstx` is `clk_sys / 2`. HSTX outputs two bits per `clk_hstx` cycle, so
-`clk_sys` equals the TMDS bit rate. Firmware panics at startup if the clocks
-don't match the mode.
+HSTX has its own clock: `PLL_USB` is retuned to the TMDS bit rate (252 MHz
+NTSC, 270 MHz PAL) and `clk_hstx` is `PLL_USB / 2`, since HSTX outputs two
+bits per cycle. `clk_sys` is therefore independent of the video mode and set
+at build time with `-DOMEGA_SYS_CLK_KHZ=<kHz>` (default 320000; PSRAM runs at
+`clk_sys / ceil(clk_sys / 133 MHz)`, 107 MHz at 320 MHz). `clk_peri` (UART,
+SPI) moves to `PLL_SYS` divided to ≤150 MHz, and the USB/ADC clocks are
+stopped: USB will need an external 48 MHz clock on GPIN0 (GPIO20) or a
+`clk_sys` that is a multiple of 48 MHz. Firmware panics at startup if
+`PLL_USB` does not match the mode.
+
+PAL boot benchmark (first AmigaDOS/Workbench frame, Kickstart 1.3 +
+Workbench 1.3): 240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s, 320 MHz
+66.7 s (64.7 s with the frame pacing below); the old 270 MHz with 90 MHz
+PSRAM took 82.1 s. The CPU clock matters more than the PSRAM clock.
+
+The emulator never waits for the display: the frame handshake is one atomic
+word (displayed buffer + pending flag). If the previous frame has not been
+shown yet, the emulator takes it back and draws over it, and core 1 switches
+to the pending frame at line 0. Waiting instead locked the emulator to whole
+fractions of the display rate (idle Workbench capped at 50/3 = 16.7 frames/s;
+17.9 without the wait).
 
 The DVI mode is standard: 640×480p60 (VGA, 25.2 MHz pixels, 252 MHz) for
 NTSC or CEA 720×576p50 (270 MHz) for PAL. Each stored image row is sent

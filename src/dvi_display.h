@@ -2,6 +2,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// TMDS bit rate of the selected video mode (252 MHz NTSC, 270 MHz PAL).
+// main.c runs PLL_USB at this rate; HSTX takes clk_hstx = PLL_USB / 2.
+uint32_t dvi_display_bit_clock_khz(void);
+
 // Start HSTX standard-definition DVI output on the board's HDMI pins.
 void dvi_display_init(void);
 void dvi_display_start(void);

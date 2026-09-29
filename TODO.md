@@ -64,8 +64,8 @@ alternative future backends.
 ### Option C: DVI/HDMI via HSTX
 - [x] First bring-up with PicoDVI (PIO + core-1 software TMDS), replaced by
       HSTX on 2026-09-29 and removed with the Waveshare board
-- [x] Standard 640×480p60 at 252 MHz for NTSC and 720×576p50 at 270 MHz for
-      PAL; `clk_hstx` = `clk_sys / 2`
+- [x] Standard 640×480p60 (252 Mbit/s) for NTSC and 720×576p50 (270 Mbit/s)
+      for PAL; `clk_hstx` = `PLL_USB / 2`, `clk_sys` chosen separately
 - [x] 640×240 (NTSC) / 640×256 (PAL) RGB332 frames in SRAM, COLOR00 borders
       via HSTX `TMDS_REPEAT` commands
 - [x] Hardware TMDS encoding; ping-pong DMA with one core-1 interrupt per
@@ -250,14 +250,18 @@ appears only ~2 min 12 s later.
       SRAM is available; one compare per access saves a QSPI round trip.
 
 ### P3 – Clocks and memory
-- [ ] **PAL PSRAM clock.** PAL's 270 MHz forces PSRAM to div 3 (90 MHz) vs
-      126 MHz on NTSC. Decouple clk_sys from the DVI bit clock (next item) or
-      try div 2 (135 MHz, 1.5 % over APS6404 spec) with a soak test.
-- [~] **HSTX DVI.** Done (2026-09-29): hardware TMDS encoding frees core 1
-      (it only services a per-line DMA interrupt) and removed PicoDVI's TMDS
-      line buffers (~44 KB free heap on NTSC, ~23 KB on PAL). Still to do:
-      feed `clk_hstx` from its own PLL/divider so `clk_sys` and the PSRAM
-      divider can be chosen for the emulator.
+- [x] **HSTX DVI.** Hardware TMDS encoding frees core 1 (it only services a
+      per-line DMA interrupt) and removed PicoDVI's TMDS line buffers (~44 KB
+      free heap on NTSC, ~23 KB on PAL).
+- [x] **Decoupled clk_sys.** HSTX runs from `PLL_USB`; `clk_sys` is the
+      `OMEGA_SYS_CLK_KHZ` build option, default 320 MHz (PSRAM 107 MHz). PAL
+      boot (first AmigaDOS/WB frame): 270/90 MHz 82.1 s → 320 MHz 66.7 s;
+      240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s. Long-term stability at
+      320 MHz / 1.20 V not yet soak-tested. USB needs an external 48 MHz
+      clock (GPIN0/GPIO20) or a multiple-of-48 `clk_sys`.
+- [x] **Frame pacing.** The emulator no longer waits for core 1 to take a
+      frame: one atomic state word lets it take back an unshown frame. Idle
+      Workbench 16.7 (capped at 50/3) → 17.9 vblanks/s; boot 66.7 → 64.7 s.
 - [ ] **Kickstart in PSRAM vs flash.** ROM fetches come from flash XIP;
       measure whether a PSRAM copy (126 MHz) is faster.
 
