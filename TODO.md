@@ -10,8 +10,9 @@
 ## Phase 1 – Compile target (COMPLETE — emulator and HDMI verified on hardware)
 
 Toolchain: ARM GNU Toolchain 14.2.rel1 (aarch64-arm-none-eabi) + Pico SDK 2.3.1.
-Output `omega-amiga.uf2` builds for both Waveshare and WeAct RP2350B boards.
-On WeAct, PSRAM, flash Kickstart loading, emulation, UART, and full-width HDMI
+Output `omega-amiga.uf2` targets the WeAct Studio RP2350B Core (the Waveshare
+RP2350-PiZero was dropped on 2026-09-29: its HDMI is on GPIO32..39, out of
+HSTX's reach). PSRAM, flash Kickstart loading, emulation, UART, and full-width HDMI
 on GPIO12..19 are verified through the Kickstart 1.3 boot screens and
 Workbench 1.3.
 
@@ -21,7 +22,7 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 (The `rp2350-emu` crate can't run the firmware — no QMI/PSRAM emulation.)
 
 - [x] Project structure: `omega/` (upstream), `src/` (RP2350 platform)
-- [x] CMakeLists.txt for Pico SDK 2.x, Waveshare and WeAct RP2350B boards
+- [x] CMakeLists.txt for Pico SDK 2.x and the WeAct RP2350B board
 - [x] `src/psram.c` – simple SDK-backed availability/size/pattern validation,
       based on the known-good `rp2350b-psram` project
 - [x] `src/Memory.c` – PSRAM-backed chipRead*/chipWrite* hardware-validated
@@ -31,9 +32,9 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 - [x] `omega/CPU.c` – `#ifdef PICO_BUILD` guard around `low16Meg` clear in `cpu_pulse_reset`
 - [x] `omega/Chipset.c` – `chipramW` set via `CHIPRAM_BASE_PTR` macro
 - [x] `omega/DMA.c` – disk DMA writes use `CHIPRAM_BASE_PTR`; SDL_Atomic calls commented
-- [x] `omega/Floppy.h` – `mfmData` is `uint8_t*` (pointer) on PICO_BUILD
+- [x] `omega/Floppy.h` – `mfmData` is a pointer; only DF0 has a buffer
 - [x] `omega/Floppy.c` – `ADF2MFM_from_mem()` added (no malloc/lseek/read)
-- [x] `tools/combine_uf2.py` – merges firmware.uf2 + ROM + optional ADFs
+- [x] `tools/combine_uf2.py` – merges firmware.uf2 + ROM + optional DF0 ADF
 - [x] Build fixes (never compiled before 2026-09-01):
       `src/psram.c` XIP flush → `xip_cache_invalidate_all()` (RP2350 has no
       `xip_ctrl_hw->flush`); `src/main.c` +`hardware/clocks.h`; `omega/DMA.c`
@@ -43,9 +44,8 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 
 ## Phase 2 – Display output (DVI COMPLETE ON WEACT)
 
-PicoDVI is implemented for Waveshare's on-board connector and the WeAct board
-on GPIO12..19. The WeAct path is verified
-with stable, correctly positioned Kickstart 1.3 video. VGA and SPI TFT remain
+HDMI runs on the RP2350 HSTX peripheral (GPIO12..19), verified with Kickstart
+1.3/2.04, Workbench 1.3 and xsysinfo in NTSC and PAL. VGA and SPI TFT remain
 alternative future backends.
 
 ### Option A: SPI TFT (easiest hardware, lowest bandwidth)
@@ -61,26 +61,26 @@ alternative future backends.
 - [ ] In DMA `evenCycle` VBL handler, push each scanline to the VGA scanvideo buffer
 - [ ] Add `pico_scanvideo_dpi` to target_link_libraries
 
-### Option C: DVI/HDMI via PicoDVI
-- [x] Fetch and patch PicoDVI `libdvi` through CMake
-- [x] Configure board-specific serialiser pins and PIO GPIO bases
-- [x] Use standard 640×480p60 at 252 MHz for NTSC and 720×576p50 at 270 MHz
-      for PAL
-- [x] WeAct: full-width 640×200 (NTSC) / 640×256 (PAL) RGB332 frames in SRAM,
-      COLOR00 borders; Waveshare: pixel-doubled RGB332 frames in PSRAM
-- [x] Run TMDS encoding and scanout on core 1, with startup acknowledgement
-- [ ] Repeat the hardware test on Waveshare with a compatible PSRAM fitted
+### Option C: DVI/HDMI via HSTX
+- [x] First bring-up with PicoDVI (PIO + core-1 software TMDS), replaced by
+      HSTX on 2026-09-29 and removed with the Waveshare board
+- [x] Standard 640×480p60 at 252 MHz for NTSC and 720×576p50 at 270 MHz for
+      PAL; `clk_hstx` = `clk_sys / 2`
+- [x] 640×240 (NTSC) / 640×256 (PAL) RGB332 frames in SRAM, COLOR00 borders
+      via HSTX `TMDS_REPEAT` commands
+- [x] Hardware TMDS encoding; ping-pong DMA with one core-1 interrupt per
+      line, startup acknowledgement to core 0
 
 ---
 
-## Phase 2b – microSD (optional, RP2350-PiZero has a slot)
+## Phase 2b – microSD (optional, external SPI module)
 
-- [x] Add a read-only FatFs + SD-SPI driver; pins in
-      `board_config.h`: SPI1 SCK30/MOSI31/MISO40/CS43)
+- [x] Add a read-only FatFs + SD-SPI driver; default pins in
+      `board_config.h` (SPI1 SCK30/MOSI31/MISO40/CS43), overridable with
+      `-DBOARD_SD_*`
 - [~] Load Kickstart ROM from `/rom/kick13.rom`, with flash fallback. The code
-      is complete but SD reading is temporarily build-disabled by default and
-      still needs validation on Waveshare. ADFs remain flash-backed and are
-      expanded to MFM in PSRAM when enabled.
+      compiles with `-DOMEGA_ENABLE_SDCARD=ON` but needs an SD module wired to
+      the WeAct board for validation. The DF0 ADF remains flash-backed.
 - [ ] Stream ADF tracks from SD instead of storing a complete MFM image in
       PSRAM; this is needed for practical disk swapping
 - [ ] Optional: a tiny on-screen disk chooser
@@ -251,11 +251,13 @@ appears only ~2 min 12 s later.
 
 ### P3 – Clocks and memory
 - [ ] **PAL PSRAM clock.** PAL's 270 MHz forces PSRAM to div 3 (90 MHz) vs
-      126 MHz on NTSC. Try div 2 (135 MHz, 1.5 % over APS6404 spec) with a
-      soak test, or decouple clk_sys from the DVI bit clock (next item).
-- [ ] **HSTX DVI.** GPIO12..19 are HSTX pins. HSTX's hardware TMDS encoder
-      and separate `clk_hstx` would free core 1 entirely and let clk_sys and
-      the PSRAM divider be chosen for the emulator.
+      126 MHz on NTSC. Decouple clk_sys from the DVI bit clock (next item) or
+      try div 2 (135 MHz, 1.5 % over APS6404 spec) with a soak test.
+- [~] **HSTX DVI.** Done (2026-09-29): hardware TMDS encoding frees core 1
+      (it only services a per-line DMA interrupt) and removed PicoDVI's TMDS
+      line buffers (~44 KB free heap on NTSC, ~23 KB on PAL). Still to do:
+      feed `clk_hstx` from its own PLL/divider so `clk_sys` and the PSRAM
+      divider can be chosen for the emulator.
 - [ ] **Kickstart in PSRAM vs flash.** ROM fetches come from flash XIP;
       measure whether a PSRAM copy (126 MHz) is faster.
 
@@ -288,9 +290,6 @@ forward steps when measuring.
 
 ## Known issues / investigation needed
 
-- [ ] **Waveshare PSRAM hardware validation**: WeAct passes the 1024-byte test,
-      full memory clear, emulator loop, and HDMI output. Repeat on a Waveshare
-      board with a compatible PSRAM part fitted to U1.
 - [x] **`chipset.vposr` PAL/NTSC flag**: `dma_execute()` uses
       `OMEGA_VIDEO_VPOSR_ID` from `omega/VideoStandard.h` (`0x0000` PAL,
       `0x1000` NTSC Fat Agnus), selected by `OMEGA_VIDEO_MODE`. xsysinfo

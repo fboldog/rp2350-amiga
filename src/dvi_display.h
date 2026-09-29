@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Start PIO-driven standard-definition DVI using the board-specific pin map.
+// Start HSTX standard-definition DVI output on the board's HDMI pins.
 void dvi_display_init(void);
 void dvi_display_start(void);
 
@@ -22,13 +22,10 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
                                int y_offset,
                                int row_rotation);
 
-// Direct RGB332 rendering (WeAct full-width scanout only). The emulator
-// writes converted pixels straight into the free SRAM scanout frame instead of
-// the ARGB raster in PSRAM.
+// Direct RGB332 rendering. The emulator writes converted pixels straight
+// into the free SRAM scanout frame instead of the ARGB raster in PSRAM.
 #define DVI_DIRECT_IMAGE_WIDTH 640
-// Returns true when direct rendering is available on this build.
-bool dvi_display_direct_supported(void);
-// Image rows of the direct frame (200 NTSC, 256 PAL).
+// Image rows of the direct frame (240 NTSC, 256 PAL).
 int dvi_display_direct_height(void);
 // Waits (at most one DVI frame) for the back buffer and returns its
 // 640-pixel-stride image, or NULL while the boot pattern is still shown.

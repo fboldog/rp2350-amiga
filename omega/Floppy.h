@@ -45,13 +45,13 @@ typedef struct{
     int index;
     int cylinder;
     int side;
-#ifdef PICO_BUILD
-    uint8_t *mfmData;           // PSRAM full image or SRAM active-track cache
-#else
-    uint8_t mfmData[12798*82*2]; // trackSize * tracks * sides
-#endif
+    // DF0 only: the RP2350 PSRAM image or SRAM active-track cache, or the
+    // native full MFM image. NULL for DF1-DF3.
+    uint8_t *mfmData;
 }Fd_t;
 
+// Only DF0 takes disks. DF1-DF3 exist solely so the drive-select and ID
+// sequences see unconnected drives.
 extern Fd_t df[4];
 extern int floppySync;
 extern int driveSelected;

@@ -10,12 +10,11 @@ The ROM is written starting at 0x10200000 (flash offset 0x200000).
 
 This matches BOARD_ROM_FLASH_BASE in src/board_config.h.
 
-ADF floppy images can also be appended at:
-  DF0: 0x10280000  (flash offset 0x280000)
-  DF1: 0x10480000  (flash offset 0x480000)
+A DF0 ADF floppy image can also be appended at 0x10280000 (flash offset
+0x280000); the emulator only uses DF0:
 
     python3 combine_uf2.py firmware.uf2 kickstart.rom combined.uf2 \\
-        --adf0 workbench.adf --adf1 extras.adf
+        --adf0 workbench.adf
 """
 
 import struct
@@ -32,7 +31,6 @@ FLASH_BASE   = 0x10000000
 
 ROM_FLASH_OFFSET  = 0x200000
 ADF0_FLASH_OFFSET = 0x280000
-ADF1_FLASH_OFFSET = 0x480000
 
 
 def read_uf2_blocks(path):
@@ -138,7 +136,6 @@ def main():
     parser.add_argument('rom_bin',      help='Kickstart ROM binary')
     parser.add_argument('output_uf2',   help='Combined output UF2')
     parser.add_argument('--adf0',       help='DF0 ADF image (optional)')
-    parser.add_argument('--adf1',       help='DF1 ADF image (optional)')
     args = parser.parse_args()
 
     try:
@@ -171,14 +168,6 @@ def main():
         adf0_blocks = binary_to_uf2_blocks(adf0, adf0_addr)
         print(f"DF0 ADF:  {len(adf0_blocks)} blocks at 0x{adf0_addr:08x}")
         blocks.extend(adf0_blocks)
-
-    if args.adf1:
-        with open(args.adf1, 'rb') as f:
-            adf1 = f.read()
-        adf1_addr = FLASH_BASE + ADF1_FLASH_OFFSET
-        adf1_blocks = binary_to_uf2_blocks(adf1, adf1_addr)
-        print(f"DF1 ADF:  {len(adf1_blocks)} blocks at 0x{adf1_addr:08x}")
-        blocks.extend(adf1_blocks)
 
     write_uf2(firmware_blocks, blocks, family_id, args.output_uf2)
 

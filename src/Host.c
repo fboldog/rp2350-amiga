@@ -85,8 +85,7 @@ static void hostDirectBegin(void) {
     // reconstruction (pixels moved between lines) keep the ARGB path.
     direct_narrow = !full_width &&
         !omegaDiwCrossesVerticalBank(chipset.diwstrt, chipset.diwstop);
-    direct_frame = dvi_display_direct_supported() &&
-                   (full_width || direct_narrow);
+    direct_frame = full_width || direct_narrow;
     hostDirectActive = direct_frame;
     if (!direct_frame)
         return;

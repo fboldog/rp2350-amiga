@@ -382,6 +382,11 @@ int floppySync = 0;
 int driveSelected=0;
 Fd_t df[4];
 
+#ifndef PICO_BUILD
+// Native builds keep DF0's whole disk as MFM (tracks * sides).
+static uint8_t df0_mfm_image[FLOPPY_MFM_TRACK_SIZE * 82 * 2];
+#endif
+
 #ifdef PICO_BUILD
 // The flash-backed DF0 path uses only the selected side in internal SRAM.
 // This removes the 2 MB MFM image and steady-state floppy traffic from PSRAM.
@@ -461,7 +466,9 @@ uint8_t floppyDataRead(){ //this function should be called by the DMA
         
     }
     
-    uint8_t retVal = df[driveSelected].mfmData[position];
+    // DF1-DF3 are unconnected and have no data.
+    uint8_t retVal = df[driveSelected].mfmData
+                   ? df[driveSelected].mfmData[position] : 0;
     
     /*
     if(retVal==0){
@@ -474,6 +481,9 @@ uint8_t floppyDataRead(){ //this function should be called by the DMA
 
 
 void floppyInsert(int drive){
+    if(drive != 0){
+        return;     // only DF0 takes disks
+    }
 
     if(df[drive].idMode !=0){
         //Only Vaild drives have an ID Mode == 0 
@@ -513,19 +523,16 @@ uint8_t* floppyInit(int drive){
     df[drive].pra  &= 0xEF;   // cylinder 0 (bit4=0)
     df[drive].pra  |= 0x20;   // drive not ready (/DKRDY=1, no disk)
 #ifdef PICO_BUILD
-    // Assign MFM buffer into PSRAM; only drives 0 and 1 are supported
-    static const uint32_t psram_offsets[4] = {
-        PSRAM_DF0_OFFSET,
-        PSRAM_DF1_OFFSET,
-        0, 0   // drives 2/3 unsupported on RP2350 (insufficient PSRAM)
-    };
-    df[drive].mfmData = (drive < 2) ? psram_ptr(psram_offsets[drive]) : NULL;
+    // Only DF0 has an MFM buffer (in PSRAM); DF1-DF3 are unconnected.
+    df[drive].mfmData = drive == 0 ? psram_ptr(PSRAM_DF0_OFFSET) : NULL;
     if (drive == 0) {
         df0_adf = NULL;
         df0_adf_size = 0;
         df0_cached_cylinder = -1;
         df0_cached_side = -1;
     }
+#else
+    df[drive].mfmData = drive == 0 ? df0_mfm_image : NULL;
 #endif
     return df[drive].mfmData;
 }

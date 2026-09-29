@@ -315,3 +315,21 @@ native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
   presentation path at ~2 vblanks/s (animation looked frozen) until narrow
   layouts got the direct path. Its shutter colour $998877 turns olive in
   RGB332 — quantization, not a bug. NTSC now shows 240 rows (xsysinfo).
+
+**HSTX HDMI, WeAct only, DF0 only (2026-09-29).**
+- HDMI now uses the RP2350 HSTX peripheral: hardware TMDS encoding of RGB332,
+  command lists for sync/porches and `TMDS_REPEAT` borders, two ping-pong DMA
+  channels, one core-1 DMA_IRQ_1 interrupt per line (copies the next 640-byte
+  row, swaps frames at line 0). `clk_hstx` = `clk_sys / 2` (HSTX shifts two
+  bits per cycle). Verified NTSC (KS 2.04 insert screen) and PAL (xsysinfo).
+- Gotchas: the SDK runtime leaves HSTX in reset — call
+  `reset_unreset_block_num_wait_blocking(RESET_HSTX)` after configuring
+  `clk_hstx`, or all register writes are ignored (CSR reads 0x10050600).
+  HSTX starts a few seconds after reset (PSRAM check, boot pattern first), so
+  SWD reads right after a flash show it idle.
+- The Waveshare RP2350-PiZero was dropped with PicoDVI: its mini-HDMI is on
+  GPIO32..39 and HSTX is hard-wired to GPIO12..19. The SD-card code stays
+  (external SPI module planned); pins are overridable `BOARD_SD_*` defaults.
+- Only DF0 is supported. DF1-DF3 remain in `df[4]` purely as unconnected
+  drives for Kickstart's drive-ID probe (their `pra`/`idMode` from
+  floppyInit); `mfmData` is NULL for them and floppyDataRead returns 0.

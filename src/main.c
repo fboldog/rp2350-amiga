@@ -16,8 +16,8 @@
 //   placed at flash offset 0x200000 (absolute 0x10200000).  See README.md.
 //
 // Floppy placement:
-//   Raw ADF images live in flash. DF0 encodes only its active track into an
-//   SRAM cache; place images at ADF0_FLASH_BASE / ADF1_FLASH_BASE.
+//   Only DF0 is used. Its raw ADF image lives in flash at ADF0_FLASH_BASE,
+//   and only the active track is encoded into an SRAM cache.
 
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
@@ -60,11 +60,10 @@
 _Static_assert(DMA_CPU_BATCH % OMEGA_CPU_SLICE_SLOTS == 0,
                "the DMA batch must hold whole CPU slices");
 
-// ── Flash locations for ADF images (optional) ─────────────────────────────
-// Place standard raw ADF images in flash at these absolute addresses.
-// Leave them 0 / unprogrammed to boot without a floppy.
+// ── Flash location of the DF0 ADF image (optional) ────────────────────────
+// Place a standard raw ADF image in flash at this absolute address. Leave it
+// unprogrammed to boot without a floppy.
 #define ADF0_FLASH_BASE  0x10280000u   // flash offset 0x280000
-#define ADF1_FLASH_BASE  0x10480000u   // flash offset 0x480000
 
 void __attribute__((noreturn, used)) hardfault_report(uint32_t *frame) {
     printf("HARDFAULT: pc=%08lx lr=%08lx cfsr=%08lx hfsr=%08lx "
@@ -84,36 +83,21 @@ void __attribute__((naked)) isr_hardfault(void) {
         "b hardfault_report\n");
 }
 
-// ── Load floppy images from flash into PSRAM ──────────────────────────────
-// The ADF2MFM_from_flash variant reads from XIP flash instead of a file.
-static bool load_floppy_from_flash(int drive, uint32_t flash_abs_addr) {
-    const uint8_t *adf_data = (const uint8_t *)flash_abs_addr;
+// ── Mount the DF0 ADF image from flash ───────────────────────────────────
+static bool load_df0_from_flash(void) {
+    const uint8_t *adf_data = (const uint8_t *)ADF0_FLASH_BASE;
 
-    // Verify the first sector starts with a valid AmigaDOS block.
-    // First two bytes of an OFS ADF should be 0x00 0x00 (T_HEADER).
-    // If the flash is blank (0xFF) there is no disk.
+    // Blank flash (0xFF) means no disk image has been programmed.
     if (adf_data[0] == 0xFF && adf_data[1] == 0xFF) return false;
 
-    if (drive == 0) {
-        if (!floppyMountADF(0, adf_data, FLOPPY_ADF_SIZE))
-            return false;
-        printf("DF0: flash ADF mounted with %u-byte SRAM track cache\n",
-               FLOPPY_MFM_TRACK_SIZE);
-        return true;
-    }
-
-    // Non-streaming fallback for DF1 in non-HDMI builds.
-    uint8_t *mfm_buf = floppyInit(drive);
-    if (!mfm_buf) return false;
-    ADF2MFM_from_mem(adf_data, FLOPPY_ADF_SIZE, mfm_buf);
-    df[drive].hasDisk = 1;
-    df[drive].pra &= 0xFB;
-    printf("DF%d: loaded from flash 0x%08lx\n", drive,
-           (unsigned long)flash_abs_addr);
+    if (!floppyMountADF(0, adf_data, FLOPPY_ADF_SIZE))
+        return false;
+    printf("DF0: flash ADF mounted with %u-byte SRAM track cache\n",
+           FLOPPY_MFM_TRACK_SIZE);
     return true;
 }
 
-#if OMEGA_ENABLE_FLASH_FLOPPY && BOARD_HAS_USER_BUTTON
+#if OMEGA_ENABLE_FLASH_FLOPPY
 static bool df0_image_ready;
 static bool disk_button_raw;
 static bool disk_button_stable;
@@ -233,35 +217,30 @@ static void prepare_hdmi_clock(void) {
     const uint32_t dvi_clock_khz = 252000u;
 #endif
 
-    // PicoDVI serialises one TMDS bit per system-clock cycle. Raise the core
-    // voltage before overclocking, then recalculate and apply the SDK PSRAM
-    // timing for the faster QMI clock before touching external memory.
+    // HSTX runs from clk_sys / 2 at half the TMDS bit rate (two bits per
+    // clk_hstx cycle), so clk_sys is the bit rate. Raise the core voltage
+    // before overclocking, then recalculate and apply the SDK PSRAM timing
+    // for the faster QMI clock before touching external memory.
     vreg_set_voltage(VREG_VOLTAGE_1_20);
     sleep_ms(10);
     if (!set_sys_clock_khz(dvi_clock_khz, true))
-        panic("Unable to select the PicoDVI system clock");
+        panic("Unable to select the HDMI system clock");
     if (psram_configure_params(PICO_DEFAULT_PSRAM_MAX_FREQ,
                                PICO_DEFAULT_PSRAM_MAX_SELECT,
                                PICO_DEFAULT_PSRAM_MIN_DESELECT) != PICO_OK ||
         psram_reinitialize() != PICO_OK)
-        panic("Unable to retime PSRAM for PicoDVI");
+        panic("Unable to retime PSRAM for HDMI");
 }
 #endif
 
 int main(void) {
     // 1. Clock and stdio. Normal builds retain the SDK's 150 MHz startup
-    // clock; PicoDVI builds select their video bit clock and retime PSRAM.
+    // clock; HDMI builds select their video bit clock and retime PSRAM.
 #if OMEGA_ENABLE_HDMI
     prepare_hdmi_clock();
 #endif
-#if OMEGA_STDIO_USB
-    stdio_init_all();
-    // Let the host enumerate USB CDC before printing the bring-up log.
-    sleep_ms(1500);
-#else
     stdio_uart_init_full(BOARD_UART_ID, BOARD_UART_BAUD,
                          BOARD_UART_TX_PIN, BOARD_UART_RX_PIN);
-#endif
     printf("\n\nOmega/RP2350 – Amiga emulator\n");
     printf("Sys clock: %lu kHz\n", (unsigned long)(clock_get_hz(clk_sys) / 1000));
     printf("Video: %s (%d lines, %.3f Hz)\n",
@@ -284,7 +263,7 @@ int main(void) {
 
     // 3. Memory (chip RAM, slow RAM, flash ROM fallback, optional SD override)
     memory_init();
-    bool sd_rom_active = load_kickstart_from_sd();
+    load_kickstart_from_sd();
 
     // 4. Host (framebuffer, display hardware)
     hostInit();
@@ -296,13 +275,12 @@ int main(void) {
     cpu_init();
     ChipsetInit();
 
-    // 6. Floppy images (optional). Keep this disabled while isolating HDMI;
-    // Kickstart boots without a disk and no MFM conversion runs at startup.
+    // 6. Floppy. Only DF0 takes disks; DF1-DF3 are initialised as
+    // unconnected drives so Kickstart's drive-ID probe skips them.
     for (int drive = 0; drive < 4; ++drive)
         floppyInit(drive);
 #if OMEGA_ENABLE_FLASH_FLOPPY
-    bool df0_loaded = load_floppy_from_flash(0, ADF0_FLASH_BASE);
-#if BOARD_HAS_USER_BUTTON
+    bool df0_loaded = load_df0_from_flash();
     df0_image_ready = df0_loaded;
     disk_button_init();
 #if OMEGA_DF0_INSERT_AT_BOOT
@@ -316,22 +294,8 @@ int main(void) {
         printf("DF0: no disk inserted; press KEY after Kickstart starts\n");
 #endif
 #else
-    if (df0_loaded) {
-        df[0].hasDisk = 1;
-        df[0].pra &= 0xFB;
-    }
-#endif
-#if OMEGA_ENABLE_HDMI
-    (void)sd_rom_active;
-    printf("DF1: disabled (its PSRAM region holds HDMI scanout buffers)\n");
-#else
-    if (!sd_rom_active) load_floppy_from_flash(1, ADF1_FLASH_BASE);
-    else printf("DF1: disabled (its PSRAM region holds the SD ROM cache)\n");
-#endif
-#else
-    (void)sd_rom_active;
     prepare_empty_df0();
-    printf("DF0/DF1: flash ADF loading disabled\n");
+    printf("DF0: flash ADF loading disabled\n");
 #endif
 
     printf("Entering emulation loop\n");
@@ -347,7 +311,7 @@ int main(void) {
                 dma_execute();
             m68k_execute(16 * OMEGA_CPU_SLICE_SLOTS);
         }
-#if OMEGA_ENABLE_FLASH_FLOPPY && BOARD_HAS_USER_BUTTON
+#if OMEGA_ENABLE_FLASH_FLOPPY
         disk_button_poll();
 #endif
         // hostDisplay is called exactly once per VBL by the DMA engine.  It
