@@ -217,9 +217,13 @@ How to measure (no halt, firmware keeps running):
       vblanks/s (~17.5 frames/s shown: when a frame is still waiting for the
       display and the ring fills first, core 1 skips drawing one). All of
       core 1's thread code must stay in RAM (see README).
-- [ ] **Show more of the emulated frames.** A larger ring (NTSC has ~32 KB
-      heap spare, PAL ~12 KB) or converting lines ahead would let core 1 wait
-      for the swap without skipping.
+- [x] **Larger ring.** 32 KB on NTSC, 16 KB on PAL (all other SRAM is free:
+      nothing uses malloc since PicoDVI left). Idle Workbench shown/emulated
+      frames: NTSC 22.1/32.0 → 27.1/31.9, PAL 17.5/26.8 → 18.6/26.9; boot
+      unchanged (~47 s). SRAM left: ~8.1 KB NTSC, ~3.9 KB PAL.
+- [ ] **Show the rest of PAL's frames.** Its 16 KB ring is too small for the
+      up-to-20 ms wait; converting ahead into a line buffer or freeing SRAM
+      elsewhere would let core 1 wait without skipping.
 
 ### P2 – Emulation core
 Profile on the Kickstart 1.3 hand screen (NTSC, after the RGB332 render; the

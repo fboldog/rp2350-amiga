@@ -134,7 +134,7 @@ The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
 each fetched bitplane block, palette changes and frame begin/end into an 8 KB
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`), so Copper palette changes still reach the right pixels. HAM
+`src/Host.c`; the ring is 32 KB on NTSC and 16 KB on PAL), so Copper palette changes still reach the right pixels. HAM
 blocks are converted on core 0 and sent as ready pixels. Everything core 1
 executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
 traffic once delayed the line interrupt past its deadline and stopped the

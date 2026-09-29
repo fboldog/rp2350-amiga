@@ -364,3 +364,6 @@ native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
   recovered with `-f target/rp2350-rescue.cfg`.
 - Floppy on core 1 was evaluated and rejected: during the disk-heavy boot all
   floppy code is ~2 % of core 0 and must answer within the DMA slot.
+- Core-1 ring sized per mode (32 KB NTSC, 16 KB PAL): nothing calls malloc
+  any more, so all SRAM past `end` is free. Shown fps at idle Workbench: NTSC
+  22 → 27 of 32, PAL 17.5 → 18.6 of 27.

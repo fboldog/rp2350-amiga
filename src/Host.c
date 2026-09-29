@@ -82,7 +82,15 @@ enum {
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
      (uint32_t)(extra) << 23)
 
-#define RING_WORDS 2048u // power of two
+// Power of two. Core 1 waits up to one display frame for a pending frame to
+// be shown while core 0 keeps queueing; a bigger ring skips fewer frames
+// (idle Workbench shown/emulated: NTSC 22/32 fps with 8 KB, 27/32 with
+// 32 KB). NTSC has ~32 KB of SRAM spare, PAL (larger frames) ~12 KB.
+#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
+#define RING_WORDS 4096u  // 16 KB
+#else
+#define RING_WORDS 8192u  // 32 KB
+#endif
 static uint32_t ring[RING_WORDS];
 static volatile uint32_t ring_head; // words produced (core 0)
 static volatile uint32_t ring_tail; // words consumed (core 1)
