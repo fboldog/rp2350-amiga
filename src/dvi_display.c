@@ -423,23 +423,28 @@ static void SCAN_FUNC(scan_indexed)(uint32_t *out, const uint8_t *row,
 }
 
 // HAM is LORES only, so every code covers an aligned pair of columns;
-// decode each pair once. Odd bounds fall back to single pixels.
+// decode each pair once. Odd bounds fall back to single pixels. A sprite
+// pixel (0x40 | register) shows that colour register and leaves the held
+// colour alone, as on real hardware.
+static inline uint32_t scan_ham_pixel(uint32_t code, uint32_t *hold) {
+    if (code & 0x40u)
+        return scan_palette[code & 0x1fu];
+    code &= 63u;
+    *hold = (*hold & scan_ham_keep[code >> 4]) | scan_ham_set[code];
+    return *hold;
+}
+
 static uint32_t SCAN_FUNC(scan_ham)(uint32_t *out, const uint8_t *row,
                                     uint32_t x0, uint32_t x1, uint32_t hold) {
-    const uint32_t *keep = scan_ham_keep, *set = scan_ham_set;
     if ((x0 | x1) & 1u) {
-        for (uint32_t x = x0; x < x1; ++x) {
-            const uint32_t code = row[x] & 63u;
-            hold = (hold & keep[code >> 4]) | set[code];
-            out[x] = hold;
-        }
+        for (uint32_t x = x0; x < x1; ++x)
+            out[x] = scan_ham_pixel(row[x], &hold);
         return hold;
     }
     for (uint32_t x = x0; x < x1; x += 2u) {
-        const uint32_t code = row[x] & 63u;
-        hold = (hold & keep[code >> 4]) | set[code];
-        out[x] = hold;
-        out[x + 1u] = hold;
+        const uint32_t pixel = scan_ham_pixel(row[x], &hold);
+        out[x] = pixel;
+        out[x + 1u] = pixel;
     }
     return hold;
 }

@@ -378,8 +378,9 @@ separate `native_frame_counter` state.
 
 The rendering/DMA cleanup checklist is complete. Remaining compatibility
 behavior is documented where it is implemented: content-aware wrapped-prefix
-reconstruction and no-fetch bitplane modulo advancement. Sprite DMA and sprite
-rendering remain unimplemented.
+reconstruction and no-fetch bitplane modulo advancement. Sprite DMA and
+rendering are implemented in `omega/DMA.c` (see the top-level README);
+sprite collisions (CLXDAT) are not.
 
 - Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
   The native host records the full PAL/NTSC beam field and tracks whether the

@@ -281,6 +281,27 @@ were silently never written and the previous disk stayed in flash.
 Hold BOOTSEL and connect USB, then copy the generated combined UF2 to the
 `RPI-RP2` drive.
 
+## Sprites
+
+`omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per
+line (0x15 + 4n, 0x17 + 4n): it fetches SPRxPOS/SPRxCTL on the first line
+after vertical blanking, SPRxDATA/SPRxDATB on every line from VSTART, and
+the next POS/CTL pair at VSTOP, so a sprite can be reused further down the
+screen. Words go through the register handlers, so DATA arms and CTL disarms
+a sprite exactly as CPU writes do (manual sprites work too), and the Copper
+can reposition sprites mid-frame (RemGame moves six sprites every 16 lines).
+Unused slots stay free for the blitter.
+
+At the end of each line's fetch window the armed sprites are drawn over the
+line: lower sprites in front, clipped to the display window, attached pairs
+as 15-colour sprites (each half at its own position, combined where they
+coincide), and BPLCON2 decides which pairs sit behind playfield colours
+other than 0 (single playfield only). On the board core 1 overlays them on
+the indexed frame as colour registers tagged with 0x40, so a sprite on a HAM
+row neither takes nor changes the held HAM colour; the native build draws
+them on the ARGB raster. Sprite collisions (CLXDAT) and dual playfield are
+not emulated.
+
 ## Display pipeline
 
 The raw DMA raster is at `PSRAM_BASE + PSRAM_VIDEO_RASTER_OFFSET`. HDMI

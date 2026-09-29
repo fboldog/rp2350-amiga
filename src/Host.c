@@ -78,7 +78,9 @@ enum {
     MSG_LORES,       // + 3 words: planes 1..6; extra = 1 for HAM
     MSG_PALETTE,     // + 16 words: 32 colours, 0x0RGB, two per word
     MSG_END,         // + 1 word: border colour (0x0RGB)
+    MSG_SPRITE,      // + 1-2 words: sprite planes; extra = base | att | behind
 };
+#define SPRITE_X_BIAS 64   // raster x + bias fits the 10-bit field
 #define MSG_HEADER(type, row, x, extra) \
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
      (uint32_t)(extra) << 23)
@@ -231,6 +233,23 @@ void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
     ringPush(msg, count_of(msg));
 }
 
+void hostDirectSprite(int row, int x, int colour_base, int attached,
+                      int behind, uint16_t a, uint16_t b, uint16_t c,
+                      uint16_t d) {
+    const int field = x + SPRITE_X_BIAS;
+    if (field < 0 || field > 0x3ff || row < 0 || row > 0x1ff)
+        return;
+    hostDirectSyncPalette();
+    const uint32_t msg[3] = {
+        MSG_HEADER(MSG_SPRITE, row, field,
+                   (uint32_t)colour_base | (uint32_t)(attached != 0) << 5 |
+                   (uint32_t)(behind != 0) << 6),
+        a | (uint32_t)b << 16,
+        c | (uint32_t)d << 16,
+    };
+    ringPush(msg, attached ? 3u : 2u);
+}
+
 static void hostDirectFinish(void) {
     hostDirectSyncPalette();
     const uint32_t msg[2] = {
@@ -260,6 +279,7 @@ static int c1_height;              // image rows
     __attribute__((optimize("no-tree-loop-distribute-patterns"))) \
     __not_in_flash_func(name)
 static uint16_t c1_palette[32];   // current colours, 0x0RGB
+volatile uint32_t hostCaptureHold; // debug: non-zero stops drawing new frames
 
 
 
@@ -283,6 +303,82 @@ static void hostInitPlanarTables(void) {
 }
 
 #define C2P(p, shift, half) c2p_spread[((p) >> (shift)) & 0xffu][half]
+
+static void C1_FUNC(c1Record)(int y, int x0, int x1);
+
+// Overlays a sprite on image row y (core 0 has clipped it to the display
+// window). Columns the bitplanes did not draw on this row get colour 0
+// first and are recorded as drawn. Sprite pixels carry 0x40: scanout shows
+// them as colour registers even on HAM rows, where they must not change the
+// held colour.
+static void C1_FUNC(c1Sprite)(int row, int x, uint32_t extra, uint32_t ab,
+                              uint32_t cd) {
+    if (!c1_image || row % c1_step)
+        return;
+    const int y = c1_first_row + row / c1_step;
+    if (y < 0 || y >= c1_height || y != c1_open_row)
+        return;
+    const dvi_indexed_frame_t *rec = c1_record;
+    const uint32_t first = rec->row_segment[y];
+    const uint32_t used = rec->segments_used;
+    int min = DVI_DIRECT_IMAGE_WIDTH, max = 0;
+    for (uint32_t i = first; i < used; ++i) {
+        const int x0 = (int)DVI_SEGMENT_X0(rec->segment[i]);
+        const int x1 = (int)DVI_SEGMENT_X1(rec->segment[i]);
+        if (x0 < min) min = x0;
+        if (x1 > max) max = x1;
+    }
+    uint8_t *line = c1_image + y * DVI_DIRECT_IMAGE_WIDTH;
+    if (min > max)
+        min = max = 0;  // nothing drawn on this row yet
+    const uint32_t base = extra & 0x1fu;
+    const bool attached = (extra >> 5) & 1u;
+    const bool behind = (extra >> 6) & 1u;
+    for (int i = 0; i < 16; ++i) {
+        const int bit = 15 - i;
+        uint32_t v = ((ab >> bit) & 1u) | ((ab >> (15 + bit)) & 2u);
+        if (attached)
+            v |= ((cd >> bit) & 1u) << 2 | ((cd >> (16 + bit)) & 1u) << 3;
+        if (!v)
+            continue;
+        const uint8_t colour = (uint8_t)(0x40u | (base + v));
+        for (int j = 0; j < 2; ++j) {
+            int ix = x + 2 * i + j;
+            if (c1_narrow) {
+                ix -= HOST_FETCH_LEAD;
+            } else {
+                if (ix < 0 || ix >= HOST_RASTER_W)
+                    continue;
+                ix -= c1_rotation;
+                if (ix < 0)
+                    ix += HOST_RASTER_W;
+            }
+            if (ix < 0 || ix >= DVI_DIRECT_IMAGE_WIDTH)
+                continue;
+            if (ix < min || ix >= max) {
+                // Outside the drawn columns: extend the row's drawn range
+                // with colour 0 up to this pixel, keeping it contiguous.
+                int x0, x1;
+                if (min == max) { x0 = ix; x1 = ix + 1; }
+                else if (ix < min) { x0 = ix; x1 = min; }
+                else { x0 = max; x1 = ix + 1; }
+                for (int k = x0; k < x1; ++k)
+                    line[k] = 0;
+                const bool ham = c1_ham;
+                c1_ham = false;
+                c1Record(y, x0, x1);
+                c1_ham = ham;
+                if (min == max) { min = x0; max = x1; }
+                else if (x0 < min) min = x0;
+                else max = x1;
+            }
+            // Behind the playfield: only over colour 0 (or other sprites).
+            if (behind && line[ix] != 0 && !(line[ix] & 0x40u))
+                continue;
+            line[ix] = colour;
+        }
+    }
+}
 
 // Records that image columns [x0, x1) of row y were drawn with the palette
 // as logged so far. Runs drawn back to back with no palette change between
@@ -421,7 +517,9 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     while (dvi_display_frame_pending() &&
            ringFill(ring_head, ring_tail) < OMEGA_RING_SKIP_WORDS)
         tight_loop_contents();
-    c1_image = dvi_display_frame_pending()
+    // hostCaptureHold (set over SWD) freezes the displayed frame so it can
+    // be dumped consistently; emulation keeps running.
+    c1_image = dvi_display_frame_pending() || hostCaptureHold
              ? NULL
              : dvi_display_direct_acquire(&c1_record); // NULL: boot pattern
     if (!c1_image)
@@ -507,6 +605,10 @@ void C1_FUNC(hostCore1Loop)(void) {
             case MSG_BEGIN:
                 c1Begin(msg[1], msg[2]);
                 length = 3;
+                break;
+            case MSG_SPRITE:
+                c1Sprite(row, x - SPRITE_X_BIAS, header >> 23, msg[1], msg[2]);
+                length = ((header >> 28) & 1u) ? 3 : 2;
                 break;
             case MSG_END:
                 c1End((uint16_t)msg[1]);

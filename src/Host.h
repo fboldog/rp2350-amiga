@@ -73,6 +73,13 @@ static inline void hostRasterWritten(int row, int x, int width) {
 // hostRasterPixels()/hostRasterWritten().
 #if defined(PICO_BUILD) && OMEGA_ENABLE_HDMI
 extern int hostDirectActive;
+// One sprite (or attached pair) on raster row `row` from raster column x
+// (lores pixels, each 2 columns wide): colour base register, attached,
+// behind the playfield, planes a/b (and c/d for an attached pair), bit 15
+// leftmost.
+void hostDirectSprite(int row, int x, int colour_base, int attached,
+                      int behind, uint16_t a, uint16_t b, uint16_t c,
+                      uint16_t d);
 // Core 1 work loop (never returns): converts the enqueued blocks into the
 // scanout frame. Started by dvi_display.c after HSTX scanout is running.
 void hostCore1Loop(void);
@@ -82,6 +89,12 @@ void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
                      uint16_t p4, uint16_t p5, uint16_t p6, int ham);
 #else
 #define hostDirectActive 0
+static inline void hostDirectSprite(int row, int x, int colour_base,
+                                    int attached, int behind, uint16_t a,
+                                    uint16_t b, uint16_t c, uint16_t d) {
+    (void)row; (void)x; (void)colour_base; (void)attached; (void)behind;
+    (void)a; (void)b; (void)c; (void)d;
+}
 static inline void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
                                    uint16_t p3, uint16_t p4) {
     (void)row; (void)x; (void)p1; (void)p2; (void)p3; (void)p4;

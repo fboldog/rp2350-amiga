@@ -150,7 +150,8 @@ in SRAM (`hostDirect*` in `src/Host.c`, `dvi_indexed_frame_t`); scanout
 replays the frame's palette log, so colours are the exact 12-bit ones.
 Wrapped-fetch screens still use the ARGB raster and presentation path
 (RGB332). Verified on hardware through the Kickstart boot screens,
-Workbench 1.3, xsysinfo and RemGame (HAM; sprites are not emulated).
+Workbench 1.3, xsysinfo and RemGame (HAM and sprites; sprite collisions
+are not emulated).
 
 The interrupt must re-arm the finished channel before the other finishes its
 line (~30 µs). Keep it in RAM and free of PSRAM/flash accesses: the emulator

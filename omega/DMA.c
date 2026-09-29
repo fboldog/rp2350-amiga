@@ -763,6 +763,11 @@ static void dmaUpdateLineState(void) {
     dmaLineStateDirty = 0;
 }
 
+static void spriteFrameStart(void);
+static void spriteRenderLine(void);
+// Raster row of this line's bitplane blocks, or -1 (no block this line).
+static int spriteLineRow = -1;
+
 // End of a line (rare): kept out of the per-slot path so dma_run() stays
 // small and saves few registers.
 static void __attribute__((noinline)) dmaEndOfLine(void) {
@@ -783,6 +788,7 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
     if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
         internal.vPos = 0;
         copperWaitPosition = 0;
+        spriteFrameStart();
 
         //Reset Copper.
         putChipReg16[COPJMP1](0);
@@ -800,6 +806,8 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
 
 // Fetch-window end (rare, once per line).
 static void __attribute__((noinline)) dmaFetchWindowComplete(void) {
+    spriteRenderLine();
+    spriteLineRow = -1;
     bitplaneLine.fetchWindowComplete = 1;
     bitplaneLine.pointerAtFetchCompletion[0] = chipset.bpl1pt;
     bitplaneLine.pointerAtFetchCompletion[1] = chipset.bpl2pt;
@@ -1052,9 +1060,183 @@ void audio3Cycle(void){
 }
 
 
-void spriteCycle(void){
+// ── Sprites ───────────────────────────────────────────────────────────────
+// Sprite n owns two DMA slots per line (0x15 + 4n and 0x17 + 4n). On the
+// first line after vertical blanking it fetches SPRxPOS/SPRxCTL; from
+// VSTART it fetches SPRxDATA/SPRxDATB on every line until VSTOP, where the
+// next POS/CTL pair follows (a sprite reused further down). Words go
+// through the register handlers, so DATA arms and CTL disarms the sprite
+// exactly as CPU writes do. Unused slots stay free for the blitter.
+enum { SPRITE_CONTROL, SPRITE_WAIT, SPRITE_ACTIVE, SPRITE_DONE };
+enum { SPRITE_FETCH_NONE, SPRITE_FETCH_CONTROL, SPRITE_FETCH_DATA };
+static uint8_t spriteState[8];
+static uint8_t spriteLineFetch[8];
 
-    oddCycle();
+static inline uint16_t *spriteRegisters(unsigned n) {
+    return &chipset.spr0pos + 4u * n;  // POS, CTL, DATA, DATB
+}
+
+static inline int spriteVStart(const uint16_t *r) {
+    return (r[0] >> 8) | ((r[1] & 0x4) << 6);
+}
+
+static inline int spriteVStop(const uint16_t *r) {
+    return (r[1] >> 8) | ((r[1] & 0x2) << 7);
+}
+
+static void spriteFrameStart(void) {
+    for (unsigned n = 0; n < 8; ++n)
+        spriteState[n] = SPRITE_CONTROL;
+}
+
+void spriteCycle(void){
+    const unsigned slot = internal.hPos - 0x15u;
+    const unsigned n = slot >> 2;
+    const unsigned second = (slot >> 1) & 1u;
+    if (n > 7u || (chipset.dmaconr & 0x220) != 0x220 ||
+        internal.vPos < OMEGA_SPRITE_FIRST_LINE) {
+        oddCycle();
+        return;
+    }
+    uint16_t *r = spriteRegisters(n);
+    if (!second) {
+        uint8_t fetch = SPRITE_FETCH_NONE;
+        switch (spriteState[n]) {
+        case SPRITE_CONTROL:
+            fetch = SPRITE_FETCH_CONTROL;
+            break;
+        case SPRITE_WAIT:
+            if (internal.vPos == spriteVStart(r)) {
+                spriteState[n] = SPRITE_ACTIVE;
+                fetch = internal.vPos == spriteVStop(r)
+                      ? SPRITE_FETCH_CONTROL : SPRITE_FETCH_DATA;
+            }
+            break;
+        case SPRITE_ACTIVE:
+            fetch = internal.vPos == spriteVStop(r)
+                  ? SPRITE_FETCH_CONTROL : SPRITE_FETCH_DATA;
+            break;
+        default:
+            break;
+        }
+        spriteLineFetch[n] = fetch;
+    }
+    const uint8_t fetch = spriteLineFetch[n];
+    if (fetch == SPRITE_FETCH_NONE) {
+        oddCycle();
+        return;
+    }
+    uint32_t *pt = &chipset.spr0pt + n;
+    uint16_t word = internal.chipramW[*pt];
+    word = (uint16_t)((word << 8) | (word >> 8));   // chip RAM is byte-swapped
+    *pt += 1;
+    const unsigned reg = fetch == SPRITE_FETCH_CONTROL ? SPR0POS : SPR0DATA;
+    putChipReg16[reg + 4u * n + second](word);
+    if (fetch == SPRITE_FETCH_CONTROL && second)
+        spriteState[n] = (r[0] == 0 && r[1] == 0) ? SPRITE_DONE : SPRITE_WAIT;
+}
+
+
+// Draws one sprite (or attached pair) into the ARGB raster (native build
+// and the RP2350 fallback layouts).
+static void spriteDrawArgb(int row, int x, int colour_base, int attached,
+                           int behind, uint16_t a, uint16_t b, uint16_t c,
+                           uint16_t d) {
+    for (int i = 0; i < 16; ++i) {
+        const int bit = 15 - i;
+        unsigned v = ((a >> bit) & 1u) | (((b >> bit) & 1u) << 1);
+        if (attached)
+            v |= (((c >> bit) & 1u) << 2) | (((d >> bit) & 1u) << 3);
+        if (!v)
+            continue;
+        const uint32_t colour = internal.palette[colour_base + v];
+        for (int j = 0; j < 2; ++j) {
+            const int px = x + 2 * i + j;
+            if (px < 0 || px >= HOST_RASTER_W)
+                continue;
+            uint32_t *p = hostRasterPixels(row, px);
+            if (behind && *p != internal.palette[0])
+                continue;
+            *p = colour;
+        }
+    }
+}
+
+// Shows the armed sprites of this line over its bitplane pixels. Lower
+// numbered sprites are in front; an odd sprite with ATT set joins its even
+// partner as one 15-colour sprite. BPLCON2 (PF2P, single playfield) puts
+// sprite pairs at or above its code behind the playfield.
+static void spriteRenderLine(void) {
+    const int row = spriteLineRow;
+    if (row < 0 || row >= HOST_RASTER_H || !spriteArmed)
+        return;
+    // Raster column 0 is the first pixel of the first fetched word; OCS
+    // shows it at lores position 2 * DDFSTRT + 17 (LORES) or + 9 (HIRES).
+    const int hires = (chipset.bplcon0 & 0x8000) != 0;
+    const int first = 2 * chipset.ddfstrt +
+                      (hires ? OMEGA_SPRITE_HIRES_OFFSET
+                             : OMEGA_SPRITE_LORES_OFFSET);
+    const unsigned front_pairs = (chipset.bplcon2 >> 3) & 7u;
+    // Sprites show only inside the display window: DIWSTRT/DIWSTOP low
+    // bytes in lores beam positions (OCS: HSTOP8 is fixed at 1).
+    const int diw_start = chipset.diwstrt & 0xff;
+    const int diw_stop = (chipset.diwstop & 0xff) | 0x100;
+    for (int pair = 3; pair >= 0; --pair) {
+        const unsigned even = 2u * (unsigned)pair, odd = even + 1u;
+        const uint16_t *re = spriteRegisters(even), *ro = spriteRegisters(odd);
+        const int behind = (unsigned)pair >= front_pairs;
+        // OCS: the odd sprite's ATT bit makes the pair one 15-colour sprite
+        // (colours 17-31). Each keeps its own position; their bits combine
+        // where they overlap, so a pair at one position is drawn together
+        // and otherwise each half is drawn with its attached colours.
+        const int attached = (ro[1] & 0x80) != 0;
+        const int even_on = (spriteArmed >> even) & 1u;
+        const int odd_on = (spriteArmed >> odd) & 1u;
+        const int hs_even = ((re[0] & 0xff) << 1) | (re[1] & 1);
+        const int hs_odd = ((ro[0] & 0xff) << 1) | (ro[1] & 1);
+        // Lower sprites are in front: odd first, then even over it.
+        for (int k = 1; k >= 0; --k) {
+            const int is_odd = k;
+            if (!(is_odd ? odd_on : even_on))
+                continue;
+            if (attached && is_odd && even_on && hs_odd == hs_even)
+                continue;               // drawn with the even half
+            const uint16_t *rn = is_odd ? ro : re;
+            const int hstart = is_odd ? hs_odd : hs_even;
+            const int x = 2 * (hstart - first);
+            // Clip to the display window: bit 15 is at hstart.
+            uint32_t mask = 0xffffu;
+            if (hstart < diw_start)
+                mask &= diw_start - hstart >= 16 ? 0u
+                      : 0xffffu >> (diw_start - hstart);
+            if (hstart + 16 > diw_stop)
+                mask &= hstart >= diw_stop ? 0u
+                      : (0xffffu << (hstart + 16 - diw_stop)) & 0xffffu;
+            if (!mask)
+                continue;
+            uint16_t a = 0, b = 0, c = 0, d = 0;
+            int base = 16 + 4 * pair, att = 0;
+            if (!attached) {
+                a = rn[2] & mask; b = rn[3] & mask;
+            } else {
+                base = 16; att = 1;
+                if (!is_odd) {
+                    a = re[2] & mask; b = re[3] & mask;
+                    if (odd_on && hs_odd == hs_even) {
+                        c = ro[2] & mask; d = ro[3] & mask;
+                    }
+                } else {
+                    c = ro[2] & mask; d = ro[3] & mask;  // bits 2-3 only
+                }
+            }
+            if (!(a | b | c | d))
+                continue;
+            if (hostDirectActive)
+                hostDirectSprite(row, x, base, att, behind, a, b, c, d);
+            else
+                spriteDrawArgb(row, x, base, att, behind, a, b, c, d);
+        }
+    }
 }
 
 
@@ -1163,6 +1345,7 @@ void loresPlane1(void){
         host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W)
         return;
     
+    spriteLineRow = host.rasterRow;
     if (hostDirectActive) {
         hostDirectLores(host.rasterRow, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat, chipset.bpl5dat, chipset.bpl6dat, chipset.bplcon0 & 0x800);
     } else {
@@ -1286,6 +1469,7 @@ void hiresPlane1(){
 
     int raster_row = host.rasterRow;
     int row_rotation = lineRowRotation;
+    spriteLineRow = host.rasterRow;
     // The leading words in this layout are the pipeline suffix of the
     // preceding logical scanline. Keep that association in the raw raster.
     if (row_rotation && host.rasterX < row_rotation) {

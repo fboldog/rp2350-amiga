@@ -552,6 +552,7 @@ typedef struct{
 
 extern Chipset_t  chipset;
 extern Internal_t internal;
+extern uint8_t spriteArmed;  // bit n: sprite n armed (SPRxDATA written)
 
 void ChipsetInit();
 

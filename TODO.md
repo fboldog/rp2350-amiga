@@ -253,9 +253,25 @@ How to measure (no halt, firmware keeps running):
       screens at 4 bits per pixel would free ~80 KB per frame (HAM/EHB rows
       still need a byte) — room for a larger PAL ring or a third frame.
 - [ ] **Exact colours for wrapped-fetch layouts** (still ARGB → RGB332).
-- [ ] **Sprites.** Omega does not render sprites (`spriteCycle()` only runs
-      the Copper/blitter slot); games such as RemGame miss their characters.
-      Their colour registers (17..31) also fill the palette log.
+- [x] **Sprites.** Sprite DMA (`spriteCycle()`: POS/CTL after vertical
+      blanking, DATA/DATB from VSTART, the next POS/CTL at VSTOP), DATA arms
+      and CTL disarms (CPU or DMA), clipped to the display window, attached
+      pairs (each half at its own position), BPLCON2 playfield priority
+      (single playfield), HAM-safe overlay on core 1 (0x40 pixel tag). 32-bit
+      CPU writes to handler-less register pairs (SPRxPT, BPLxPT) are now two
+      16-bit writes on the board. Palette log 2047 entries. Workbench shows
+      the pointer; RemGame shows its HUD, player and items. Cost: Workbench
+      idle 28.0 -> 27.2 frames/s, RemGame 10.5 -> 9.6 (PAL).
+- [ ] **Sprite collisions (CLXDAT/CLXCON)** and **dual playfield** (full
+      BPLCON2 priorities) are not emulated.
+- [ ] **RemGame item colours.** The heart shows white and coin edges show
+      white. Verified 2026-09-30 against a synchronised capture of the Copper
+      list and sprite data: the display matches what the game wrote (the heart
+      is sprite 4 sharing pair 2's colours 25-27 = white/dark/orange with a
+      flask; its fill uses colour 25). On real hardware the fill would have
+      to use colour 27, but the heart's DATB plane holds only its outline, so
+      the difference is in the game's run on the emulator (CPU, blitter or
+      timing), not in sprite display. Needs a reference emulator state.
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [x] **Pixel conversion on core 1.** Core 0 enqueues bitplane blocks,

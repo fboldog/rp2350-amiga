@@ -212,9 +212,16 @@ void noopL(uint32_t value){
     
 }
 
+// A 32-bit write to a register pair without its own handler (e.g.
+// move.l to BPLxPTH/SPRxPTH) is two 16-bit writes, high word first, as the
+// 68000 performs it. chipWriteLong() sets debugChipAddress to the register.
 void longWrite(uint32_t value){
-    CHIPSET_STUB_LOG("32bit Write: to %s (%0x - %d) not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
-        debugChipAddress = 0;
+    const uint32_t reg = debugChipAddress;
+    if (reg + 1u < 256u) {
+        putChipReg16[reg]((uint16_t)(value >> 16));
+        putChipReg16[reg + 1u]((uint16_t)value);
+    }
+    debugChipAddress = 0;
 }
 
 //**********************************************************
@@ -820,65 +827,25 @@ void spr7ptl(uint16_t value){
     chipset.spr7pt = (value>>1)    | (chipset.spr7pt & 0xFFFF8000);
 }
 
-void spr0pos(uint16_t value){
-    chipset.spr0pos = value;
-}
-void spr0ctl(uint16_t value){
-    chipset.spr0ctl = value;
-}
-
-void spr1pos(uint16_t value){
-    chipset.spr1pos = value;
-}
-void spr1ctl(uint16_t value){
-    chipset.spr1ctl = value;
-}
-
-void spr2pos(uint16_t value){
-    chipset.spr2pos = value;
-}
-void spr2ctl(uint16_t value){
-    chipset.spr2ctl = value;
-}
-
-void spr3pos(uint16_t value){
-    chipset.spr3pos = value;
-}
-void spr3ctl(uint16_t value){
-    chipset.spr3ctl = value;
-}
-
-void spr4pos(uint16_t value){
-    chipset.spr4pos = value;
-}
-void spr4ctl(uint16_t value){
-    chipset.spr4ctl = value;
-}
-
-void spr5pos(uint16_t value){
-    chipset.spr5pos = value;
-}
-void spr5ctl(uint16_t value){
-    chipset.spr5ctl = value;
-}
-
-void spr6pos(uint16_t value){
-    chipset.spr6pos = value;
-}
-void spr6ctl(uint16_t value){
-    chipset.spr6ctl = value;
-}
-
-void spr7pos(uint16_t value){
-    chipset.spr7pos = value;
-}
-void spr7ctl(uint16_t value){
-    chipset.spr7ctl = value;
-}
-
-void spr7data(uint16_t value){
-    chipset.spr7data = value;
-}
+// Sprite registers. As in Denise, writing SPRxCTL disarms sprite x and
+// writing SPRxDATA arms it; an armed sprite shows DATA/DATB on its lines.
+// Sprite DMA (DMA.c) writes them through these handlers like the CPU does.
+uint8_t spriteArmed;
+#define SPRITE_REGISTERS(n) \
+void spr##n##pos(uint16_t value){ chipset.spr##n##pos = value; } \
+void spr##n##ctl(uint16_t value){ \
+    chipset.spr##n##ctl = value; spriteArmed &= (uint8_t)~(1u << (n)); } \
+void spr##n##data(uint16_t value){ \
+    chipset.spr##n##data = value; spriteArmed |= (uint8_t)(1u << (n)); } \
+void spr##n##datb(uint16_t value){ chipset.spr##n##datb = value; }
+SPRITE_REGISTERS(0)
+SPRITE_REGISTERS(1)
+SPRITE_REGISTERS(2)
+SPRITE_REGISTERS(3)
+SPRITE_REGISTERS(4)
+SPRITE_REGISTERS(5)
+SPRITE_REGISTERS(6)
+SPRITE_REGISTERS(7)
 
 void color00(uint16_t value){
     chipset.color00 = value; //old register
@@ -2267,36 +2234,36 @@ void (*putChipReg16[])(uint16_t) ={
     spr7ptl,
     spr0pos,
     spr0ctl,
-    wordWrite,
-    wordWrite,
+    spr0data,
+    spr0datb,
     spr1pos,
     spr1ctl,
-    wordWrite,
-    wordWrite,
+    spr1data,
+    spr1datb,
     spr2pos,
     spr2ctl,
-    wordWrite,
-    wordWrite,
+    spr2data,
+    spr2datb,
     spr3pos,
     spr3ctl,
-    wordWrite,
-    wordWrite,
+    spr3data,
+    spr3datb,
     spr4pos,
     spr4ctl,
-    wordWrite,
-    wordWrite,
+    spr4data,
+    spr4datb,
     spr5pos,
     spr5ctl,
-    wordWrite,
-    wordWrite,
+    spr5data,
+    spr5datb,
     spr6pos,
     spr6ctl,
-    wordWrite,
-    wordWrite,
+    spr6data,
+    spr6datb,
     spr7pos,
     spr7ctl,
     spr7data,
-    wordWrite,
+    spr7datb,
     color00,
     color01,
     color02,
