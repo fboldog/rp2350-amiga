@@ -217,6 +217,14 @@ How to measure (no halt, firmware keeps running):
       deadline (60 % of core 1, lost HDMI sync); fixed by re-arming the DMA
       channel before expanding and a branchless, pair-wise HAM decode (18 %).
       PAL went back to a 16 KB ring for the frame records (~470 B SRAM left).
+- [x] **Two-level opcode table; 64 KB rings.** `m68ki_instruction_index`
+      (128 KB flat) became a byte per 64-opcode block plus the ~245 unique
+      blocks (~33 KB); built flat in PSRAM scratch at boot and verified.
+      ~96 KB SRAM back for <1 % idle speed (boot +1-2 s). A 64 KB ring then
+      shows every emulated frame on idle Workbench (PAL 28.0/28.0, was
+      28.2/21.7; NTSC 33.6/33.6, was 33.6/32.5); 32 KB did not help PAL and
+      112/128 KB add nothing. SRAM left: PAL 57 KB, NTSC 77 KB — not enough
+      for a third frame (PAL 160 KB, NTSC 150 KB), even with smaller rings.
 - [x] **Frame records in PSRAM; rings take the rest of SRAM.** The two
       `dvi_indexed_frame_t` records moved to PSRAM (0x780000, cached alias,
       coherent through the shared XIP cache): ~9.6 KB SRAM back for ~1 %
@@ -260,7 +268,8 @@ How to measure (no halt, firmware keeps running):
       until the ring is full instead of 3/4 full. Idle Workbench
       emulated/shown, KS1.3+WB1.3: PAL 29.8/20.1 → 29.4/20.5, NTSC
       35.5/24.5 → 35.3/~26.8; boot 44.1 → 45.1 s (PSRAM track).
-- [ ] **Show the rest of PAL's frames.** A PAL Workbench frame is ~4× the
+- [x] ~~**Show the rest of PAL's frames.**~~ Done by the 64 KB ring (above).
+      Former notes: A PAL Workbench frame is ~4× the
       ring, so no affordable ring absorbs the wait for the 50 Hz swap. Never
       skipping (`OMEGA_RING_SKIP_WORDS=RING_WORDS`) gives a steady 25/25
       but costs ~15 % emulation speed. Needs SRAM freed by the frames

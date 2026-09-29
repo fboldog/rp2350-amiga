@@ -136,12 +136,13 @@ The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
 each fetched bitplane block, palette changes and frame begin/end into a
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`). The ring takes the SRAM that is left: 44 KB on NTSC, 24 KB on
-PAL (`RING_WORDS`; any size works, positions run over twice the ring size).
-Core 1 reads each message in place and copies out only one that wraps. On
-idle Workbench the larger rings show 32.3 of 33.8 emulated frames/s on NTSC
-(was 27.0 of 35.0 with 32 KB) and 21.6 of 28.4 on PAL (was 20.5 of 29.1
-with 16 KB); drawing more frames costs core 0 ~3 %. Everything core 1
+`src/Host.c`). The ring is 64 KB in both modes (`RING_WORDS`; any size
+works, positions run over twice the ring size), which holds a whole frame's
+messages across the wait for the display swap: on idle Workbench every
+emulated frame is shown (PAL 28.0 of 28.0 frames/s, was 21.7 of 28.2 with
+24 KB and 21.9 with 32 KB; NTSC 33.6 of 33.6, was 32.5 with 44 KB; larger
+rings change nothing). Core 1 reads each message in place and copies out
+only one that wraps. Everything core 1
 executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
 traffic once delayed the line interrupt past its deadline and stopped the
 DMA chain.
@@ -293,12 +294,16 @@ TinyUSB is included in the Pico SDK; add `tinyusb_host` to `target_link_librarie
 - **Musashi 68K** (`omega/m68k*.c`) keeps only the 68000 tables in Pico builds
   to reduce internal SRAM use; the native build retains the full tables.
   Pico builds also replace the 256 KB opcode pointer table with a 16-bit
-  handler index per opcode (128 KB), keep the opcode description table in
-  flash, and store 68000 cycle counts per handler instead of per opcode
-  (register shifts by an immediate count add their 2-cycles-per-bit cost from
-  the opcode). Together this frees about 210 KB of SRAM for the HDMI frames;
-  handlers and cycle counts were checked identical for all 65,536 opcodes
-  against the original tables.
+  handler index per opcode, keep the opcode description table in flash, and
+  store 68000 cycle counts per handler instead of per opcode (register
+  shifts by an immediate count add their 2-cycles-per-bit cost from the
+  opcode); handlers and cycle counts were checked identical for all 65,536
+  opcodes against the original tables. The index is two-level: the 1024
+  blocks of 64 opcodes (the effective-address field) contain only ~245
+  distinct blocks, so a byte per block selects a shared block (~33 KB
+  instead of 128 KB). It is built flat in PSRAM scratch at boot, compressed
+  and verified against the flat table (panic on mismatch). Together this
+  frees about 305 KB of SRAM; the extra lookup costs <1 % idle speed.
 - **Chipset/CIA/DMA/Blitter** remain close to upstream, with Pico memory paths,
   quieter diagnostics, and the shared raster-position fixes called out above.
 - **Floppy.c** supports DF0 only; DF1–DF3 stay as unconnected drives for

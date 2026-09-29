@@ -351,7 +351,7 @@
 #include "m68kops.h"
 static inline uint m68ki_instruction_cycles(uint ir)
 {
-	uint cycles = m68ki_handler_cycles[m68ki_instruction_index[ir]];
+	uint cycles = m68ki_handler_cycles[m68ki_handler_index(ir)];
 	if(cycles & M68KI_CYCLES_IMMEDIATE_SHIFT)
 		cycles = (cycles & 0xff) + (((((ir >> 9) - 1) & 7) + 1) << 1);
 	return cycles;

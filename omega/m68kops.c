@@ -14,11 +14,18 @@
 #endif
 
 #ifdef PICO_BUILD
-// Internal SRAM is scarce on RP2350. Store a 16-bit handler index for each
-// opcode instead of a 256 KiB pointer table, and keep the handler
-// descriptions in flash; they are only read while building the index.
+// Internal SRAM is scarce on RP2350. Store a 16-bit handler index per opcode
+// instead of a 256 KiB pointer table, deduplicated into shared 64-opcode
+// blocks (see m68kops.h), and keep the handler descriptions in flash; they
+// are only read while building the index.
+#include "../src/psram.h"
+#include "pico/platform.h"
+#include <stdio.h>
 #define M68KI_HANDLER_TABLE_CONST const
-unsigned short m68ki_instruction_index[0x10000]; /* opcode handler index */
+unsigned char m68ki_opcode_block[0x10000 >> M68KI_BLOCK_BITS];
+unsigned short m68ki_opcode_blocks[M68KI_MAX_BLOCKS][M68KI_BLOCK_SIZE];
+/* The flat table is built in PSRAM scratch at boot, then compressed. */
+static unsigned short *m68ki_instruction_index;
 #else
 #define M68KI_HANDLER_TABLE_CONST
 void  (*m68ki_instruction_jump_table[0x10000])(void); /* opcode handler jump table */
@@ -2042,6 +2049,43 @@ unsigned short m68ki_handler_cycles[M68KI_HANDLER_COUNT];
 #endif
 
 
+#ifdef PICO_BUILD
+/* Share identical 64-opcode blocks of the flat table built in PSRAM. */
+static void m68ki_compress_opcode_table(void)
+{
+	int blocks = 0;
+	for(int b = 0; b < (0x10000 >> M68KI_BLOCK_BITS); b++)
+	{
+		const unsigned short *src = &m68ki_instruction_index[b << M68KI_BLOCK_BITS];
+		int u;
+		for(u = 0; u < blocks; u++)
+		{
+			int k;
+			for(k = 0; k < M68KI_BLOCK_SIZE && m68ki_opcode_blocks[u][k] == src[k]; k++)
+				;
+			if(k == M68KI_BLOCK_SIZE)
+				break;
+		}
+		if(u == blocks)
+		{
+			if(blocks == M68KI_MAX_BLOCKS)
+				panic("m68k: more than %d distinct opcode blocks", M68KI_MAX_BLOCKS);
+			for(int k = 0; k < M68KI_BLOCK_SIZE; k++)
+				m68ki_opcode_blocks[blocks][k] = src[k];
+			blocks++;
+		}
+		m68ki_opcode_block[b] = (unsigned char)u;
+	}
+	/* Verify against the flat table. */
+	for(int op = 0; op < 0x10000; op++)
+		if(m68ki_handler_index(op) != m68ki_instruction_index[op])
+			panic("m68k: opcode table compression mismatch at %04x", op);
+	printf("M68K: opcode table %d unique blocks (%u bytes)\n", blocks,
+	       (unsigned)(sizeof(m68ki_opcode_block) +
+	                  (unsigned)blocks * M68KI_BLOCK_SIZE * 2u));
+}
+#endif
+
 /* Build the opcode handler jump table */
 void m68ki_build_opcode_table(void)
 {
@@ -2053,6 +2097,8 @@ void m68ki_build_opcode_table(void)
 	int k;
 
 #ifdef PICO_BUILD
+	m68ki_instruction_index =
+		(unsigned short *)psram_ptr(BOARD_MAP_OPCODE_BUILD_OFFSET);
 	for(i = 0; i < (int)M68KI_HANDLER_COUNT; i++)
 		m68ki_handler_ptrs[i] = m68k_opcode_handler_table[i].opcode_handler;
 	m68ki_handler_ptrs[M68KI_ILLEGAL_INDEX] = m68k_op_illegal;
@@ -2159,6 +2205,9 @@ void m68ki_build_opcode_table(void)
 		M68KI_SET_CYCLES(ostruct->match, ostruct);
 		ostruct++;
 	}
+#ifdef PICO_BUILD
+	m68ki_compress_opcode_table();
+#endif
 }
 
 

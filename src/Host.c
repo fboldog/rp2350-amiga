@@ -85,15 +85,14 @@ enum {
 
 // Core 1 waits for a pending frame to be shown while core 0 keeps queueing;
 // when the ring is full core 0 stalls until the swap. A bigger ring lets
-// emulation run further ahead of the display (idle Workbench shown/emulated,
-// NTSC: 22/32 fps with 8 KB, 27/32 with 32 KB). Any size works: positions
-// run over [0, 2 * RING_WORDS), so the ring takes the SRAM that is left.
+// emulation run further ahead of the display. 64 KB holds a whole frame's
+// messages across the wait, so every emulated frame is shown (idle
+// Workbench emulated/shown: PAL 28.2/21.7 with 24 KB, 28.1/21.9 with 32 KB,
+// 28.0/28.0 with 64 KB; NTSC 33.6/32.5 with 44 KB, 33.6/33.6 with 64 KB;
+// larger rings change nothing). Any size works: positions run over
+// [0, 2 * RING_WORDS).
 #ifndef RING_WORDS
-#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
-#define RING_WORDS 6144u  // 24 KB
-#else
-#define RING_WORDS 11264u // 44 KB
-#endif
+#define RING_WORDS 16384u // 64 KB
 #endif
 #define RING_SPAN (2u * RING_WORDS)
 // Ring fill at which core 1 stops waiting for the pending frame's swap and
