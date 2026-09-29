@@ -291,8 +291,10 @@ forward steps when measuring.
 - [ ] **Waveshare PSRAM hardware validation**: WeAct passes the 1024-byte test,
       full memory clear, emulator loop, and HDMI output. Repeat on a Waveshare
       board with a compatible PSRAM part fitted to U1.
-- [ ] **`chipset.vposr` PAL/NTSC flag**: currently hardcoded to NTSC value `0x1000`.
-      PAL should be `0x0000`. Change in `omega/DMA.c:dma_execute()`.
+- [x] **`chipset.vposr` PAL/NTSC flag**: `dma_execute()` uses
+      `OMEGA_VIDEO_VPOSR_ID` from `omega/VideoStandard.h` (`0x0000` PAL,
+      `0x1000` NTSC Fat Agnus), selected by `OMEGA_VIDEO_MODE`. xsysinfo
+      reports NTSC / FatAgnus 8370 on the NTSC build.
 - [ ] **ROM validation**: `src/Memory.c:memory_init()` checks `rom_base[0] == 0x11`.
       KS 2.x ROMs start with `0x11 0x14`; KS 1.3 with `0x11 0x11`. KS 3.1/3.2
       also start `0x11 ..` so they pass and execute.

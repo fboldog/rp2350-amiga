@@ -780,7 +780,6 @@ void dma_execute(){
         if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
             internal.vPos = 0;
             copperWaitPosition = 0;
-            //chipset.vposr   = (internal.LOF | 0x1000); //0x1000 is for NTSC / 0x0000 is for PAL
 
             //Reset Copper.
             putChipReg16[COPJMP1](0);
