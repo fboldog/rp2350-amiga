@@ -90,7 +90,8 @@
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
 //  0x780000..0x787FFF  HDMI frame records (dvi_indexed_frame_t x2, 32 KB)
 //  0x788000..0x7A7FFF  68000 opcode table scratch (128 KB, boot only)
-//  0x7A8000..0x7FFFFF  Reserved
+//  0x7A8000..0x7FEFFF  Reserved
+//  0x7FF000..0x7FF00B  DF0 disk rotation state (survives resets only)
 #define BOARD_MAP_CHIPRAM_OFFSET   0x000000u
 #define BOARD_MAP_SLOWRAM_OFFSET   0x200000u
 #define BOARD_MAP_DF0_OFFSET       0x280000u
@@ -98,6 +99,7 @@
 #define BOARD_MAP_DVI_RECORDS_OFFSET 0x780000u
 #define BOARD_MAP_DVI_RECORDS_SIZE 0x008000u
 #define BOARD_MAP_OPCODE_BUILD_OFFSET 0x788000u
+#define BOARD_MAP_BOOT_STATE_OFFSET 0x7FF000u
 #define BOARD_MAP_VIDEO_RASTER_OFFSET 0x540000u
 #define BOARD_MAP_SD_ROM_OFFSET    0x480000u
 

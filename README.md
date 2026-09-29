@@ -207,7 +207,7 @@ PSRAM: detected 8388608 bytes on GPIO0
 PSRAM: 1024-byte read/write test passed at 0x11000000
 ROM: flash 0x10200000, header=1111 opcode=4ef9 entry=00fc00d2
 DVI: HSTX 640x480p60 emulator scanout on GPIO12..19
-DF0: flash ADF mounted with a 12798-byte PSRAM track buffer
+DF0: flash ADF 1 of 1 (0x10280000) mounted with a 12798-byte PSRAM track buffer
 DF0: disk inserted at boot; KEY ejects/reinserts it
 Entering emulation loop
 DVI: first indexed emulator frame queued
@@ -251,13 +251,24 @@ python3 tools/combine_uf2.py \
     sd_card/rom/kick13.rom \
     build-weact-hdmi/omega-amiga-kick13.uf2
 
-# Optionally add the DF0 ADF image
+# Optionally add DF0 ADF images (repeat --adf to rotate between them)
 python3 tools/combine_uf2.py \
     build-weact-hdmi/omega-amiga.uf2 \
     sd_card/rom/kick13.rom \
     build-weact-hdmi/omega-amiga-kick13-wb13.uf2 \
-    --adf0 sd_card/adf/amiga-os-134-workbench.adf
+    --adf sd_card/adf/amiga-os-134-workbench.adf
 ```
+
+**Disk rotation (demo mode).** Up to 15 ADF images (880 KB each, flash
+0x280000 onwards on 16 MB) can be embedded with repeated `--adf` options.
+Every boot, a reset included, mounts the next one in DF0; a power cycle
+starts again at the first. The position is kept in PSRAM (offset
+0x7FF000, uncached, guarded by a magic and a complement): the PSRAM stays
+powered through a RUN-pin reset but loses its contents on a power cycle,
+and flash is never written at runtime. (POWMAN scratch registers were tried
+first: they survive SWD resets but are cleared by the RESET button.) The tool writes an erased marker after the last image, so images
+left over from an earlier, longer list are not mounted. The boot log names
+the disk, e.g. `DF0: flash ADF 2 of 3 (0x1035c000) mounted ...`.
 
 ADF embedding remains optional. The combined Kickstart 1.3 + Workbench 1.3
 image was verified with DF0 inserted at boot, and with KEY eject and reinsert

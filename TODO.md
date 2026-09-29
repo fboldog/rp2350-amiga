@@ -217,6 +217,14 @@ How to measure (no halt, firmware keeps running):
       deadline (60 % of core 1, lost HDMI sync); fixed by re-arming the DMA
       channel before expanding and a branchless, pair-wise HAM decode (18 %).
       PAL went back to a 16 KB ring for the frame records (~470 B SRAM left).
+- [x] **DF0 disk rotation (demo mode).** Up to 15 ADFs back to back from
+      flash 0x280000 (`combine_uf2.py --adf ... --adf ...`, end marker after
+      the last); each boot, reset included, mounts the next one. Position in
+      PSRAM 0x7FF000 (kept through RUN-pin resets, lost on power loss; no
+      flash writes). POWMAN scratch registers were cleared by the RESET
+      button (RUN pin), though they survive SWD resets.
+      Verified: SWD resets rotate 1 → 2 → 3 → 1; the RESET button advances
+      the disk; a power cycle starts at the first.
 - [x] **Two-level opcode table; 64 KB rings.** `m68ki_instruction_index`
       (128 KB flat) became a byte per 64-opcode block plus the ~245 unique
       blocks (~33 KB); built flat in PSRAM scratch at boot and verified.

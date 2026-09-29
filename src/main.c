@@ -16,8 +16,9 @@
 //   placed at flash offset 0x200000 (absolute 0x10200000).  See README.md.
 //
 // Floppy placement:
-//   Only DF0 is used. Its raw ADF image lives in flash at ADF0_FLASH_BASE,
-//   and only the active track is encoded into an SRAM cache.
+//   Only DF0 is used. Raw ADF images live back to back in flash from
+//   ADF0_FLASH_BASE (up to 15 on 16 MB); each boot mounts the next one.
+//   Only the active track is encoded, into a PSRAM track buffer.
 
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
@@ -62,10 +63,21 @@
 _Static_assert(DMA_CPU_BATCH % OMEGA_CPU_SLICE_SLOTS == 0,
                "the DMA batch must hold whole CPU slices");
 
-// ── Flash location of the DF0 ADF image (optional) ────────────────────────
-// Place a standard raw ADF image in flash at this absolute address. Leave it
-// unprogrammed to boot without a floppy.
+// ── Flash location of the DF0 ADF images (optional) ──────────────────────
+// Standard raw ADF images are placed back to back from this absolute address
+// (tools/combine_uf2.py --adf a.adf --adf b.adf ...). The first slot whose
+// first word is erased flash ends the list; leave slot 0 unprogrammed to
+// boot without a floppy.
 #define ADF0_FLASH_BASE  0x10280000u   // flash offset 0x280000
+#define ADF_SLOTS ((PICO_FLASH_SIZE_BYTES - (ADF0_FLASH_BASE - XIP_BASE)) / \
+                   FLOPPY_ADF_SIZE)  // 15 with 16 MB of flash
+// Disk rotation: every boot, reset included, mounts the next slot. The
+// position is kept in PSRAM, which stays powered through a RUN-pin reset
+// (the POWMAN scratch registers do not survive one) and loses its contents
+// on a power cycle, so power-on starts at the first disk. It is accessed
+// uncached, so nothing is left in the XIP cache at reset, and guarded by a
+// magic and a complement against random power-on contents.
+#define ADF_ROTATION_MAGIC 0xadf0b007u
 
 void __attribute__((noreturn, used)) hardfault_report(uint32_t *frame) {
     printf("HARDFAULT: pc=%08lx lr=%08lx cfsr=%08lx hfsr=%08lx "
@@ -85,16 +97,45 @@ void __attribute__((naked)) isr_hardfault(void) {
         "b hardfault_report\n");
 }
 
-// ── Mount the DF0 ADF image from flash ───────────────────────────────────
+// ── Mount a DF0 ADF image from flash ─────────────────────────────────────
+static const uint8_t *adf_slot(unsigned slot) {
+    return (const uint8_t *)(ADF0_FLASH_BASE + slot * FLOPPY_ADF_SIZE);
+}
+
+static unsigned count_adf_slots(void) {
+    unsigned count = 0;
+    // Blank flash (0xFFFFFFFF) means no image has been programmed there.
+    while (count < ADF_SLOTS &&
+           *(const uint32_t *)adf_slot(count) != 0xffffffffu)
+        ++count;
+    return count;
+}
+
+// Returns the slot for this boot and advances the rotation.
+static unsigned next_adf_slot(unsigned count) {
+    volatile uint32_t *state = (volatile uint32_t *)(
+        PSRAM_BASE - XIP_BASE + XIP_NOCACHE_NOALLOC_BASE +
+        BOARD_MAP_BOOT_STATE_OFFSET);
+    unsigned slot = 0;
+    if (state[0] == ADF_ROTATION_MAGIC && state[1] == ~state[2])
+        slot = state[1] % count;
+    const uint32_t next = (slot + 1u) % count;
+    state[1] = next;
+    state[2] = ~next;
+    state[0] = ADF_ROTATION_MAGIC;
+    return slot;
+}
+
 static bool load_df0_from_flash(void) {
-    const uint8_t *adf_data = (const uint8_t *)ADF0_FLASH_BASE;
-
-    // Blank flash (0xFF) means no disk image has been programmed.
-    if (adf_data[0] == 0xFF && adf_data[1] == 0xFF) return false;
-
+    const unsigned count = count_adf_slots();
+    if (count == 0)
+        return false;
+    const unsigned slot = next_adf_slot(count);
+    const uint8_t *adf_data = adf_slot(slot);
     if (!floppyMountADF(0, adf_data, FLOPPY_ADF_SIZE))
         return false;
-    printf("DF0: flash ADF mounted with a %u-byte PSRAM track buffer\n",
+    printf("DF0: flash ADF %u of %u (0x%08lx) mounted with a %u-byte PSRAM "
+           "track buffer\n", slot + 1u, count, (unsigned long)adf_data,
            FLOPPY_MFM_TRACK_SIZE);
     return true;
 }

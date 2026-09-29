@@ -113,9 +113,10 @@ Session 2 if similar issues resurface after an upstream merge.
 Flash with Kickstart ROM:
 ```bash
 python3 tools/combine_uf2.py build/omega-amiga.uf2 kickstart13.rom combined.uf2
-# Optional DF0 ADF:
+# Optional DF0 ADFs (repeat --adf; each boot, reset included, mounts the
+# next one, power-on starts at the first; position kept in PSRAM 0x7FF000):
 python3 tools/combine_uf2.py build/omega-amiga.uf2 kickstart13.rom combined.uf2 \
-    --adf0 workbench.adf
+    --adf workbench.adf --adf demo.adf
 # Copy combined.uf2 to board in BOOTSEL mode
 ```
 
