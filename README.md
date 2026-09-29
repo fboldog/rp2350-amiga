@@ -16,7 +16,7 @@ use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | ROM from microSD, with flash fallback | ⏸ implemented, build-disabled by default (needs an external SD module) |
 | Musashi 68K CPU core | ✅ |
 | Custom chipset + CIA + DMA | ✅ |
-| Floppy (DF0 raw flash ADF + SRAM track cache) | ✅ verified; build-disabled by default |
+| Floppy (DF0 raw flash ADF + PSRAM track buffer) | ✅ verified; build-disabled by default |
 | HDMI output (HSTX) | ✅ verified NTSC and PAL; build-disabled by default |
 | USB HID keyboard/mouse | ⬜ Phase 2 |
 
@@ -131,10 +131,10 @@ Workbench 1.3): 240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s, 320 MHz
 PSRAM took 82.1 s. The CPU clock matters more than the PSRAM clock.
 
 The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
-each fetched bitplane block, palette changes and frame begin/end into an 8 KB
+each fetched bitplane block, palette changes and frame begin/end into a 32 KB
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`; the ring is 32 KB on NTSC and 16 KB on PAL), so Copper palette changes still reach the right pixels. HAM
+`src/Host.c`), so Copper palette changes still reach the right pixels. HAM
 blocks are converted on core 0 and sent as ready pixels. Everything core 1
 executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
 traffic once delayed the line interrupt past its deadline and stopped the
@@ -144,8 +144,10 @@ The frame handshake is one atomic word (displayed buffer + pending flag);
 core 1 switches to the pending frame at line 0. A finished frame is never
 taken back. If it has not been shown when the next frame starts, core 1
 waits for the swap (≤ one display frame) while core 0 keeps queueing, and
-skips drawing that frame only if the ring gets 3/4 full, so the emulator never
-waits for the display. `dvi_frames_shown` counts the frames actually shown.
+skips drawing that frame only if core 0 fills the ring first, so the emulator
+barely waits for the display. `OMEGA_RING_SKIP_WORDS` sets the skip point;
+`RING_WORDS + 1` never skips and locks emulation to the display cadence
+(PAL idle Workbench 25.0/25.0 emulated/shown frames/s instead of 29.4/20.5). `dvi_frames_shown` counts the frames actually shown.
 
 The DVI mode is standard: 640×480p60 (VGA, 25.2 MHz pixels, 252 MHz) for
 NTSC or CEA 720×576p50 (270 MHz) for PAL. Each stored image row is sent
@@ -184,7 +186,7 @@ PSRAM: detected 8388608 bytes on GPIO0
 PSRAM: 1024-byte read/write test passed at 0x11000000
 ROM: flash 0x10200000, header=1111 opcode=4ef9 entry=00fc00d2
 DVI: HSTX 640x480p60 emulator scanout on GPIO12..19
-DF0: flash ADF mounted with 12798-byte SRAM track cache
+DF0: flash ADF mounted with a 12798-byte PSRAM track buffer
 DF0: disk inserted at boot; KEY ejects/reinserts it
 Entering emulation loop
 DVI: first direct RGB332 emulator frame queued
@@ -209,9 +211,13 @@ At boot the firmware mounts the card through SPI1 and loads a valid 256 KB or
 filesystem, or file cannot be read, the firmware uses the ROM embedded in flash.
 
 Flash-backed DF0 keeps its raw ADF in flash and encodes only the active
-12,798-byte MFM track into internal SRAM. ADF files are not yet read from SD,
-but that path can reuse the same track cache once sector reads replace the
-current memory-mapped flash source.
+12,798-byte MFM track, streamed straight into the DF0 area of PSRAM. The
+track is written and read through the uncached XIP alias, so disk loading
+does not evict emulator code or chip RAM from the shared 16 KB XIP cache
+(boot costs ~1 s more than the former SRAM track, which is now part of the
+core-1 ring). ADF files are not yet read from SD, but that path can reuse the
+same track buffer once sector reads replace the current memory-mapped flash
+source.
 
 ### Flash with Kickstart ROM
 

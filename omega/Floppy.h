@@ -45,8 +45,8 @@ typedef struct{
     int index;
     int cylinder;
     int side;
-    // DF0 only: the RP2350 PSRAM image or SRAM active-track cache, or the
-    // native full MFM image. NULL for DF1-DF3.
+    // DF0 only: the RP2350 PSRAM empty-drive image or active-track buffer
+    // (uncached alias), or the native full MFM image. NULL for DF1-DF3.
     uint8_t *mfmData;
 }Fd_t;
 

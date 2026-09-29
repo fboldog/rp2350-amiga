@@ -82,14 +82,18 @@ enum {
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
      (uint32_t)(extra) << 23)
 
-// Power of two. Core 1 waits up to one display frame for a pending frame to
-// be shown while core 0 keeps queueing; a bigger ring skips fewer frames
-// (idle Workbench shown/emulated: NTSC 22/32 fps with 8 KB, 27/32 with
-// 32 KB). NTSC has ~32 KB of SRAM spare, PAL (larger frames) ~12 KB.
-#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
-#define RING_WORDS 4096u  // 16 KB
-#else
+// Power of two. Core 1 waits for a pending frame to be shown while core 0
+// keeps queueing; when the ring is full core 0 stalls until the swap. A
+// bigger ring lets emulation run further ahead of the display (idle
+// Workbench shown/emulated, NTSC: 22/32 fps with 8 KB, 27/32 with 32 KB).
 #define RING_WORDS 8192u  // 32 KB
+// Ring fill at which core 1 stops waiting for the pending frame's swap and
+// skips drawing the new frame. RING_WORDS skips only when core 0 has filled
+// the ring; RING_WORDS + 1 never skips, which locks emulation to the display
+// cadence (PAL idle Workbench: 25.0/25.0 emulated/shown instead of 29.4/20.5,
+// as a frame is ~4x the ring and cannot absorb the wait for the swap).
+#ifndef OMEGA_RING_SKIP_WORDS
+#define OMEGA_RING_SKIP_WORDS RING_WORDS
 #endif
 static uint32_t ring[RING_WORDS];
 static volatile uint32_t ring_head; // words produced (core 0)
@@ -353,7 +357,7 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     // queueing; if the ring gets close to full first, skip this frame so
     // the emulator never stalls. A finished frame is never discarded.
     while (dvi_display_frame_pending() &&
-           ring_head - ring_tail < RING_WORDS * 3u / 4u)
+           ring_head - ring_tail < OMEGA_RING_SKIP_WORDS)
         tight_loop_contents();
     c1_image = dvi_display_frame_pending()
              ? NULL

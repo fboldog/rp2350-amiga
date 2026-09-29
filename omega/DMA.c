@@ -714,6 +714,11 @@ static void hiresDisplayPrefetch(void) {
 }
 
 int dmaLineStateDirty = 1;
+// Cached with the line state (see dmaUpdateLineState()).
+static int lineBitplaneWindow;   // bitplane DMA on and line in the window
+static int lineFullWidth;        // omegaDdfIsFullWidth(DDFSTRT)
+static int lineHiresDisplayTop;  // DIWSTRT line + upper overscan
+static int lineRowRotation;      // omegaDdfRowRotation(DDFSTRT, DDFSTOP)
 
 // Per-line display state. It only changes at a line boundary or when one of
 // the registers listed in DMA.h is written, so it is recomputed then instead
@@ -726,6 +731,11 @@ static void dmaUpdateLineState(void) {
     bitplaneLine.enabledMask |= enabledPlanes;
     if (dmaEnabled && displayWindowActive)
         bitplaneLine.fetchEligibleMask |= enabledPlanes;
+    lineBitplaneWindow = dmaEnabled && displayWindowActive;
+    lineFullWidth = omegaDdfIsFullWidth(chipset.ddfstrt);
+    lineHiresDisplayTop = (chipset.diwstrt >> 8) +
+                          omegaDdfUpperOverscan(chipset.ddfstop);
+    lineRowRotation = omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
 
     if(chipset.bplcon0 & 0x8000){
         // The 0x3c full-width window consumes one more word than the narrower
@@ -830,11 +840,23 @@ void dma_execute(){
 }
 
 
+// Copper WAIT comparison (copperExecute() state 3).
+static inline int copperWaitReached(void) {
+    uint32_t beamPosition = ((uint32_t)internal.vPos << 8) | internal.hPos;
+    uint32_t maskedBeam = beamPosition & (0xFFFF0000u | internal.IR2);
+    return maskedBeam >= copperWaitPosition;
+}
+
 void evenCycle(void){
 
-    
-    if(copperExecute()==1){
-        return;
+    // An idle Copper (DMA off, frozen until VBL, or waiting for a beam
+    // position not yet reached) does not take the slot; skip the call. On
+    // the slot a WAIT completes copperExecute() still runs and returns 0.
+    if ((chipset.dmaconr & 0x280) == 0x280 && internal.copperCycle != 4 &&
+        (internal.copperCycle != 3 || copperWaitReached())) {
+        if(copperExecute()==1){
+            return;
+        }
     }
     
     //if the copper doesn't want the even cycle, give it to the odd cycle devices.
@@ -842,11 +864,14 @@ void evenCycle(void){
 
 }
 
+static int blitterState = 0;
+
 void oddCycle(void){
     
-    if(blitterExecute()==1){
+    // An idle Blitter (no blit started) does nothing; skip the call.
+    if (blitterState == 0 && (chipset.dmaconr & 0x4240) != 0x4240)
         return;
-    }
+    blitterExecute();
     
     //A Free slot for CPU... but the CPU isn't currently bound to the DMA timing
     // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
@@ -1022,10 +1047,10 @@ void spriteCycle(void){
 
 
 int bitplaneActive(){
-    //check if DMA is on, if not let the Copper and Blitter run.
-    if((chipset.dmaconr & 0x300) != 0x300){
+    //check if DMA is on and the line is inside the display window (cached
+    //per line); if not let the Copper and Blitter run.
+    if (!lineBitplaneWindow)
         return 0;
-    }
     
     //too early horisonal position let the Copper and Blitter run
     if(internal.hPos<(chipset.ddfstrt)){
@@ -1035,9 +1060,6 @@ int bitplaneActive(){
     if (internal.hPos > bitplaneLine.lastCycle) {
         return 0;
     }
-    
-    if (!displayWindowContainsLine(internal.vPos))
-        return 0;
     
     return 1;
 }
@@ -1229,19 +1251,15 @@ void hiresPlane1(){
 
     // The full-width raster begins 40 PAL beam lines below DIWSTRT. Remove
     // that upper overscan so all 200 useful rows fit in the host framebuffer.
-    if (omegaDdfIsFullWidth(chipset.ddfstrt)) {
-        int upper_overscan =
-            omegaDdfUpperOverscan(chipset.ddfstop);
-        int display_line = internal.vPos - (chipset.diwstrt >> 8) -
-                           upper_overscan;
+    if (lineFullWidth) {
+        int display_line = internal.vPos - lineHiresDisplayTop;
         if (display_line < 0)
             return;
         if (bitplaneLine.hiresWords == 1) {
             host.rasterRow = display_line;
             host.rasterX = 0;
         }
-    } else if (!omegaDdfIsFullWidth(chipset.ddfstrt) &&
-               bitplaneLine.hiresWords == 1) {
+    } else if (bitplaneLine.hiresWords == 1) {
         host.rasterRow = internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
         host.rasterX = 0;
     }
@@ -1255,8 +1273,7 @@ void hiresPlane1(){
         return;
 
     int raster_row = host.rasterRow;
-    int row_rotation =
-        omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
+    int row_rotation = lineRowRotation;
     // The leading words in this layout are the pipeline suffix of the
     // preceding logical scanline. Keep that association in the raw raster.
     if (row_rotation && host.rasterX < row_rotation) {
@@ -1408,7 +1425,7 @@ int copperExecute(){
 
 int blitterExecute(){
     
-    static int state = 0;
+    int state = blitterState;
     
     
     switch(state){
@@ -1488,7 +1505,7 @@ int blitterExecute(){
             break;
     }
     
-    
+    blitterState = state;
     
     return 0;
 }

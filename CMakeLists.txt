@@ -115,6 +115,9 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_DF0_INSERT_AT_BOOT=$<BOOL:${OMEGA_DF0_INSERT_AT_BOOT}>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
     OMEGA_SYS_CLK_KHZ=${OMEGA_SYS_CLK_KHZ}u
+    # Nothing on the device mallocs; keep the SDK's minimum heap so the SRAM
+    # goes to the frames and the core-1 ring.
+    PICO_HEAP_SIZE=0x100
 )
 
 

@@ -307,73 +307,6 @@ void ADF2MFM_from_mem(const uint8_t* adf, uint32_t size, uint8_t* mfm) {
     }
 }
 
-// Encode one cylinder side into a 12,798-byte MFM track. This is the RP2350
-// streaming path: the raw ADF remains in flash and only the selected track is
-// retained in internal SRAM.
-static int ADF2MFM_track_from_mem(const uint8_t *adf, uint32_t size,
-                                  int track, int side, uint8_t *mfm) {
-    if (!adf || !mfm || track < 0 || track >= 80 || side < 0 || side > 1)
-        return 0;
-
-    uint8_t lowlevelSector[544];
-    int s = 0;
-
-    for (int sector = 0; sector < 11; sector++) {
-        uint32_t source_offset =
-            (uint32_t)(((track * 2 + side) * 11 + sector) * 512);
-        if (source_offset + 512u > size)
-            return 0;
-
-        lowlevelSector[0] = 0x00;
-        lowlevelSector[1] = 0x00;
-        lowlevelSector[2] = 0xA1;
-        lowlevelSector[3] = 0xA1;
-        lowlevelSector[4] = 0xFF;
-        lowlevelSector[5] = (uint8_t)((track << 1) | side);
-        lowlevelSector[6] = (uint8_t)sector;
-        lowlevelSector[7] = (uint8_t)(11 - sector);
-        memset(&lowlevelSector[8], 0, 24);
-        memcpy(&lowlevelSector[32], adf + source_offset, 512);
-
-        mfm[s+0] = 0xAA; mfm[s+1] = 0xAA;
-        mfm[s+2] = 0xAA; mfm[s+3] = 0xAA;
-        mfm[s+4] = 0x44; mfm[s+5] = 0x89;
-        mfm[s+6] = 0x44; mfm[s+7] = 0x89;
-
-        encodeBlock(&lowlevelSector[4],  &mfm[s+8],  4);
-        encodeBlock(&lowlevelSector[8],  &mfm[s+16], 16);
-        encodeBlock(&lowlevelSector[32], &mfm[s+64], 512);
-
-        uint8_t hcheck[4] = {0,0,0,0};
-        for (unsigned i = 8; i < 48; i += 4) {
-            hcheck[0] ^= mfm[s+i];   hcheck[1] ^= mfm[s+i+1];
-            hcheck[2] ^= mfm[s+i+2]; hcheck[3] ^= mfm[s+i+3];
-        }
-        memcpy(&lowlevelSector[24], hcheck, sizeof(hcheck));
-        encodeBlock(&lowlevelSector[24], &mfm[s+48], 4);
-
-        uint8_t dcheck[4] = {0,0,0,0};
-        for (unsigned i = 64; i < 1088; i += 4) {
-            dcheck[0] ^= mfm[s+i];   dcheck[1] ^= mfm[s+i+1];
-            dcheck[2] ^= mfm[s+i+2]; dcheck[3] ^= mfm[s+i+3];
-        }
-        memcpy(&lowlevelSector[28], dcheck, sizeof(dcheck));
-        encodeBlock(&lowlevelSector[28], &mfm[s+56], 4);
-
-        for (int i = 8; i < 1088; i++)
-            mfm[s+i] = addClockBits(mfm[s+i-1], mfm[s+i]);
-        s += 1088;
-    }
-
-    mfm[s]   = addClockBits(mfm[s-1], 0);
-    mfm[s+1] = 0xA8; mfm[s+2] = 0x55;
-    mfm[s+3] = 0x55; mfm[s+4] = 0xAA;
-    for (int i = 5; i < 700; i++)
-        mfm[s+i] = addClockBits(mfm[s+i-1], 0);
-    memset(&mfm[s + 700], 0,
-           FLOPPY_MFM_TRACK_SIZE - (unsigned)(s + 700));
-    return 1;
-}
 //*******************************
 
 
@@ -388,10 +321,107 @@ static uint8_t df0_mfm_image[FLOPPY_MFM_TRACK_SIZE * 82 * 2];
 #endif
 
 #ifdef PICO_BUILD
-// The flash-backed DF0 path uses only the selected side in internal SRAM.
-// This removes the 2 MB MFM image and steady-state floppy traffic from PSRAM.
-static uint8_t df0_track_cache[FLOPPY_MFM_TRACK_SIZE]
-    __attribute__((aligned(4)));
+// The flash-backed DF0 path keeps only the selected side as MFM, in the
+// otherwise unused DF0 area of PSRAM. It is accessed through the uncached
+// XIP alias so disk streaming never evicts emulator code or chip RAM from
+// the shared 16 KB XIP cache; SRAM is left for the core-1 ring.
+#define df0_track_cache ((uint8_t *)(PSRAM_BASE - XIP_BASE + \
+                                     XIP_NOCACHE_NOALLOC_BASE + \
+                                     PSRAM_DF0_OFFSET))
+#define DF0_TRACK_WORDS ((FLOPPY_MFM_TRACK_SIZE + 3) / 4)
+// Streams MFM bytes, clock bits included, as 32-bit writes to the
+// uncached PSRAM track buffer.
+typedef struct {
+    volatile uint32_t *dst;
+    uint32_t word;
+    unsigned bytes;
+    uint8_t prev;
+} MfmWriter;
+
+static inline void mfmPut(MfmWriter *w, uint8_t value) {
+    w->word |= (uint32_t)value << (8u * w->bytes);
+    w->prev = value;
+    if (++w->bytes == 4u) {
+        *w->dst++ = w->word;
+        w->word = 0;
+        w->bytes = 0;
+    }
+}
+
+static inline void mfmPutClocked(MfmWriter *w, uint8_t data) {
+    mfmPut(w, addClockBits(w->prev, data));
+}
+
+// encodeBlock() followed by the clock-bit pass, streamed.
+static void mfmPutBlock(MfmWriter *w, const uint8_t *src, int size) {
+    for (int i = 0; i < size; i++)
+        mfmPutClocked(w, (uint8_t)(src[i] >> 1));
+    for (int i = 0; i < size; i++)
+        mfmPutClocked(w, src[i]);
+}
+
+// XOR of encodeBlock(src, size) by byte lane, as the sector checksums take
+// it. Both halves of byte i land in lane i % 4 (size is a multiple of 4).
+static uint32_t mfmBlockSum(const uint32_t *src, int size) {
+    uint32_t sum = 0;
+    for (int i = 0; i < size / 4; i++)
+        sum ^= (src[i] ^ (src[i] >> 1)) & 0x55555555u;
+    return sum;
+}
+
+// Encode one cylinder side into a 12,798-byte MFM track, bit-identical to
+// ADF2MFM(). The raw ADF remains in flash; the track is written straight to
+// `mfm` in PSRAM without a staging copy in SRAM.
+static int ADF2MFM_track_from_mem(const uint8_t *adf, uint32_t size,
+                                  int track, int side, uint8_t *mfm) {
+    if (!adf || !mfm || track < 0 || track >= 80 || side < 0 || side > 1)
+        return 0;
+
+    // Sector bytes 4..543 of lowlevelSector in ADF2MFM(): info, label,
+    // header and data checksums, then the 512 data bytes.
+    uint32_t sector_words[135];
+    uint8_t *info = (uint8_t *)sector_words;
+    MfmWriter w = { (volatile uint32_t *)mfm, 0, 0, 0 };
+
+    for (int sector = 0; sector < 11; sector++) {
+        uint32_t source_offset =
+            (uint32_t)(((track * 2 + side) * 11 + sector) * 512);
+        if (source_offset + 512u > size)
+            return 0;
+
+        info[0] = 0xFF;
+        info[1] = (uint8_t)((track << 1) | side);
+        info[2] = (uint8_t)sector;
+        info[3] = (uint8_t)(11 - sector);
+        memset(&info[4], 0, 16);
+        memcpy(&info[28], adf + source_offset, 512);
+        sector_words[5] = mfmBlockSum(&sector_words[0], 4) ^
+                          mfmBlockSum(&sector_words[1], 16);
+        sector_words[6] = mfmBlockSum(&sector_words[7], 512);
+
+        mfmPut(&w, 0xAA); mfmPut(&w, 0xAA);
+        mfmPut(&w, 0xAA); mfmPut(&w, 0xAA);
+        mfmPut(&w, 0x44); mfmPut(&w, 0x89);
+        mfmPut(&w, 0x44); mfmPut(&w, 0x89);
+        mfmPutBlock(&w, &info[0], 4);
+        mfmPutBlock(&w, &info[4], 16);
+        mfmPutBlock(&w, &info[20], 4);
+        mfmPutBlock(&w, &info[24], 4);
+        mfmPutBlock(&w, &info[28], 512);
+    }
+
+    mfmPutClocked(&w, 0);
+    mfmPut(&w, 0xA8); mfmPut(&w, 0x55);
+    mfmPut(&w, 0x55); mfmPut(&w, 0xAA);
+    for (int i = 5; i < 700; i++)
+        mfmPutClocked(&w, 0);
+    for (int i = 11 * 1088 + 700; i < FLOPPY_MFM_TRACK_SIZE; i++)
+        mfmPut(&w, 0);
+    if (w.bytes)
+        *w.dst = w.word;    // the buffer is padded to a word multiple
+    return 1;
+}
+
 static const uint8_t *df0_adf;
 static uint32_t df0_adf_size;
 static int df0_cached_cylinder = -1;
@@ -424,9 +454,10 @@ int floppyMountADF(int drive, const uint8_t *adf, uint32_t size) {
 
     // Before insertion expose an invalid header rather than mounted data, so
     // Kickstart can finish its no-disk retry and display the hand screen.
-    memset(df0_track_cache, 0, sizeof(df0_track_cache));
-    df0_track_cache[0] = 0x44;
-    df0_track_cache[1] = 0x89;
+    volatile uint32_t *track = (volatile uint32_t *)df0_track_cache;
+    track[0] = 0x8944u;
+    for (int i = 1; i < DF0_TRACK_WORDS; i++)
+        track[i] = 0;
     return 1;
 }
 #endif

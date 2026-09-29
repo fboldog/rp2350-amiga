@@ -203,11 +203,17 @@ How to measure (no halt, firmware keeps running):
       Layouts needing the wrapped-fetch reconstruction keep the old path.
 - [x] **NTSC shows 240 rows** (the full 640x480 mode) instead of 200, so
       overscan screens such as xsysinfo are no longer cut off.
-- [ ] **Colour depth.** RGB332 cannot represent some Amiga colours (e.g. the
-      KS 2.04 disk shutter $998877 shows as olive; blue has 4 levels). Options:
-      store palette indices and expand per line on core 1 (per-line palette
-      snapshots for Copper changes), or allocate the 256 codes per frame from
-      the 4096 Amiga colours with RGB332 as the overflow fallback (HAM).
+- [ ] **Colour depth / palette-index frames.** RGB332 cannot represent some
+      Amiga colours (e.g. the KS 2.04 disk shutter $998877 shows as olive;
+      blue has 4 levels). No fewer colours: RGB222 frames were rejected.
+      Preferred direction: store palette indices (≤ 5 bits) and expand per
+      line on core 1 at scanout, with per-line palette snapshots (~64 B/line)
+      for Copper changes; lossless, and shrinks the double frames from
+      ~320 KB to ~200 KB. HAM cannot be indexed and needs a full-colour frame
+      (single-buffered or in PSRAM). Cost: ~9 Mpixel/s of expansion on core 1
+      next to its conversion work — prototype and measure that first.
+      Alternative: allocate the 256 codes per frame from the 4096 Amiga
+      colours with RGB332 as the overflow fallback (HAM).
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [x] **Pixel conversion on core 1.** Core 0 enqueues bitplane blocks,
@@ -221,9 +227,18 @@ How to measure (no halt, firmware keeps running):
       nothing uses malloc since PicoDVI left). Idle Workbench shown/emulated
       frames: NTSC 22.1/32.0 → 27.1/31.9, PAL 17.5/26.8 → 18.6/26.9; boot
       unchanged (~47 s). SRAM left: ~8.1 KB NTSC, ~3.9 KB PAL.
-- [ ] **Show the rest of PAL's frames.** Its 16 KB ring is too small for the
-      up-to-20 ms wait; converting ahead into a line buffer or freeing SRAM
-      elsewhere would let core 1 wait without skipping.
+- [x] **32 KB ring on PAL; skip only when the ring is full.** The DF0 track
+      moved to PSRAM (uncached, streamed MFM encode, bit-identical tracks)
+      and the linker heap to its 256-byte minimum, which frees the 16 KB.
+      PAL SRAM left: 16 bytes (NTSC ~21 KB). Core 1 now waits for the swap
+      until the ring is full instead of 3/4 full. Idle Workbench
+      emulated/shown, KS1.3+WB1.3: PAL 29.8/20.1 → 29.4/20.5, NTSC
+      35.5/24.5 → 35.3/~26.8; boot 44.1 → 45.1 s (PSRAM track).
+- [ ] **Show the rest of PAL's frames.** A PAL Workbench frame is ~4× the
+      ring, so no affordable ring absorbs the wait for the 50 Hz swap. Never
+      skipping (`OMEGA_RING_SKIP_WORDS=RING_WORDS+1`) gives a steady 25/25
+      but costs ~15 % emulation speed. Needs SRAM freed by the frames
+      themselves (see colour depth: palette indices, or frames in PSRAM).
 
 ### P2 – Emulation core
 Profile on the Kickstart 1.3 hand screen (NTSC, after the RGB332 render; the
@@ -260,8 +275,14 @@ appears only ~2 min 12 s later.
       fetch-end work in separate functions. Native frames bit-identical.
       PAL 320 MHz: boot (first AmigaDOS/WB frame) 64.7 → 52.9 s, idle 17.9 →
       22.9 vblanks/s.
-- [ ] **Per-slot overhead, part 2.** A fast path for slots with no DMA and a
-      cheap skip of `copperExecute()` while the Copper waits.
+- [x] **Per-slot overhead, part 2.** Per-line cached bitplane window,
+      full-width flag, hires top row and row rotation; `evenCycle` skips
+      `copperExecute()` while the Copper waits (`copperWaitReached()`),
+      `oddCycle` skips the blitter when it is idle. Native frames
+      bit-identical. KS1.3+WB1.3, 320 MHz: boot to the Workbench icons ~47 →
+      44.1 s; idle emulated vblanks/s PAL 26.9 → 29.8, NTSC 31.9 → 35.5.
+      Faster emulation fills the ring sooner, so NTSC shown fell 27.1 → 24.5
+      until the skip point moved to a full ring (above).
 - [ ] **SRAM window over low chip RAM** (vectors, stacks, hot Exec data) once
       SRAM is available; one compare per access saves a QSPI round trip.
 
@@ -275,6 +296,12 @@ appears only ~2 min 12 s later.
       240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s. Long-term stability at
       320 MHz / 1.20 V not yet soak-tested. USB needs an external 48 MHz
       clock (GPIN0/GPIO20) or a multiple-of-48 `clk_sys`.
+- [ ] **Soak-test 320 MHz.** A KS 2.04 run once derailed the 68k (illegal
+      exception with a bogus supervisor stack) and not again in a 5 min
+      rerun; overclock or PSRAM timing is suspected. The resulting host
+      hard fault is fixed: word/long writes beyond 0xDFF1FF no longer index
+      past `putChipReg16/32`, and long reads beyond the 16-entry
+      `getChipReg32` return 0.
 - [x] **Frame pacing.** The emulator no longer waits for the display
       (idle Workbench had been capped at 50/3 vblanks/s). The first version
       took back unshown frames, which could stop frames from ever being

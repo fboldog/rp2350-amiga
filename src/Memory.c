@@ -205,7 +205,9 @@ unsigned int chipReadLong(unsigned int address) {
     // Custom chipset registers (32-bit = two 16-bit reads)
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
-        off &= 0xFFu;
+        // getChipReg32 covers only the first 16 registers; everything else
+        // (including autoconfig space) reads 0 like its noReadL entries.
+        if (off >= 16u) return 0;
         debugChipAddress = off;
         return getChipReg32[off]();
     }
@@ -262,6 +264,10 @@ void chipWriteWord(unsigned int address, unsigned int value) {
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
+        // The tables cover 0xDFF000..0xDFF1FF. A runaway 68k can write
+        // anywhere up to the ROM; ignore it rather than jump through a
+        // pointer read past the table.
+        if (off >= 256u) return;
         debugChipAddress = off;
         debugChipValue   = value;
         putChipReg16[off]((uint16_t)value);
@@ -293,6 +299,7 @@ void chipWriteLong(unsigned int address, unsigned int value) {
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
+        if (off >= 256u) return;    // see chipWriteWord
         debugChipAddress = off;
         putChipReg32[off](value);
         return;

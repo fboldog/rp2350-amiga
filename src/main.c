@@ -94,7 +94,7 @@ static bool load_df0_from_flash(void) {
 
     if (!floppyMountADF(0, adf_data, FLOPPY_ADF_SIZE))
         return false;
-    printf("DF0: flash ADF mounted with %u-byte SRAM track cache\n",
+    printf("DF0: flash ADF mounted with a %u-byte PSRAM track buffer\n",
            FLOPPY_MFM_TRACK_SIZE);
     return true;
 }

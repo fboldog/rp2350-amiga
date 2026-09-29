@@ -83,7 +83,8 @@
 //  0x000000..0x1FFFFF  Chip RAM        (2 MB)      Amiga 0x000000..0x1FFFFF
 //  0x200000..0x27FFFF  Slow/Ranger RAM (512 KB)    Amiga 0xC00000..0xC7FFFF
 //  0x280000..0x47FFFF  DF0 MFM buffer  (2 MB; empty-drive image when no ADF
-//                                       is in flash; the ADF itself streams)
+//                                       is in flash, else the active track,
+//                                       read uncached; the ADF streams)
 //  0x480000..0x4FFFFF  SD Kickstart cache (512 KB, SD-card builds)
 //  0x540000..0x639FFF  Video DMA raster scratch (640x400 ARGB32, 1000 KB)
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
