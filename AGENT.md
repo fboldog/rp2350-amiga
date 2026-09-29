@@ -23,7 +23,7 @@ rp2350-amiga/
 │   ├── psram.h / psram.c   Simple hardware_psram availability + read/write test
 │   ├── Memory.h / Memory.c PSRAM-backed chipRead*/chipWrite* (no 16 MB array)
 │   ├── Host.h / Host.c     SDL-free host: raster presentation and frame submission
-│   └── dvi_display.*      HSTX HDMI scanout: SRAM RGB332 frames, core-1 DMA IRQ
+│   └── dvi_display.*      HSTX HDMI scanout: SRAM indexed frames, core-1 DMA IRQ
 ├── native/                 Head-less PC runner (see native/README.md)
 ├── omega/                  Upstream Omega source (minimal diffs from original)
 │   ├── CPU.c               +#ifdef PICO_BUILD guard in cpu_pulse_reset
@@ -138,13 +138,16 @@ All RP2350-specific code in omega/ files uses:
 
 ### Display output
 HDMI runs on the RP2350 HSTX peripheral (GPIO12..19), which TMDS-encodes
-RGB332 in hardware. Two ping-pong DMA channels feed it a scanline at a time;
-core 1 only handles one DMA interrupt per line (`hstx_dma_irq` in
-`src/dvi_display.c`) and swaps frames at line 0. The emulator renders most
-screens straight to RGB332 into double-buffered 640×240 (NTSC) or 640×256
-(PAL) frames in SRAM (`hostDirect*` in `src/Host.c`); wrapped-fetch and HAM
-screens still use the ARGB raster and presentation path. Verified on hardware
-through the Kickstart boot screens, Workbench 1.3 and xsysinfo.
+RGB888 in hardware. Two ping-pong DMA channels feed it a scanline at a time;
+core 1 handles one DMA interrupt per line (`hstx_dma_irq` in
+`src/dvi_display.c`), swaps frames at line 0 and expands each image row once
+to RGB888. The emulator renders most screens, HAM included, as Amiga colour
+numbers into double-buffered 640×240 (NTSC) or 640×256 (PAL) indexed frames
+in SRAM (`hostDirect*` in `src/Host.c`, `dvi_indexed_frame_t`); scanout
+replays the frame's palette log, so colours are the exact 12-bit ones.
+Wrapped-fetch screens still use the ARGB raster and presentation path
+(RGB332). Verified on hardware through the Kickstart boot screens,
+Workbench 1.3, xsysinfo and RemGame (HAM; sprites are not emulated).
 
 The interrupt must re-arm the finished channel before the other finishes its
 line (~30 µs). Keep it in RAM and free of PSRAM/flash accesses: the emulator

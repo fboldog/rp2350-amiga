@@ -1,9 +1,12 @@
 // DVI/HDMI scanout through the RP2350 HSTX peripheral (WeAct GPIO12..19).
 //
-// HSTX TMDS-encodes RGB332 pixels in hardware. Two ping-pong DMA channels
-// feed it one scanline at a time; core 1 only services one DMA interrupt per
-// line. Core 0 fills double-buffered RGB332 frames in SRAM, and core 1
-// changes buffers only at a DVI frame boundary.
+// HSTX TMDS-encodes RGB888 pixels in hardware. Two ping-pong DMA channels
+// feed it one scanline at a time. The double-buffered SRAM frames hold one
+// byte per pixel: Amiga colour register numbers / HAM codes (indexed frames,
+// see dvi_indexed_frame_t) or RGB332 (boot pattern and the ARGB paths). The
+// per-line DMA interrupt on core 1 expands each image row once into RGB888
+// and sends it on both of its lines. Buffers change only at a DVI frame
+// boundary.
 
 #include "dvi_display.h"
 #include "board_config.h"
@@ -76,6 +79,9 @@ static uint8_t sram_frames[2][DVI_FRAME_BYTES] __attribute__((aligned(4)));
 
 static uint8_t *source_frames[2];
 static bool source_frame_has_emulator[2];
+// Indexed frames carry colour numbers plus this record; the others RGB332.
+static bool frame_indexed[2];
+static dvi_indexed_frame_t frame_records[2];
 // Frame handshake, one atomic word: bit 0 is the displayed buffer, bit 1 set
 // means the other buffer holds a finished frame waiting for the next DVI
 // frame boundary (the scanout interrupt swaps at line 0). A finished frame
@@ -111,9 +117,29 @@ static inline bool __not_in_flash_func(boot_pattern_showing)(void) {
     return !boot_pattern_armed ||
            (int32_t)(timer_hw->timerawl - boot_pattern_until_lo) < 0;
 }
-// Border colour (COLOR00) of each frame. Like a real Amiga, the areas around
-// the image show the border colour rather than black.
-static uint8_t frame_border[2];
+// Border colour (COLOR00, RGB888) of each frame, for the lines above and
+// below the image. Like a real Amiga, the areas around the image show the
+// border colour rather than black; indexed rows use their own COLOR00.
+static uint32_t frame_border[2];
+
+// 0x0RGB -> RGB888 (each nibble doubled: 0xF -> 0xFF).
+static inline uint32_t ocs_rgb888(uint32_t c) {
+    return ((c & 0xf00u) << 8 | (c & 0xf0u) << 4 | (c & 0xfu)) * 0x11u;
+}
+// RGB332 -> RGB888, full range.
+static uint32_t rgb332_rgb888[256];
+
+static void dvi_init_rgb332_table(void) {
+    for (uint i = 0; i < 256u; ++i) {
+        const uint r = (i >> 5) & 7u, g = (i >> 2) & 7u, b = i & 3u;
+        rgb332_rgb888[i] = (r * 255u + 3u) / 7u << 16 |
+                           (g * 255u + 3u) / 7u << 8 | b * 85u;
+    }
+}
+
+static inline uint32_t argb_rgb888(uint32_t argb) {
+    return argb & 0xffffffu;
+}
 
 // Returns the first pixel of image row y (0..AMIGA_SOURCE_HEIGHT-1).
 static inline uint8_t *dvi_image_row(uint8_t *frame, uint y) {
@@ -132,6 +158,7 @@ static bool dvi_begin_submit(int *target_out, uint8_t **dst_out) {
         return false;
     int target = dvi_claim_back_buffer();
     uint8_t *dst = source_frames[target];
+    frame_indexed[target] = false;
     if (!source_frame_has_emulator[target]) {
         memset(dst, 0, DVI_FRAME_BYTES);
         source_frame_has_emulator[target] = true;
@@ -158,18 +185,21 @@ int __not_in_flash_func(dvi_display_direct_height)(void) {
     return AMIGA_SOURCE_HEIGHT;
 }
 
-uint8_t *__not_in_flash_func(dvi_display_direct_acquire)(void) {
+uint8_t *__not_in_flash_func(dvi_display_direct_acquire)(
+    dvi_indexed_frame_t **record) {
     if (boot_pattern_showing())
         return NULL;
     direct_target = dvi_claim_back_buffer();
     source_frame_has_emulator[direct_target] = true;
+    *record = &frame_records[direct_target];
     return source_frames[direct_target];
 }
 
-void __not_in_flash_func(dvi_display_direct_publish_rgb332)(uint8_t border) {
+void __not_in_flash_func(dvi_display_direct_publish)(uint16_t border) {
     if (direct_target < 0)
         return;
-    frame_border[direct_target] = border;
+    frame_indexed[direct_target] = true;
+    frame_border[direct_target] = ocs_rgb888(border);
     dvi_publish_frame(direct_target);
     direct_target = -1;
 }
@@ -184,7 +214,7 @@ bool dvi_display_submit_frame(const uint32_t *argb_frame) {
 
     // The presented frame's corner always holds the border colour.
     const uint8_t border_pixel = dvi_rgb332(argb_frame[0]);
-    frame_border[target] = border_pixel;
+    frame_border[target] = argb_rgb888(argb_frame[0]);
     for (uint y = 0; y < AMIGA_SOURCE_HEIGHT; ++y) {
         uint8_t *dst_row = dvi_image_row(dst, y);
         // The presented framebuffer holds SCREEN_H / 2 logical rows.
@@ -214,7 +244,7 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
         return false;
 
     const uint8_t border_pixel = dvi_rgb332(border);
-    frame_border[target] = border_pixel;
+    frame_border[target] = argb_rgb888(border);
     const int first_source_y = y_offset / 2;
     const int source_rows = HOST_RASTER_H / source_step;
 
@@ -297,9 +327,10 @@ static uint32_t border_line[] = {
     HSTX_CMD_NOP,
 };
 
-// Image line: blanking, left border, 640 pixels, right border. Each DMA
-// channel owns one, refilled from the SRAM frame while the other is sent.
-#define IMAGE_PIXEL_WORDS (AMIGA_SOURCE_WIDTH / 4u)
+// Image row: blanking, left border, 640 RGB888 pixels, right border. Each
+// row is expanded once and sent on both of its lines, from buffer
+// (row & 1): the other buffer's row is still being sent.
+#define IMAGE_PIXEL_WORDS AMIGA_SOURCE_WIDTH
 enum {
     IMAGE_LINE_HEADER = 8,
     IMAGE_LINE_LEFT = IMAGE_LINE_HEADER,          // TMDS_REPEAT, colour
@@ -310,10 +341,149 @@ enum {
 };
 static uint32_t image_lines[2][IMAGE_LINE_WORDS] __attribute__((aligned(4)));
 
+// Scanout state of the displayed indexed frame: the palette after
+// scan_applied log entries, as RGB888 (32..63 extra half-brite).
+static uint32_t scan_palette[64];
+static uint32_t scan_applied;
+// Branchless HAM:
+//   next = (previous & scan_ham_keep[code >> 4]) | scan_ham_set[code].
+// Codes 0x00..0x0f load a colour register (keep nothing), 0x10/0x20/0x30
+// replace blue/red/green.
+static uint32_t scan_ham_keep[4] = { 0u, 0xffff00u, 0x00ffffu, 0xff00ffu };
+static uint32_t scan_ham_set[64];
+
+static void dvi_init_ham_tables(void) {
+    static const uint8_t shift[4] = { 0, 0, 16, 8 };
+    for (uint code = 0; code < 64u; ++code) {
+        if (code >= 16u)
+            scan_ham_set[code] = (code & 0xfu) * 0x11u << shift[code >> 4];
+    }
+}
+
+// Loops here must not become libc calls (flash code) inside the interrupt.
+#define SCAN_FUNC(name) \
+    __attribute__((optimize("no-tree-loop-distribute-patterns"))) \
+    __not_in_flash_func(name)
+
+static inline void scan_set_register(uint32_t reg, uint32_t colour) {
+    const uint32_t rgb = ocs_rgb888(colour);
+    scan_palette[reg] = rgb;
+    scan_palette[reg + 32u] = ocs_rgb888((colour >> 1) & 0x777u);
+    if (reg < 16u)
+        scan_ham_set[reg] = rgb;
+}
+
+static void SCAN_FUNC(scan_begin_frame)(int frame) {
+    if (!frame_indexed[frame])
+        return;
+    const dvi_indexed_frame_t *rec = &frame_records[frame];
+    for (uint32_t i = 0; i < 32u; ++i)
+        scan_set_register(i, rec->initial_palette[i]);
+    scan_applied = 0;
+}
+
+static inline void scan_apply_log(const dvi_indexed_frame_t *rec,
+                                  uint32_t pos) {
+    while (scan_applied < pos) {
+        const uint32_t entry = rec->palette_log[scan_applied++];
+        scan_set_register(entry >> 12, entry & 0xfffu);
+    }
+}
+
+static inline void scan_fill(uint32_t *out, uint32_t x0, uint32_t x1,
+                             uint32_t colour) {
+    for (uint32_t x = x0; x < x1; ++x)
+        out[x] = colour;
+}
+
+static void SCAN_FUNC(scan_indexed)(uint32_t *out, const uint8_t *row,
+                                    uint32_t x0, uint32_t x1) {
+    const uint32_t *palette = scan_palette;
+    uint32_t x = x0;
+    for (; x < x1 && (x & 3u); ++x)
+        out[x] = palette[row[x] & 63u];
+    // Four pixels per word load.
+    for (; x + 4u <= x1; x += 4u) {
+        const uint32_t four = *(const uint32_t *)&row[x];
+        out[x] = palette[four & 63u];
+        out[x + 1u] = palette[(four >> 8) & 63u];
+        out[x + 2u] = palette[(four >> 16) & 63u];
+        out[x + 3u] = palette[(four >> 24) & 63u];
+    }
+    for (; x < x1; ++x)
+        out[x] = palette[row[x] & 63u];
+}
+
+// HAM is LORES only, so every code covers an aligned pair of columns;
+// decode each pair once. Odd bounds fall back to single pixels.
+static uint32_t SCAN_FUNC(scan_ham)(uint32_t *out, const uint8_t *row,
+                                    uint32_t x0, uint32_t x1, uint32_t hold) {
+    const uint32_t *keep = scan_ham_keep, *set = scan_ham_set;
+    if ((x0 | x1) & 1u) {
+        for (uint32_t x = x0; x < x1; ++x) {
+            const uint32_t code = row[x] & 63u;
+            hold = (hold & keep[code >> 4]) | set[code];
+            out[x] = hold;
+        }
+        return hold;
+    }
+    for (uint32_t x = x0; x < x1; x += 2u) {
+        const uint32_t code = row[x] & 63u;
+        hold = (hold & keep[code >> 4]) | set[code];
+        out[x] = hold;
+        out[x + 1u] = hold;
+    }
+    return hold;
+}
+
+// Expands image row y of `frame` into out[0..640); returns the row's
+// border colour.
+static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
+    const uint8_t *row = dvi_image_row(source_frames[frame], y);
+    if (!frame_indexed[frame]) {
+        for (uint x = 0; x < AMIGA_SOURCE_WIDTH; ++x)
+            out[x] = rgb332_rgb888[row[x]];
+        return frame_border[frame];
+    }
+    const dvi_indexed_frame_t *rec = &frame_records[frame];
+    const uint32_t first = rec->row_segment[y];
+    const uint32_t last = rec->row_segment[y + 1u];
+    if (first == last) {
+        if (rec->segment_overflow && first == rec->segments_used)
+            scan_indexed(out, row, 0, AMIGA_SOURCE_WIDTH);
+        else
+            scan_fill(out, 0, AMIGA_SOURCE_WIDTH, scan_palette[0]);
+        return scan_palette[0];
+    }
+    // Columns outside the drawn runs show COLOR00 as the row began.
+    scan_apply_log(rec, DVI_SEGMENT_POS(rec->segment[first]));
+    const uint32_t border = scan_palette[0];
+    uint32_t min = AMIGA_SOURCE_WIDTH, max = 0;
+    for (uint32_t i = first; i < last; ++i) {
+        const uint32_t seg = rec->segment[i];
+        if (DVI_SEGMENT_X0(seg) < min) min = DVI_SEGMENT_X0(seg);
+        if (DVI_SEGMENT_X1(seg) > max) max = DVI_SEGMENT_X1(seg);
+    }
+    scan_fill(out, 0, min, border);
+    scan_fill(out, max, AMIGA_SOURCE_WIDTH, border);
+    // Runs in drawing order, so the palette log only moves forward; HAM
+    // holds its colour across runs, starting from COLOR00.
+    uint32_t hold = border;
+    for (uint32_t i = first; i < last; ++i) {
+        const uint32_t seg = rec->segment[i];
+        scan_apply_log(rec, DVI_SEGMENT_POS(seg));
+        if (DVI_SEGMENT_HAM(seg))
+            hold = scan_ham(out, row, DVI_SEGMENT_X0(seg),
+                            DVI_SEGMENT_X1(seg), hold);
+        else
+            scan_indexed(out, row, DVI_SEGMENT_X0(seg), DVI_SEGMENT_X1(seg));
+    }
+    return border;
+}
+
 static uint hstx_dma[2];
 static uint hstx_next_line;
 static int hstx_active_frame;
-static uint32_t hstx_border_word;
 
 static void hstx_init_line_buffers(void) {
     static const uint32_t header[IMAGE_LINE_HEADER] = { HBLANK_CMDS(1) };
@@ -347,24 +517,20 @@ static void __not_in_flash_func(hstx_program_next)(uint index) {
             hstx_active_frame = (int)((state & 1u) ^ 1u);
             dvi_frames_shown++;
         }
-        hstx_border_word = frame_border[hstx_active_frame] * 0x01010101u;
-        border_line[BORDER_LINE_COLOUR_WORD] = hstx_border_word;
+        border_line[BORDER_LINE_COLOUR_WORD] = frame_border[hstx_active_frame];
+        scan_begin_frame(hstx_active_frame);
     }
 
     const uint32_t *list;
     uint count;
+    int expand_y = -1;
     if (line < MODE_V_ACTIVE_LINES) {
         const uint image_y = line / 2u - DVI_IMAGE_Y0;
         if (image_y < AMIGA_SOURCE_HEIGHT) {
-            uint32_t *out = image_lines[index];
-            const uint32_t *row = (const uint32_t *)dvi_image_row(
-                source_frames[hstx_active_frame], image_y);
-            for (uint i = 0; i < IMAGE_PIXEL_WORDS; ++i)
-                out[IMAGE_LINE_PIXELS + i] = row[i];
-            if (DVI_IMAGE_X0) {
-                out[IMAGE_LINE_LEFT + 1] = hstx_border_word;
-                out[IMAGE_LINE_RIGHT + 1] = hstx_border_word;
-            }
+            uint32_t *out = image_lines[image_y & 1u];
+            // The first line of each row expands it; the second resends it.
+            if (!(line & 1u))
+                expand_y = (int)image_y;
             list = out;
             count = IMAGE_LINE_WORDS;
         } else {
@@ -383,6 +549,19 @@ static void __not_in_flash_func(hstx_program_next)(uint index) {
     dma_channel_hw_t *ch = &dma_hw->ch[hstx_dma[index]];
     ch->read_addr = (uintptr_t)list;
     ch->transfer_count = count;
+
+    // Expand after reprogramming: this channel starts only when the other
+    // finishes its line, and the line's commands never change, so a late
+    // expansion can at worst tear a row, never lose sync.
+    if (expand_y >= 0) {
+        uint32_t *out = image_lines[expand_y & 1];
+        const uint32_t border = scan_expand_row(
+            hstx_active_frame, (uint)expand_y, out + IMAGE_LINE_PIXELS);
+        if (DVI_IMAGE_X0) {
+            out[IMAGE_LINE_LEFT + 1] = border;
+            out[IMAGE_LINE_RIGHT + 1] = border;
+        }
+    }
 }
 
 static void __not_in_flash_func(hstx_dma_irq)(void) {
@@ -405,18 +584,19 @@ static void hstx_configure(void) {
         5u << HSTX_CTRL_CSR_N_SHIFTS_LSB |
         2u << HSTX_CTRL_CSR_SHIFT_LSB |
         HSTX_CTRL_CSR_EN_BITS;
-    // RGB332: red bits 7:5 (lane 2), green 4:2 (lane 1), blue 1:0 (lane 0).
+    // RGB888: red bits 23:16 (lane 2), green 15:8 (lane 1), blue 7:0
+    // (lane 0); each lane encodes bits 7:0 of the word rotated right.
     hstx_ctrl_hw->expand_tmds =
-        2u << HSTX_CTRL_EXPAND_TMDS_L2_NBITS_LSB |
-        0u << HSTX_CTRL_EXPAND_TMDS_L2_ROT_LSB |
-        2u << HSTX_CTRL_EXPAND_TMDS_L1_NBITS_LSB |
-        29u << HSTX_CTRL_EXPAND_TMDS_L1_ROT_LSB |
-        1u << HSTX_CTRL_EXPAND_TMDS_L0_NBITS_LSB |
-        26u << HSTX_CTRL_EXPAND_TMDS_L0_ROT_LSB;
-    // Four 8-bit pixels per data word; control words are raw 30-bit symbols.
+        7u << HSTX_CTRL_EXPAND_TMDS_L2_NBITS_LSB |
+        16u << HSTX_CTRL_EXPAND_TMDS_L2_ROT_LSB |
+        7u << HSTX_CTRL_EXPAND_TMDS_L1_NBITS_LSB |
+        8u << HSTX_CTRL_EXPAND_TMDS_L1_ROT_LSB |
+        7u << HSTX_CTRL_EXPAND_TMDS_L0_NBITS_LSB |
+        0u << HSTX_CTRL_EXPAND_TMDS_L0_ROT_LSB;
+    // One pixel per data word; control words are raw 30-bit symbols.
     hstx_ctrl_hw->expand_shift =
-        4u << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
-        8u << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
+        1u << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
+        0u << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
         1u << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
         0u << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
 
@@ -481,7 +661,10 @@ void dvi_display_init(void) {
     source_frames[1] = sram_frames[1];
     source_frame_has_emulator[0] = false;
     source_frame_has_emulator[1] = false;
+    frame_indexed[0] = frame_indexed[1] = false;
     frame_state = 0;
+    dvi_init_rgb332_table();
+    dvi_init_ham_tables();
 
     // main.c runs PLL_USB at the TMDS bit rate. Two bits leave per clk_hstx
     // cycle, so clk_hstx = PLL_USB / 2 (126 MHz NTSC, 135 MHz PAL), and

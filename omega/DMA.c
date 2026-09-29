@@ -589,6 +589,7 @@ typedef struct {
     int loresWords;
     uint8_t enabledMask;
     uint8_t fetchEligibleMask;
+    uint8_t inDisplayWindow;        // the line was inside DIW's vertical range
     uint8_t fetchedMask;
     uint8_t fetchWindowComplete;
     uint32_t pointerAtFetchCompletion[4];
@@ -606,6 +607,7 @@ static void resetBitplaneLine(void) {
     bitplaneLine.loresWords = 0;
     bitplaneLine.enabledMask = 0;
     bitplaneLine.fetchEligibleMask = 0;
+    bitplaneLine.inDisplayWindow = 0;
     bitplaneLine.fetchedMask = 0;
     bitplaneLine.fetchWindowComplete = 0;
     bitplaneLine.pointerHighWriteMask = 0;
@@ -661,6 +663,15 @@ static void advanceBitplanePointers(void) {
         return;
     }
 
+    // Like OCS Agnus, a line outside the vertical display window fetches
+    // nothing and adds no modulo. Adding it there moved every plane of a
+    // game that loads BPLxPT at the top of the frame (RemGame: HAM, modulo
+    // 212, display from line $2c) 44 lines of modulo too far on. Inside the
+    // window the compatibility advancement stays: Kickstart 2.x/3.x load
+    // their pointers mid-line just before a few no-fetch lines, and the
+    // display layout is calibrated with the modulo applied there.
+    if (!bitplaneLine.inDisplayWindow)
+        return;
     fetched = bitplaneLine.fetchEligibleMask != 0
         ? bitplaneLine.fetchEligibleMask
         : lastFetchedMask;
@@ -729,6 +740,7 @@ static void dmaUpdateLineState(void) {
     int dmaEnabled = (chipset.dmaconr & 0x300) == 0x300;
     int displayWindowActive = displayWindowContainsLine(internal.vPos);
     bitplaneLine.enabledMask |= enabledPlanes;
+    bitplaneLine.inDisplayWindow |= (uint8_t)displayWindowActive;
     if (dmaEnabled && displayWindowActive)
         bitplaneLine.fetchEligibleMask |= enabledPlanes;
     lineBitplaneWindow = dmaEnabled && displayWindowActive;
@@ -1151,8 +1163,8 @@ void loresPlane1(void){
         host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W)
         return;
     
-    if (hostDirectActive && !(chipset.bplcon0 & 0x800)) {
-        hostDirectLores(host.rasterRow, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat, chipset.bpl5dat, chipset.bpl6dat);
+    if (hostDirectActive) {
+        hostDirectLores(host.rasterRow, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat, chipset.bpl5dat, chipset.bpl6dat, chipset.bplcon0 & 0x800);
     } else {
         uint32_t *pixels = hostRasterPixels(host.rasterRow, host.rasterX);
         if(chipset.bplcon0 & 0x800){

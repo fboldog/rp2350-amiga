@@ -109,11 +109,13 @@ Output: `<build-directory>/omega-amiga.uf2`
 ### HDMI output
 
 `src/dvi_display.c` drives the RP2350 **HSTX** peripheral. HSTX TMDS-encodes
-RGB332 pixels in hardware; its command lists generate syncs and porches, and
-`TMDS_REPEAT` commands fill the borders. Two ping-pong DMA channels feed it
-one scanline at a time. Core 1 only services one DMA interrupt per line
-(copying the next 640-pixel image row into that channel's line buffer) and
-swaps frames at line 0, so no scanline can be late.
+RGB888 pixels (one per 32-bit word) in hardware; its command lists generate
+syncs and porches, and `TMDS_REPEAT` commands fill the borders. Two ping-pong
+DMA channels feed it one scanline at a time. Core 1 services one DMA
+interrupt per line: it re-arms the finished channel first and then expands
+the next image row into one of two RGB888 row buffers, which is sent on both
+of the row's lines. Because the line commands never change, a late expansion
+could at worst tear a row, never lose sync; swaps happen at line 0.
 
 HSTX has its own clock: `PLL_USB` is retuned to the TMDS bit rate (252 MHz
 NTSC, 270 MHz PAL) and `clk_hstx` is `PLL_USB / 2`, since HSTX outputs two
@@ -134,8 +136,9 @@ The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
 each fetched bitplane block, palette changes and frame begin/end into a 32 KB
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`), so Copper palette changes still reach the right pixels. HAM
-blocks are converted on core 0 and sent as ready pixels. Everything core 1
+`src/Host.c`). The ring is 32 KB on NTSC and 16 KB on PAL (PAL's larger
+frames and their records leave no room for more; 32 KB had only moved PAL
+from 20.1 to 20.5 shown frames/s). Everything core 1
 executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
 traffic once delayed the line interrupt past its deadline and stopped the
 DMA chain.
@@ -144,10 +147,11 @@ The frame handshake is one atomic word (displayed buffer + pending flag);
 core 1 switches to the pending frame at line 0. A finished frame is never
 taken back. If it has not been shown when the next frame starts, core 1
 waits for the swap (≤ one display frame) while core 0 keeps queueing, and
-skips drawing that frame only if core 0 fills the ring first, so the emulator
-barely waits for the display. `OMEGA_RING_SKIP_WORDS` sets the skip point;
-`RING_WORDS + 1` never skips and locks emulation to the display cadence
-(PAL idle Workbench 25.0/25.0 emulated/shown frames/s instead of 29.4/20.5). `dvi_frames_shown` counts the frames actually shown.
+skips drawing that frame once core 0 can no longer queue the largest message
+(17 words), so the emulator barely waits for the display.
+`OMEGA_RING_SKIP_WORDS` sets the skip point; `RING_WORDS` never skips and
+locks emulation to the display cadence (PAL idle Workbench 25.0/25.0
+emulated/shown frames/s instead of 29.4/20.6). `dvi_frames_shown` counts the frames actually shown.
 
 The DVI mode is standard: 640×480p60 (VGA, 25.2 MHz pixels, 252 MHz) for
 NTSC or CEA 720×576p50 (270 MHz) for PAL. Each stored image row is sent
@@ -159,14 +163,25 @@ mode at 252 MHz ran off-standard at ~55.9 Hz, which capture devices locked
 onto unreliably.
 
 The image is 640 pixels wide without upscaling, so HIRES (e.g. Workbench
-text) keeps every pixel. Its two 640×240 (NTSC) or 640×256 (PAL) RGB332 frames
-live in internal SRAM, not PSRAM: the emulator saturates the shared QMI bus.
-The emulator converts each bitplane block straight to RGB332 into the free
-frame (`hostDirectHires()`/`hostDirectLores()`, `hostRasterPixels()`/
-`hostRasterWritten()` in `src/Host.c`), so the display path does not touch
-PSRAM. Narrow fetch layouts use the same path with the presentation mapping;
-only layouts that need the wrapped-fetch reconstruction, and HAM, fall back
-to the ARGB raster in PSRAM.
+text) keeps every pixel. Its two 640×240 (NTSC) or 640×256 (PAL) frames live
+in internal SRAM, not PSRAM: the emulator saturates the shared QMI bus.
+
+Colours are exact. The frames hold one byte per pixel: the Amiga colour
+register number (0..31, 32..63 extra half-brite) or, on HAM runs, the raw
+6-bit HAM code. Core 1 converts each bitplane block to those numbers
+(`hostDirectHires()`/`hostDirectLores()`, HAM included) and keeps a record
+per frame (`dvi_indexed_frame_t`): the palette at frame begin, a log of every
+colour change (up to 448), and for each row the runs of pixels it drew with
+the log position before them (up to 640). Scanout replays the log in drawing
+order and expands each row to RGB888 with the 12-bit colours doubled to 8 bits
+(0xF → 0xFF), so Copper palette changes (the Kickstart 2.04 rainbow, border
+gradients) keep their exact colours even mid-line; a row's undrawn columns
+and the PAL side borders show that row's COLOR00. HAM holds its colour across
+the row from COLOR00, as on real hardware. A full log drops further changes
+for the rest of that frame; the next frame starts from the full palette.
+Narrow fetch layouts use the same path with the presentation mapping; only
+layouts that need the wrapped-fetch reconstruction fall back to the ARGB
+raster in PSRAM, shown as RGB332.
 
 The frames show colour bars for the first 1.5 seconds, then emulator video.
 HSTX starts a few seconds after reset, once core 0 has validated PSRAM and
@@ -189,7 +204,7 @@ DVI: HSTX 640x480p60 emulator scanout on GPIO12..19
 DF0: flash ADF mounted with a 12798-byte PSRAM track buffer
 DF0: disk inserted at boot; KEY ejects/reinserts it
 Entering emulation loop
-DVI: first direct RGB332 emulator frame queued
+DVI: first indexed emulator frame queued
 ```
 
 ### Load Kickstart from microSD
@@ -252,8 +267,8 @@ Hold BOOTSEL and connect USB, then copy the generated combined UF2 to the
 ## Display pipeline
 
 The raw DMA raster is at `PSRAM_BASE + PSRAM_VIDEO_RASTER_OFFSET`. HDMI
-full-width and narrow modes render straight to the RGB332 SRAM frames;
-wrapped-fetch and HAM modes use the raster, and wrapped-fetch modes also the
+full-width and narrow modes (HAM included) render straight to the indexed
+SRAM frames; wrapped-fetch modes use the raster and the
 640×400 ARGB presentation fallback at `PSRAM_BASE + PSRAM_FRAMEBUF_OFFSET`.
 Logical Amiga scanlines and LORES overscan positioning match the native test
 runner.

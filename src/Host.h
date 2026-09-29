@@ -68,9 +68,9 @@ static inline void hostRasterWritten(int row, int x, int width) {
 }
 #endif
 
-// Direct RGB332 rendering (RP2350 HDMI): while hostDirectActive, the DMA
-// converts plain bitplane blocks with these table-driven functions instead of
-// hostRasterPixels()/hostRasterWritten() (HAM still uses the ARGB path).
+// Direct indexed rendering (RP2350 HDMI): while hostDirectActive, the DMA
+// hands every bitplane block (HAM included) to these functions instead of
+// hostRasterPixels()/hostRasterWritten().
 #if defined(PICO_BUILD) && OMEGA_ENABLE_HDMI
 extern int hostDirectActive;
 // Core 1 work loop (never returns): converts the enqueued blocks into the
@@ -79,7 +79,7 @@ void hostCore1Loop(void);
 void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
                      uint16_t p3, uint16_t p4);
 void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
-                     uint16_t p4, uint16_t p5, uint16_t p6);
+                     uint16_t p4, uint16_t p5, uint16_t p6, int ham);
 #else
 #define hostDirectActive 0
 static inline void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
@@ -88,9 +88,9 @@ static inline void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
 }
 static inline void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2,
                                    uint16_t p3, uint16_t p4, uint16_t p5,
-                                   uint16_t p6) {
+                                   uint16_t p6, int ham) {
     (void)row; (void)x; (void)p1; (void)p2; (void)p3; (void)p4;
-    (void)p5; (void)p6;
+    (void)p5; (void)p6; (void)ham;
 }
 #endif
 

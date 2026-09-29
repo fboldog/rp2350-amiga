@@ -55,28 +55,29 @@ static void hostBorderUnwrittenPixels(uint32_t border) {
 }
 
 #if OMEGA_ENABLE_HDMI
-// Direct RGB332 rendering: for full-width and plain narrow fetch layouts,
-// converted pixels go straight into the free SRAM scanout frame, so the ARGB
-// raster in PSRAM is neither written nor read.
+// Direct indexed rendering: for full-width and plain narrow fetch layouts,
+// bitplane pixels go straight into the free SRAM scanout frame as colour
+// register numbers (HAM as raw codes), so the ARGB raster in PSRAM is
+// neither written nor read. Scanout expands them to exact 12-bit colours
+// (dvi_indexed_frame_t in dvi_display.h).
 //
 // The conversion runs on core 1. Core 0 (the emulator) only enqueues each
 // fetched bitplane block, palette updates and frame begin/end into a
 // single-producer/single-consumer ring of 32-bit words; core 1 drains it in
-// order between its HSTX line interrupts, so Copper palette changes still hit
-// the right pixels. Core 1 owns the scanout frame, the row tracking and its
-// palette copy.
-#define DIRECT_MAX_ROWS 256
-static bool direct_frame;         // this frame renders straight to RGB332
+// order between its HSTX line interrupts and logs every palette change
+// against the pixels drawn after it, so Copper palette changes still hit the
+// right pixels. Core 1 owns the scanout frame, its record and its palette
+// copy.
+#define DIRECT_MAX_ROWS DVI_MAX_ROWS
+static bool direct_frame;         // this frame renders straight to the frame
 int hostDirectActive;             // mirrors direct_frame for DMA.c
-static uint32_t direct_block[32]; // one planar block of ARGB pixels (HAM)
 
 enum {
     MSG_BEGIN = 1,   // + 2 words: frame layout
     MSG_HIRES,       // + 2 words: planes 1..4
-    MSG_LORES,       // + 3 words: planes 1..6
-    MSG_PIXELS,      // + count / 4 words: ready RGB332 pixels (HAM)
-    MSG_PALETTE,     // + 16 words: palette332[64]
-    MSG_END,         // + 1 word: border colour (RGB332)
+    MSG_LORES,       // + 3 words: planes 1..6; extra = 1 for HAM
+    MSG_PALETTE,     // + 16 words: 32 colours, 0x0RGB, two per word
+    MSG_END,         // + 1 word: border colour (0x0RGB)
 };
 #define MSG_HEADER(type, row, x, extra) \
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
@@ -86,14 +87,21 @@ enum {
 // keeps queueing; when the ring is full core 0 stalls until the swap. A
 // bigger ring lets emulation run further ahead of the display (idle
 // Workbench shown/emulated, NTSC: 22/32 fps with 8 KB, 27/32 with 32 KB).
+// PAL's frames are larger and its ring gained little beyond 16 KB (29.8/20.1
+// vs 29.4/20.5); that SRAM holds the indexed frame records instead.
+#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
+#define RING_WORDS 4096u  // 16 KB
+#else
 #define RING_WORDS 8192u  // 32 KB
+#endif
 // Ring fill at which core 1 stops waiting for the pending frame's swap and
-// skips drawing the new frame. RING_WORDS skips only when core 0 has filled
-// the ring; RING_WORDS + 1 never skips, which locks emulation to the display
-// cadence (PAL idle Workbench: 25.0/25.0 emulated/shown instead of 29.4/20.5,
-// as a frame is ~4x the ring and cannot absorb the wait for the swap).
+// skips drawing the new frame. The default skips once core 0 can no longer
+// queue the largest message (17 words), i.e. just before it would stall;
+// RING_WORDS never skips, which locks emulation to the display cadence (PAL
+// idle Workbench: 25.0/25.0 emulated/shown instead of ~29.5/20.5, as a frame
+// is several times the ring and cannot absorb the wait for the swap).
 #ifndef OMEGA_RING_SKIP_WORDS
-#define OMEGA_RING_SKIP_WORDS RING_WORDS
+#define OMEGA_RING_SKIP_WORDS (RING_WORDS - 17u)
 #endif
 static uint32_t ring[RING_WORDS];
 static volatile uint32_t ring_head; // words produced (core 0)
@@ -114,13 +122,21 @@ static inline void ringPush(const uint32_t *words, uint32_t count) {
     __sev(); // wake core 1 from __wfe()
 }
 
+// internal.palette holds OCS2ARGB() colours: the high nibbles are the
+// original 0x0RGB register value.
+static inline uint32_t argbToOcs(uint32_t argb) {
+    return (argb >> 12 & 0xf00u) | (argb >> 8 & 0xf0u) | (argb >> 4 & 0xfu);
+}
+
 static inline void hostDirectSyncPalette(void) {
     if (internal.paletteGeneration == palette_generation_sent)
         return;
     palette_generation_sent = internal.paletteGeneration;
     uint32_t msg[17];
     msg[0] = MSG_HEADER(MSG_PALETTE, 0, 0, 0);
-    memcpy(&msg[1], internal.palette332, sizeof(internal.palette332));
+    for (int i = 0; i < 16; ++i)
+        msg[1 + i] = argbToOcs(internal.palette[2 * i]) |
+                     argbToOcs(internal.palette[2 * i + 1]) << 16;
     ringPush(msg, count_of(msg));
 }
 
@@ -180,10 +196,10 @@ void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
 }
 
 void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
-                     uint16_t p4, uint16_t p5, uint16_t p6) {
+                     uint16_t p4, uint16_t p5, uint16_t p6, int ham) {
     hostDirectSyncPalette();
     const uint32_t msg[4] = {
-        MSG_HEADER(MSG_LORES, row, x, 0),
+        MSG_HEADER(MSG_LORES, row, x, ham ? 1 : 0),
         p1 | (uint32_t)p2 << 16,
         p3 | (uint32_t)p4 << 16,
         p5 | (uint32_t)p6 << 16,
@@ -191,32 +207,25 @@ void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
     ringPush(msg, count_of(msg));
 }
 
-// ARGB block (HAM path, converted here because HAM depends on the previous
-// pixel) -> RGB332 pixels for core 1.
-static void hostDirectCommit(int row, int x, int width) {
-    uint32_t msg[1 + 32 / 4];
-    msg[0] = MSG_HEADER(MSG_PIXELS, row, x, width);
-    uint8_t *pixels = (uint8_t *)&msg[1];
-    for (int i = 0; i < width; ++i)
-        pixels[i] = dvi_rgb332(direct_block[i]);
-    ringPush(msg, 1u + ((uint32_t)width + 3u) / 4u);
-}
-
 static void hostDirectFinish(void) {
+    hostDirectSyncPalette();
     const uint32_t msg[2] = {
         MSG_HEADER(MSG_END, 0, 0, 0),
-        dvi_rgb332(internal.palette[0]),
+        argbToOcs(internal.palette[0]),
     };
     ringPush(msg, count_of(msg));
     static bool first_frame_queued;
     if (!first_frame_queued) {
         first_frame_queued = true;
-        printf("DVI: first direct RGB332 emulator frame queued\n");
+        printf("DVI: first indexed emulator frame queued\n");
     }
 }
 
 // ── Core 1: consumer ──────────────────────────────────────────────────────
 static uint8_t *c1_image;          // acquired scanout frame, or NULL
+static dvi_indexed_frame_t *c1_record; // its segments and palette log
+static int c1_open_row;            // last image row with row_segment set
+static bool c1_ham;                // the block being placed holds HAM codes
 static int c1_first_row;           // image row of raster row 0
 static int c1_step;                // raster rows per image row
 static int c1_rotation;            // DDF row rotation in raster columns
@@ -226,11 +235,13 @@ static int c1_height;              // image rows
 #define C1_FUNC(name) \
     __attribute__((optimize("no-tree-loop-distribute-patterns"))) \
     __not_in_flash_func(name)
-static int16_t c1_row_min[DIRECT_MAX_ROWS];
-static int16_t c1_row_max[DIRECT_MAX_ROWS];
-static uint8_t c1_palette[64];
+static uint16_t c1_palette[32];   // current colours, 0x0RGB
 
-// Table-driven planar-to-RGB332: c2p_spread[b] holds the 8 pixels of plane
+static inline uint32_t c1Word(uint32_t index) {
+    return ring[index & (RING_WORDS - 1u)];
+}
+
+// Table-driven planar-to-index: c2p_spread[b] holds the 8 pixels of plane
 // byte b as bytes 0/1 (leftmost pixel = bit 7 = lowest byte), so OR-ing the
 // entries of all planes, shifted by plane number, yields 8 colour indices
 // at once. Pixel order matches *Planar2Chunky: bits 7..0 of the low byte of
@@ -251,16 +262,45 @@ static void hostInitPlanarTables(void) {
 
 #define C2P(p, shift, half) c2p_spread[((p) >> (shift)) & 0xffu][half]
 
+// Records that image columns [x0, x1) of row y were drawn with the palette
+// as logged so far. Runs drawn back to back with no palette change between
+// them merge.
+static void C1_FUNC(c1Record)(int y, int x0, int x1) {
+    dvi_indexed_frame_t *rec = c1_record;
+    const uint32_t used = rec->segments_used;
+    // Rows arrive in beam order; a row behind the open one (e.g. after a
+    // mid-frame DIWSTRT change) cannot be filed any more.
+    if (y < c1_open_row)
+        return;
+    while (c1_open_row < y)
+        rec->row_segment[++c1_open_row] = (uint16_t)used;
+    const uint32_t pos = rec->log_used;
+    if (used > rec->row_segment[y]) {
+        uint32_t *last = &rec->segment[used - 1u];
+        if (DVI_SEGMENT_X1(*last) == (uint32_t)x0 &&
+            DVI_SEGMENT_POS(*last) == pos &&
+            DVI_SEGMENT_HAM(*last) == (uint32_t)c1_ham) {
+            *last = DVI_SEGMENT(DVI_SEGMENT_X0(*last), x1, pos, c1_ham);
+            return;
+        }
+    }
+    if (used == DVI_MAX_SEGMENTS) {
+        rec->segment_overflow = true;
+        return;
+    }
+    rec->segment[used] = DVI_SEGMENT(x0, x1, pos, c1_ham);
+    rec->segments_used = (uint16_t)(used + 1u);
+}
+
 static inline void C1_FUNC(c1Copy)(uint8_t *line,
                                                const uint8_t *pixels,
                                                int y, int x, int count) {
     for (int i = 0; i < count; ++i)
         line[x + i] = pixels[i];
-    if (x < c1_row_min[y]) c1_row_min[y] = (int16_t)x;
-    if (x + count > c1_row_max[y]) c1_row_max[y] = (int16_t)(x + count);
+    c1Record(y, x, x + count);
 }
 
-// Places `width` RGB332 pixels of raster (row, x) into the scanout frame.
+// Places `width` colour numbers of raster (row, x) into the scanout frame.
 static void C1_FUNC(c1Place)(int row, int x,
                                          const uint8_t *pixels, int width) {
     if (!c1_image || row % c1_step)
@@ -306,18 +346,21 @@ static void C1_FUNC(c1Hires)(int row, int x, uint32_t p12,
                              C2P(p3, shift, part) << 2 |
                              C2P(p4, shift, part) << 3;
             uint8_t *out = pixels + half * 8 + part * 4;
-            out[0] = c1_palette[index & 0xffu];
-            out[1] = c1_palette[(index >> 8) & 0xffu];
-            out[2] = c1_palette[(index >> 16) & 0xffu];
-            out[3] = c1_palette[index >> 24];
+            out[0] = (uint8_t)index;
+            out[1] = (uint8_t)(index >> 8);
+            out[2] = (uint8_t)(index >> 16);
+            out[3] = (uint8_t)(index >> 24);
         }
     }
+    c1_ham = false;
     c1Place(row, x, pixels, 16);
 }
 
-// LORES: 16 pixels of up to 6 planes (EHB palette 32..63), each doubled.
+// LORES: 16 pixels of up to 6 planes (EHB palette 32..63, or HAM codes),
+// each doubled.
 static void C1_FUNC(c1Lores)(int row, int x, uint32_t p12,
-                                         uint32_t p34, uint32_t p56) {
+                                         uint32_t p34, uint32_t p56,
+                                         bool ham) {
     const uint16_t p1 = (uint16_t)p12, p2 = (uint16_t)(p12 >> 16);
     const uint16_t p3 = (uint16_t)p34, p4 = (uint16_t)(p34 >> 16);
     const uint16_t p5 = (uint16_t)p56, p6 = (uint16_t)(p56 >> 16);
@@ -333,12 +376,13 @@ static void C1_FUNC(c1Lores)(int row, int x, uint32_t p12,
                              C2P(p6, shift, part) << 5;
             uint8_t *out = pixels + half * 16 + part * 8;
             for (int k = 0; k < 4; ++k) {
-                const uint8_t colour = c1_palette[(index >> (8 * k)) & 0xffu];
+                const uint8_t colour = (uint8_t)(index >> (8 * k));
                 out[2 * k] = colour;
                 out[2 * k + 1] = colour;
             }
         }
     }
+    c1_ham = ham;
     c1Place(row, x, pixels, 32);
 }
 
@@ -348,10 +392,6 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     c1_narrow = (layout >> 24) & 1u;
     c1_rotation = (int)(size & 0xffffu);
     c1_height = (int)(size >> 16);
-    for (int y = 0; y < DIRECT_MAX_ROWS; ++y) {
-        c1_row_min[y] = DVI_DIRECT_IMAGE_WIDTH;
-        c1_row_max[y] = 0;
-    }
     // The previous frame may still wait for the next DVI frame boundary
     // (at most one display frame). Wait for the swap while core 0 keeps
     // queueing; if the ring gets close to full first, skip this frame so
@@ -361,31 +401,48 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
         tight_loop_contents();
     c1_image = dvi_display_frame_pending()
              ? NULL
-             : dvi_display_direct_acquire(); // NULL while the boot pattern
-}
-
-static void C1_FUNC(c1End)(uint8_t border) {
+             : dvi_display_direct_acquire(&c1_record); // NULL: boot pattern
     if (!c1_image)
         return;
-    for (int y = 0; y < c1_height; ++y) {
-        uint8_t *line = c1_image + y * DVI_DIRECT_IMAGE_WIDTH;
-        int written_min = c1_row_min[y];
-        int written_max = c1_row_max[y];
-        if (written_max <= written_min)
-            written_min = written_max = DVI_DIRECT_IMAGE_WIDTH;
-        // Plain loops: libc memset executes from flash.
-        for (int x = 0; x < written_min; ++x)
-            line[x] = border;
-        for (int x = written_max; x < DVI_DIRECT_IMAGE_WIDTH; ++x)
-            line[x] = border;
-    }
-    dvi_display_direct_publish_rgb332(border);
+    dvi_indexed_frame_t *rec = c1_record;
+    for (int i = 0; i < 32; ++i)
+        rec->initial_palette[i] = c1_palette[i];
+    rec->segments_used = 0;
+    rec->log_used = 0;
+    rec->segment_overflow = false;
+    c1_open_row = -1;
+}
+
+// Unwritten columns need no fill: scanout shows them in the row's COLOR00.
+static void C1_FUNC(c1End)(uint16_t border) {
+    if (!c1_image)
+        return;
+    dvi_indexed_frame_t *rec = c1_record;
+    while (c1_open_row < DVI_MAX_ROWS)
+        rec->row_segment[++c1_open_row] = rec->segments_used;
+    dvi_display_direct_publish(border);
     c1_image = NULL;
 }
 
-static inline uint32_t c1Word(uint32_t index) {
-    return ring[index & (RING_WORDS - 1u)];
+// Takes the new colours and logs the changed ones for the frame being drawn.
+static void C1_FUNC(c1Palette)(uint32_t tail) {
+    dvi_indexed_frame_t *rec = c1_record;
+    for (uint32_t i = 0; i < 16u; ++i) {
+        const uint32_t pair = c1Word(tail + 1u + i);
+        for (uint32_t k = 0; k < 2u; ++k) {
+            const uint32_t reg = 2u * i + k;
+            const uint16_t colour = (uint16_t)(pair >> (16u * k));
+            if (colour == c1_palette[reg])
+                continue;
+            c1_palette[reg] = colour;
+            // A full log drops the change for this frame; the next frame
+            // starts from the complete palette again.
+            if (c1_image && rec->log_used < DVI_MAX_PALETTE_LOG)
+                rec->palette_log[rec->log_used++] = reg << 12 | colour;
+        }
+    }
 }
+
 
 void C1_FUNC(hostCore1Loop)(void) {
     uint32_t tail = ring_tail;
@@ -406,37 +463,19 @@ void C1_FUNC(hostCore1Loop)(void) {
                 break;
             case MSG_LORES:
                 c1Lores(row, x, c1Word(tail + 1u), c1Word(tail + 2u),
-                        c1Word(tail + 3u));
+                        c1Word(tail + 3u), (header >> 23) & 1u);
                 length = 4;
                 break;
-            case MSG_PIXELS: {
-                const int count = (int)(header >> 23);
-                uint32_t words[32 / 4];
-                length = 1u + ((uint32_t)count + 3u) / 4u;
-                for (uint32_t i = 1; i < length; ++i)
-                    words[i - 1u] = c1Word(tail + i);
-                c1Place(row, x, (const uint8_t *)words, count);
-                break;
-            }
-            case MSG_PALETTE: {
-                uint32_t words[16];
-                for (uint32_t i = 0; i < 16u; ++i)
-                    words[i] = c1Word(tail + 1u + i);
-                for (uint32_t i = 0; i < 16u; ++i) {
-                    c1_palette[4 * i] = (uint8_t)words[i];
-                    c1_palette[4 * i + 1] = (uint8_t)(words[i] >> 8);
-                    c1_palette[4 * i + 2] = (uint8_t)(words[i] >> 16);
-                    c1_palette[4 * i + 3] = (uint8_t)(words[i] >> 24);
-                }
+            case MSG_PALETTE:
+                c1Palette(tail);
                 length = 17;
                 break;
-            }
             case MSG_BEGIN:
                 c1Begin(c1Word(tail + 1u), c1Word(tail + 2u));
                 length = 3;
                 break;
             case MSG_END:
-                c1End((uint8_t)c1Word(tail + 1u));
+                c1End((uint16_t)c1Word(tail + 1u));
                 length = 2;
                 break;
             default:
@@ -450,21 +489,13 @@ void C1_FUNC(hostCore1Loop)(void) {
 }
 #endif
 
+// Direct frames never reach these: DMA.c sends every block, HAM included,
+// through hostDirectHires/Lores.
 uint32_t *hostRasterPixels(int row, int x) {
-#if OMEGA_ENABLE_HDMI
-    if (direct_frame)
-        return direct_block;
-#endif
     return &render_fb[row * HOST_RASTER_W + x];
 }
 
 void hostRasterWritten(int row, int x, int width) {
-#if OMEGA_ENABLE_HDMI
-    if (direct_frame) {
-        hostDirectCommit(row, x, width);
-        return;
-    }
-#endif
     if (x < hostRasterRowMin[row]) hostRasterRowMin[row] = (int16_t)x;
     if (x + width > hostRasterRowMax[row])
         hostRasterRowMax[row] = (int16_t)(x + width);

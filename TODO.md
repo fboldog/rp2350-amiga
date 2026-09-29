@@ -66,8 +66,9 @@ alternative future backends.
       HSTX on 2026-09-29 and removed with the Waveshare board
 - [x] Standard 640×480p60 (252 Mbit/s) for NTSC and 720×576p50 (270 Mbit/s)
       for PAL; `clk_hstx` = `PLL_USB / 2`, `clk_sys` chosen separately
-- [x] 640×240 (NTSC) / 640×256 (PAL) RGB332 frames in SRAM, COLOR00 borders
-      via HSTX `TMDS_REPEAT` commands
+- [x] 640×240 (NTSC) / 640×256 (PAL) frames in SRAM (colour numbers,
+      expanded to RGB888 at scanout), COLOR00 borders via HSTX `TMDS_REPEAT`
+      commands
 - [x] Hardware TMDS encoding; ping-pong DMA with one core-1 interrupt per
       line, startup acknowledgement to core 0
 
@@ -203,17 +204,26 @@ How to measure (no halt, firmware keeps running):
       Layouts needing the wrapped-fetch reconstruction keep the old path.
 - [x] **NTSC shows 240 rows** (the full 640x480 mode) instead of 200, so
       overscan screens such as xsysinfo are no longer cut off.
-- [ ] **Colour depth / palette-index frames.** RGB332 cannot represent some
-      Amiga colours (e.g. the KS 2.04 disk shutter $998877 shows as olive;
-      blue has 4 levels). No fewer colours: RGB222 frames were rejected.
-      Preferred direction: store palette indices (≤ 5 bits) and expand per
-      line on core 1 at scanout, with per-line palette snapshots (~64 B/line)
-      for Copper changes; lossless, and shrinks the double frames from
-      ~320 KB to ~200 KB. HAM cannot be indexed and needs a full-colour frame
-      (single-buffered or in PSRAM). Cost: ~9 Mpixel/s of expansion on core 1
-      next to its conversion work — prototype and measure that first.
-      Alternative: allocate the 256 codes per frame from the 4096 Amiga
-      colours with RGB332 as the overflow fallback (HAM).
+- [x] **Exact colours.** RGB332 could not represent many Amiga colours
+      (KS 2.04 disk shutter $998877 showed olive; blue had 4 levels; white
+      was 224). Frames now hold colour numbers or raw HAM codes; core 1 logs
+      palette changes and the pixel runs drawn after them, and the scanout
+      interrupt replays the log and expands each row once to RGB888 (exact
+      12-bit colours, mid-line Copper changes kept, HAM decoded per row from
+      COLOR00). HSTX sends RGB888. Verified: Workbench 1.3, the KS 2.04
+      insert screen (122 Copper colour changes), RemGame (HAM). Speed
+      unchanged: KS1.3+WB1.3 PAL 44.6 s, 29.4/20.6 emulated/shown; NTSC
+      45.7 s, 35.0/27.0. HAM decoding first ran over the ~32 µs line
+      deadline (60 % of core 1, lost HDMI sync); fixed by re-arming the DMA
+      channel before expanding and a branchless, pair-wise HAM decode (18 %).
+      PAL went back to a 16 KB ring for the frame records (~470 B SRAM left).
+- [ ] **Smaller frames.** Colour numbers need at most 6 bits; packing 16-colour
+      screens at 4 bits per pixel would free ~80 KB per frame (HAM/EHB rows
+      still need a byte) — room for a larger PAL ring or a third frame.
+- [ ] **Exact colours for wrapped-fetch layouts** (still ARGB → RGB332).
+- [ ] **Sprites.** Omega does not render sprites (`spriteCycle()` only runs
+      the Copper/blitter slot); games such as RemGame miss their characters.
+      Their colour registers (17..31) also fill the palette log.
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [x] **Pixel conversion on core 1.** Core 0 enqueues bitplane blocks,
@@ -236,9 +246,20 @@ How to measure (no halt, firmware keeps running):
       35.5/24.5 → 35.3/~26.8; boot 44.1 → 45.1 s (PSRAM track).
 - [ ] **Show the rest of PAL's frames.** A PAL Workbench frame is ~4× the
       ring, so no affordable ring absorbs the wait for the 50 Hz swap. Never
-      skipping (`OMEGA_RING_SKIP_WORDS=RING_WORDS+1`) gives a steady 25/25
+      skipping (`OMEGA_RING_SKIP_WORDS=RING_WORDS`) gives a steady 25/25
       but costs ~15 % emulation speed. Needs SRAM freed by the frames
-      themselves (see colour depth: palette indices, or frames in PSRAM).
+      themselves (smaller frames, or frames in PSRAM). Note: the former
+      default "skip when full" (`RING_WORDS`) never triggered, because the
+      ring stops filling just short of full; the default is now
+      `RING_WORDS - 17`.
+- [x] **Bitplane modulo on blank lines.** Omega added BPLxMOD on no-fetch
+      lines outside the display window, so a game loading BPLxPT at the top
+      of the frame (RemGame: HAM, interleaved, modulo 212, display from $2c)
+      showed every plane 44 lines of modulo too far on — garbage HAM colours
+      on both the old and the new path. Lines outside DIW's vertical range
+      now add nothing; inside it the compatibility advancement stays
+      (Kickstart 2.x/3.x load pointers mid-line before no-fetch lines and the
+      layout is calibrated for it). Native regressions unchanged.
 
 ### P2 – Emulation core
 Profile on the Kickstart 1.3 hand screen (NTSC, after the RGB332 render; the
