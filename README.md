@@ -60,6 +60,37 @@ the same memory). Offsets are defined in `src/board_config.h`
 
 The HDMI scanout frames themselves are in internal SRAM, not PSRAM.
 
+## SRAM Layout
+
+520 KB of internal SRAM: 512 KB main SRAM at `0x20000000` plus two 4 KB
+banks, `SCRATCH_X` (`0x20080000`) and `SCRATCH_Y` (`0x20081000`). Sizes are
+from the Release builds (`arm-none-eabi-nm -S`); PAL / NTSC where they
+differ.
+
+| Region | Size | Content |
+|---|---|---|
+| Vector table | 272 B | RAM copy of the vector table |
+| `.data` | 14.2 KB | Code and tables copied to RAM: core 1's conversion loop and HSTX interrupt (anything core 1 runs must not fetch from flash), the chipset register dispatch tables, `DMALores`/`DMAHires` slot tables, other hot helpers |
+| `sram_frames` | 320 KB / 300 KB | Two scanout frames, 640×256 (PAL) / 640×240 (NTSC), one byte per pixel (Amiga colour number or HAM code; RGB332 on the fallback path) |
+| `ring` | 64 KB | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
+| `m68ki_opcode_blocks` + `m68ki_opcode_block` | 32 KB + 1 KB | Two-level 68000 opcode → handler index: room for 256 shared blocks of 64 entries (~245 used), one byte per block of opcodes |
+| `m68ki_handler_ptrs` + `m68ki_handler_cycles` | 7.7 KB + 3.8 KB | Handler function pointers and 68000 cycle counts, one per handler |
+| `image_lines` | 5.1 KB | Two RGB888 row buffers with HSTX commands, expanded by the scanout interrupt |
+| `c2p_spread` | 2 KB | Planar-to-chunky lookup table (core 1) |
+| `rgb332_rgb888` | 1 KB | RGB332 → RGB888 table (boot pattern, fallback frames) |
+| `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
+| Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
+| Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
+| **Free** | **~56 KB / ~76 KB** | Between the heap and the end of main SRAM |
+| `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and 2 KB free |
+| `SCRATCH_Y` | 4 KB | Core 0 stack |
+
+The core 0 stack grows down from the top of `SCRATCH_Y`; an overrun would run
+into `SCRATCH_X` without a guard. The HDMI colour records, the DF0 track and
+the boot-time opcode table scratch were moved to PSRAM to make room for the
+64 KB ring (see the PSRAM table above). A third scanout frame (160 KB PAL /
+150 KB NTSC) does not fit.
+
 ## Flash Layout
 
 16 MB at `0x10000000`.
