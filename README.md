@@ -39,23 +39,36 @@ board header ships with the Pico SDK.
 
 ## PSRAM Layout
 
-```
-0x11000000  Chip RAM (2 MB)
-0x11200000  Slow/Ranger RAM (512 KB)
-0x11280000  DF0 MFM buffer (2 MB; empty-drive image when no ADF is in flash)
-0x11480000  SD Kickstart cache (512 KB, SD-card builds)
-0x11540000  Video DMA raster scratch (640×400 ARGB32)
-0x11680000  Framebuffer 640×400 ARGB32 (1 MB)
-0x11780000  Reserved
-```
+8 MB at `0x11000000` (cached XIP window; `0x15000000` is the uncached alias of
+the same memory). Offsets are defined in `src/board_config.h`
+(`BOARD_MAP_*`).
+
+| Address | Size | Content | Access |
+|---|---|---|---|
+| `0x11000000` | 2 MB | Chip RAM, Amiga `0x000000`–`0x1FFFFF` | cached |
+| `0x11200000` | 512 KB | Slow ("Ranger") RAM, Amiga `0xC00000`–`0xC7FFFF` | cached |
+| `0x11280000` | 2 MB | DF0 MFM buffer: the active track of the flash ADF, or the empty-drive image when no ADF is in flash | uncached |
+| `0x11480000` | 512 KB | SD Kickstart cache (SD-card builds only) | cached |
+| `0x11500000` | 256 KB | free | |
+| `0x11540000` | 1000 KB | Video DMA raster, 640×400 ARGB32 (fallback path for layouts the direct HDMI path cannot draw) | cached |
+| `0x1163A000` | 280 KB | free | |
+| `0x11680000` | 1 MB | Presented framebuffer, 640×400 ARGB32 (same fallback path) | cached |
+| `0x11780000` | 32 KB | HDMI frame records: palette log and pixel runs of the two indexed frames (`dvi_indexed_frame_t` ×2) | cached |
+| `0x11788000` | 128 KB | 68000 opcode table scratch: the flat handler index, built at boot and then compressed into SRAM | boot only |
+| `0x117A8000` | ~348 KB | free | |
+| `0x117FF000` | 12 bytes | DF0 disk rotation state (kept through resets, lost on power-off) | uncached |
+
+The HDMI scanout frames themselves are in internal SRAM, not PSRAM.
 
 ## Flash Layout
 
-```
-0x10000000  Firmware (≤ 2 MB)
-0x10200000  Kickstart ROM (256 KB mirrored to 512 KB, or 512 KB)
-0x10280000  DF0 ADF image (raw 901120-byte image)  [optional]
-```
+16 MB at `0x10000000`.
+
+| Address | Size | Content |
+|---|---|---|
+| `0x10000000` | ≤ 2 MB | Firmware (currently ~330 KB) |
+| `0x10200000` | 512 KB | Kickstart ROM (256 KB images are mirrored to 512 KB) |
+| `0x10280000` | 880 KB each | DF0 ADF images, up to 15 back to back (`combine_uf2.py --adf …`); the first slot starting with erased flash ends the list |
 
 Only DF0 is used. DF1–DF3 appear to Kickstart as unconnected drives.
 
