@@ -1,8 +1,13 @@
-# Omega Amiga Emulator – RP2350 Bare-Metal Port
+# Omega Amiga Emulator - RP2350 Bare-Metal Port
 
 Port of [Omega](https://github.com/h5n1xp/Omega) (bare-metal 68K + Amiga chipset emulator)
-to the **RP2350B**, targeting the **WeAct Studio RP2350B Core**. Normal builds
-use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
+to the **RP2350B**, targeting the [**WeAct Studio RP2350B Core**](https://github.com/WeActStudio/WeActStudio.RP2350BCoreBoard) + [Adafruit DVI breakout](https://www.adafruit.com/product/4984). 
+
+My plan was using the [Waveshare RP2350B RP2350-PiZero](https://www.waveshare.com/rp2350-pizero.htm), but unfortunately this board HDMI output 
+not connected to the HSTX pins. This is forces the DVI/HDMI output do the work from SW side, which is from 
+emulation performance isn't the best direction.
+
+Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 `OMEGA_SYS_CLK_KHZ` (default 320 MHz) and retime PSRAM through the Pico SDK.
 
 ## Status
