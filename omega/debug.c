@@ -82,7 +82,7 @@ int debugChipValue;
 
 
 /*
- //*************************************** ADF to MFM... doesn't work
+ // *************************************** ADF to MFM... doesn't work
  fd = open("/Users/Shared/uae/WORKBENCH/wbraw.adf",O_RDWR);
  const char name[] ={"UAE-1ADF   "};
  uint8_t cylind = 160;
@@ -379,7 +379,7 @@ void adf2rawtrack(uint8_t* adf,uint16_t* track,int cylinder,int surface){ //retu
 //}
 /*
 void ADF2MFMOld(int adfSize,uint8_t* adf, uint8_t MFMdisk[80][2][11][1088]){
-    /*
+    //
      
      
      uint8_t LLFdisk[80][2][11][544];
@@ -643,7 +643,7 @@ void ADF2MFMOld(int adfSize,uint8_t* adf, uint8_t MFMdisk[80][2][11][1088]){
  CIAB.prb |= 0x2;     // set diskside bit
  }
  
- /*
+ //
  if(floppy->diskStep == 0){
  b->prb &= 0xFE;     // clear disk side bit
  }else{

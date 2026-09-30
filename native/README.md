@@ -15,10 +15,12 @@ without RP2350 hardware. It does **not** exercise `src/psram.c`, `src/Memory.c`
 
 ```bash
 ./native/build.sh                       # -> native/omega-native
+HEADLESS=1 ./native/build.sh            # force PPM-only build, even with SDL2
 ```
 
 `build.sh` auto-detects SDL2 via `sdl2-config`:
-- **SDL2 present** — a live 1280×800 window (2× nearest-neighbour) opens automatically.
+- **SDL2 present** — a live integer-scaled 2× window opens automatically:
+  1280×800 for NTSC or 1280×1024 for PAL.
   Press **Esc** or close the window to stop early; the final PPM is still written.
 - **SDL2 absent** — headless PPM-only build (install `sdl2` / `libsdl2-dev` for the window).
 
@@ -27,24 +29,121 @@ mirrored automatically to fill the 512 KB window at 0xF80000–0xFFFFFF):
 
 ```bash
 # Kickstart 1.3 — insert-disk screen only (no floppy):
-./native/omega-native
+OMEGA_ROM=sd_card/rom/kick13.rom ./native/omega-native "" 500000
 
 # Kickstart 1.3 — boot a WB 1.3 ADF to the AmigaDOS CLI:
-OMEGA_ROM=kick13.rom ./native/omega-native workbench13.adf 300000 50000 3000
-#                                           ^disk.adf       ^iters ^dump ^insert-at
+OMEGA_ROM=sd_card/rom/kick13.rom ./native/omega-native \
+    sd_card/adf/amiga-os-134-workbench.adf 300000 50000 3000
+#   ^disk.adf                              ^iters ^dump ^insert-at
 
 # Kickstart 2.04 — ROM disk, no floppy (purple "Insert Workbench" backdrop):
-OMEGA_ROM=kick204.rom ./native/omega-native "" 500000
+OMEGA_ROM=sd_card/rom/kick204.rom ./native/omega-native "" 500000
 
 # Kickstart 2.04 — boot a WB 2.x / Install ADF:
-OMEGA_ROM=kick204.rom ./native/omega-native Install3.2.adf 500000 4000 3000
+OMEGA_ROM=sd_card/rom/kick204.rom ./native/omega-native \
+    sd_card/adf/Install3.2.adf 500000 4000 3000
 
 # Kickstart 3.14 — ROM-based Workbench, no floppy (boots automatically):
-OMEGA_ROM=kick314.rom ./native/omega-native "" 500000
+OMEGA_ROM=sd_card/rom/kick314.rom ./native/omega-native "" 500000
 
 # Convert the final PPM snapshot to PNG:
 python3 native/ppm2png.py frame_final.ppm frame_final.png
 ```
+
+For deterministic screenshot checks, force a headless build and capture the
+insert-disk screen after 500,000 iterations:
+
+```bash
+HEADLESS=1 ./native/build.sh
+OMEGA_ROM=sd_card/rom/kick204.rom ./native/omega-native "" 500000 500000
+python3 native/ppm2png.py frame_final.ppm frame_final.png
+```
+
+The same command works with `sd_card/rom/kick13.rom` and
+`sd_card/rom/kick314.rom`. ROMs, ADFs, reference images under `image_refs/`,
+and generated `frame*.ppm`/`frame*.png` files are local test assets and must not
+be committed.
+
+### KickSmash ROM switcher
+
+The native runner can boot the small standalone KickSmash ROM-switcher image.
+It needs a 68020 CPU and an opt-in compile-time simulation of the KickSmash32
+ROM-bus message interface:
+
+```sh
+KICKSMASH_SIM=1 VIDEO=PAL ./native/build.sh
+OMEGA_CPU=68020 OMEGA_ROM="$PWD/sd_card/rom/switcher.rom" \
+    ./native/omega-native
+```
+
+Native ROM loading accepts images from 1 byte through 512 KB. Images no larger
+than 256 KB are zero-padded to one 256 KB bank and mirrored across the complete
+Kickstart window, which is required by compact standalone ROMs.
+
+`KICKSMASH_SIM=1` recognizes the switcher's ID, bank-information, and timeout
+NVRAM queries and returns deterministic simulated board data with the protocol's
+normal header, payload, and CRC framing. The simulated ID reports KickSmash32
+firmware version 2.0. The responder models the hardware's
+address-independent reply DMA, including the older transport which consumes its
+first reply long on the command-triggering read. It is a native test fixture,
+not a full emulation of the flash programmer, USB link, or bank-switch/reset
+hardware. Unsupported commands return a protocol error.
+
+The default native CPU remains a 68000. `OMEGA_CPU=68020` selects Musashi's
+68020 core at run time; its full indexed addressing and 68020 CACR behavior are
+needed by the standalone switcher firmware.
+
+### DiagROM
+
+The native runner recognizes the DiagROM header marker (`DG`) and starts at the
+explicit entry address stored immediately after it instead of assuming the
+normal Kickstart `JMP` instruction at `0xF80002`:
+
+```sh
+VIDEO=PAL ./native/build.sh
+OMEGA_ROM="$PWD/sd_card/rom/diagrom.rom" ./native/omega-native
+```
+
+DiagROM polls the high byte of `SERDATR` while printing its early diagnostics,
+so byte reads expose the same idle `TSRE`/`TBE` state as word reads. Its memory
+tests also write through empty Zorro/autoconfig space; with no expansion board
+attached these writes are ignored rather than decoded as custom registers.
+
+DiagROM reaches and displays its complete main diagnostic screen, including
+the version heading and bottom hardware-status line. DiagROM changes display
+mode near the PAL vertical-comparator boundary, so the Copper terminator must
+remain stopped after line 255 rather than running into adjacent list data.
+
+### Screenshot regression suite
+
+`REGRESSION=1` is a native compile-time build mode. It forces a headless build
+and removes the large interactive boot-state diagnostics so framebuffer tests
+are deterministic and concise:
+
+```sh
+REGRESSION=1 VIDEO=PAL ./native/build.sh
+```
+
+The regression runner builds in that mode, boots the three ROM-only screens and
+the three Workbench/installer cases, then compares exact final-frame PPM hashes:
+
+```sh
+VIDEO=PAL  ./native/regression.sh
+VIDEO=NTSC ./native/regression.sh
+```
+
+It requires the locally supplied ROM and ADF files named in the examples above.
+Each run prints a unique temporary directory containing its PPMs and logs for
+manual review. If an intentional rendering change has been reviewed in both
+modes, update one baseline set at a time with:
+
+```sh
+UPDATE_BASELINES=1 VIDEO=PAL ./native/regression.sh
+```
+
+Never update baselines merely to make a failing test pass; inspect the generated
+images first. Reference PNGs remain manual visual references because their
+canvas sizes and capture sources are not uniform.
 
 Each "iteration" is 200×(`dma_execute()` + `cpu_execute()`), matching the RP2350
 `main.c` main loop. Rough timing guide:
@@ -60,12 +159,257 @@ drive ID mode (`df[0].idMode == 0`); the runner then polls `floppyInsert(0)`
 until the drive latches the disk. Use `""` as the disk argument to run without
 any floppy image.
 
-## Status (2026-09-03)
+The video standard is selected at compile time. NTSC is the default; build PAL
+with:
 
-- Kickstart 1.3 boots to the "insert Workbench" screen. ✅
+```sh
+VIDEO=PAL ./native/build.sh
+```
+
+`VIDEO=NTSC` restores the default; lowercase `pal` and `ntsc` are also
+accepted. The script is compatible with the Bash 3.2 version shipped by macOS.
+
+The choice is shared by DMA frame length, the chipset video-identification bit,
+CIA vertical TOD events, and SDL pacing (59.94 Hz NTSC or 50 Hz PAL), so
+VBL-driven animations run in real time. `OMEGA_HEADLESS=1` and binaries built
+with `HEADLESS=1` remain unthrottled for fast boot and framebuffer tests.
+
+The native framebuffer follows the selected standard: 640×400 for NTSC and
+640×512 for PAL. SDL creates a fixed 2× window and uses nearest-neighbour
+integer scaling, so pixels are never resized by a fractional ratio. PPM dumps
+use the same selected framebuffer dimensions. The RP2350 framebuffer remains
+640×400 because its fixed 8 MB PSRAM map reserves 1 MB for ARGB display output.
+
+PAL uses its own viewport origin and a full-height native intermediate raster.
+Video-standard viewport offsets are owned solely by `omega/VideoStandard.h`;
+the obsolete duplicate host offset has been removed.
+The full beam-row raster is required by full-width LORES copper displays.
+Overscan windows such as the Kickstart 1.3 insert-disk requester occupy more
+beam rows than the progressive viewport and keep logical picture rows on
+alternating raster rows. Normal 200/256-line LORES windows use every raster
+row. Presentation derives that choice from the DIW vertical span before
+applying the normal 2× integer scale, avoiding both empty scanlines and
+truncation of the hand, lower disk artwork, or DiagROM menu. HIRES displays
+continue to consume half-height logical rows. The RP2350 keeps its fixed
+200-row intermediate raster because of the existing PSRAM layout.
+
+DMA tracks its intermediate destination with separate raster-row and X
+coordinates. The planar-to-chunky helpers write relative to the destination
+pointer supplied by DMA instead of sharing the old overloaded `FBCounter` for
+both line and pixel offsets. Display-window vertical tests also decode the OCS
+fixed ninth bits (`VSTART8=0`, `VSTOP8=1`) in one place.
+
+Only an actual bitplane fetch selects the frame's LORES or HIRES presentation
+mode. During display blanking, `BPLCON0` contains zero planes; its cleared HIRES
+bit must not be interpreted as a LORES screen. Doing so made full-width HIRES
+Workbench output sample alternating raster rows and appear at half height.
+
+Legacy framebuffer-position helpers from the former `FBCounter` design have
+been removed. `BPLCON0` writes no longer reset a host-side drawing cursor, and
+the unused `setDisplayMode()` plus random-pixel `drawBlank()` diagnostic are
+gone. Raster placement is now owned solely by the active DMA fetch paths.
+
+Planar-to-chunky conversion APIs take only their destination and bitplane
+words. The former palette argument was unused because conversion reads the
+live chipset palette, so removing it keeps the interface consistent with the
+actual data dependency.
+
+HIRES, LORES, and HAM planar conversion now live in the shared
+`src/Planar.c`. Native and RP2350 builds link the same implementation instead
+of carrying byte-for-byte copies in their host backends.
+
+Framebuffer presentation now lives in shared `src/Presentation.c`. Clipping,
+LORES row selection, scanline expansion, wrapped-prefix repair, wrapped-row
+centering, and raster clearing therefore have one implementation for native
+and RP2350 builds. Each host backend retains only platform-specific frame
+submission and lifecycle work.
+
+The shared presentation code names its display-layout signatures, row
+rotation, wrapped-prefix width, and OCS vertical-bank size rather than
+scattering literal register and pixel values through the algorithm. Repeated
+full-width and wrapped-window predicates are expressed as helpers, including
+removal of a redundant wrapped-origin test.
+
+DDF layout signatures shared by DMA and presentation are defined in
+`omega/DisplayLayout.h`. Full-width fetch detection, the extra-word requester
+layout, and the rotated Workbench 3.14 layout can no longer drift between the
+two stages. Full-width presentation now follows DDF geometry alone; the former
+additional dependency on an early DIW vertical start was redundant and has
+been removed. Presentation calls the shared DDF predicate directly instead of
+wrapping it in another local screen-shape helper.
+
+The same layout header also names the normal and extra-word HIRES fetch tails,
+the LORES fetch span, and the two upper-overscan offsets. DMA no longer embeds
+those timing and placement values directly in its control flow. Full-width
+row rotation is expressed as two contiguous segments rather than a per-pixel
+modulo loop.
+
+Bitplane DMA now has an explicit per-scanline state object for the terminal
+fetch cycle and HIRES/LORES word counts. This replaces unrelated loose globals
+and provides one owner for the fetch-completion and modulo timing model. The
+current modulo behavior is intentionally unchanged at this foundation step.
+
+Scanline reset and bitplane-pointer advancement are now explicit operations on
+that boundary, and the state records whether a real plane fetch occurred. For
+compatibility, modulo is still applied at the existing host scanline boundary;
+the fetch marker allows no-fetch advancement to be measured before replacing
+it with hardware DDF-completion timing.
+
+Fetch tracking covers every enabled plane, not only plane 1. This captures
+partial Copper transition lines where higher planes fetch before `BPLCON0`
+blanks the display. Fully blank lines still use compatibility modulo
+advancement because removing it currently exposes incomplete Copper pointer
+reload behavior in the 2.04 and 3.14 layouts.
+
+The scanline state stores a per-plane fetch mask rather than a single boolean.
+Partial Copper transition lines can therefore distinguish odd-plane and
+even-plane activity, which is necessary before their two modulo registers can
+be timed independently. It also retains the union of planes enabled at any
+point during the line, separately from planes that actually fetched, so
+Copper mode changes are not reduced to the final `BPLCON0` value. A per-plane
+fetch-eligible mask is accumulated while bitplane DMA and the display window
+are both active, distinct from both merely enabled planes and planes for which
+a DMA word was observed. Real fetch marking is shared by all implemented OCS
+plane paths. Obsolete per-plane/group cycle diagnostics and the redundant
+completed-fetch copy were removed once DDF completion could consume the live
+fetch mask directly. On an otherwise eligible line
+where no fetch occurs, fallback advancement is limited to that eligible set;
+fully ineligible lines reuse the most recently fetched plane set. The legacy
+all-plane startup fallback has been removed, so no pointer receives speculative
+modulo advancement before the first observed bitplane fetch.
+
+The `BPLCON0` decoder caps its plane count to the implemented OCS DMA
+capacity—four planes in HIRES and six in LORES—so every consumer sees one
+supported mask. Fetch eligibility uses that decoded mask directly instead of
+independently interpreting raw register bits.
+
+Zero-plane `BPLCON0` no longer requires an early return in `bitplaneActive()`.
+The former Workbench-specific guard became redundant after display mode state
+was separated from blanking and has been removed without changing output.
+
+The final DDF cycle explicitly snapshots the completed per-plane fetch mask.
+This provides a stable completion hook for relocating modulo timing later,
+without yet changing the scanline-boundary application used by rendering. The
+corresponding HIRES pointers for planes 1–4 are captured at the same boundary,
+separating the fetched line from any later Copper pointer writes. The
+narrow-DDF right-edge prefetch now reads these captured pointers instead of
+live end-of-line values, preventing late Copper writes from changing a line
+whose fetch window already completed. Modulo for planes that really fetched is
+now applied exclusively at this DDF-completion boundary. The former
+end-of-line safety application and its double-advance mask have been removed;
+no-fetch compatibility advancement is the only modulo operation that remains
+at the scanline boundary.
+
+Narrow-window prefix reconstruction remains necessary for wrapped DIW/DDF
+layouts: removing it visibly moves the 3.1.4 requester’s right-edge graphics
+to the left side of the following row. The condition is based on display
+geometry rather than Kickstart identity; code comments use the same generic
+terminology. The current selector is nevertheless indirect: a vertical
+256-line DIW-bank crossing enables horizontal fetch-row reconstruction. This
+coupling is named explicitly. Raw raster-row width was tested as an alternative
+selector, but both 2.04 and 3.1.4 requesters produce 145 rows of 624 pixels, so
+the insufficient diagnostic state was removed. DMA and presentation now share
+the OCS ninth-bit decoding of DIW vertical start and stop values. Vertical-bank
+crossing detection also lives in that shared layout layer; presentation no
+longer interprets raw DIW values to select requester reconstruction.
+The remaining content-aware work is contained in named helpers for locating a
+row's rightmost visible pixel and measuring the following row's wrapped prefix,
+instead of being embedded in the reconstruction loop.
+Prefix extent is measured through the last non-border pixel in the complete
+prefix window. A wrapped row may legitimately contain the border colour inside
+its artwork; treating the first such pixel as the endpoint truncated later
+segments and produced a purple line through the animated 3.1.4 floppy.
+
+Bitplane pointer register writes are tracked per plane and per scanline. Both
+CPU and Copper writes pass through the same register handlers, allowing DMA to
+correlate pointer reloads with the planes that fetched before blank-line
+compatibility advancement is removed. High- and low-word writes are recorded
+separately, so completeness is derived directly from their intersection rather
+than stored in a redundant third mask or transition state. Repeated complete
+writes are idempotent. Only completions before DDF affect the
+blank-line policy, so they are retained in one bitmask rather than a per-plane
+phase array; unused during/after classifications were removed. Cross-scanline
+reload diagnostics were also tested and removed after they proved the fallback
+dependency was unrelated to pending complete reloads.
+
+Partial scanlines now apply `BPL1MOD` and `BPL2MOD` only to odd/even plane
+members that actually fetched, so an unfetched sibling pointer no longer
+advances merely because another plane in its modulo group was active. Fully
+blank lines retain compatibility
+advancement at the scanline boundary, except when every active plane in a
+group completed a pointer reload before DDF. Requiring the full active group
+avoids treating a partial Copper pointer update as a reload of all odd or even
+planes. The active set is accumulated across the full scanline rather than
+taken from the final `BPLCON0` value, preserving modes that the Copper changes
+before the line ends. Because pointer advancement is now per plane, a
+pre-fetch reload suppresses fallback advancement only for that active plane;
+unrelated pointers in the same modulo group are unaffected. Applying modulo
+at the emulated terminal fetch slot was tested and rejected for now because it
+shifted the extra right-edge fetch used by the Kickstart 2.04 requester.
+Modulo policy selection and pointer mutation are now separate internal steps,
+so a future timing change can relocate application without duplicating the
+per-plane and compatibility rules.
+
+The shared layout definitions also name the raster origin at beam line 43 and
+the first LORES render line at 44. LORES and HIRES positioning now refer to
+those meanings rather than repeating unexplained vertical literals.
+Their scanline destinations are initialized at every plane-1 DMA slot even
+when plane 1 is disabled. LORES also clears its plane-1 data latch before an
+optional fetch, matching HIRES, while full-width negative upper-overscan lines
+reject every word. Together these prevent transition frames from combining
+fresh higher planes with stale plane-1 data or raster coordinates.
+
+The unused `sprite2chunky()` API and its duplicate host implementations have
+been removed. This does not remove working sprite support: `spriteCycle()` is
+currently an explicit stub, so sprite DMA and sprite rendering remain
+unimplemented. Implementing the sprite fetch/state machine is still required
+before a shared sprite converter should be introduced again.
+
+Always-on rendering investigation logs have also been removed from the DMA and
+custom-register hot paths. Per-line HIRES, `BPLCON0`, and modulo writes no
+longer add console I/O or timing noise during normal emulation; screenshot
+regression logs retain the runner-level information needed for failures.
+
+The unused host-side `vblCount` member and its native/RP2350 initializations
+have been removed. Native frame counting remains in the native runner's
+separate `native_frame_counter` state.
+
+## Status (2026-09-08)
+
+The rendering/DMA cleanup checklist is complete. Remaining compatibility
+behavior is documented where it is implemented: content-aware wrapped-prefix
+reconstruction and no-fetch bitplane modulo advancement. Sprite DMA and
+rendering are implemented in `omega/DMA.c` (see the top-level README);
+sprite collisions (CLXDAT) are not.
+
+- Kickstart 1.3 boots to the complete "insert Workbench" screen. ✅
+  The native host records the full PAL/NTSC beam field and tracks whether the
+  active display is LORES or HIRES. Full-width LORES output is deinterlaced
+  before 2× presentation, so the requester has continuous scanlines, correct
+  vertical scale, and its complete lower half.
+- Loaded Workbench screens retain their full vertical height. ✅
+  Zero-plane blanking no longer changes the remembered display resolution, so
+  HIRES frames are not mistakenly passed through the LORES alternating-row
+  presentation path. This applies to Workbench 1.3, 2.04, and 3.14 while
+  leaving their insert-disk requester output unchanged.
 - `original2.adf` (WB 1.3.2 UK) boots through the startup-sequence to `[CLI 2]`. ✅
+  Full-width HIRES Workbench screens use a true 640-pixel raster stride rather
+  than the narrower wrapped-fetch presentation used by the Kickstart artwork.
+  PAL Copper waits that cross line 255 retain the next vertical-line bank, and
+  the `FFFF FFFE` list terminator is frozen explicitly. Treating that marker as
+  a normal 16-bit WAIT allowed PAL line 256 to release it and execute adjacent
+  data as Copper instructions. The 40-line upper overscan is removed before
+  presentation. This keeps complete Workbench and DiagROM screens—including
+  their lower borders and status lines—in the output.
 - Kickstart 2.04 boots Workbench 2.x from ADF (`Install3.2.adf` confirmed). ✅
-  Title bar, Ram Disk volume, and disk name all render correctly (~1000 VBLs).
+  Its `DDFSTRT=0x3c`, `DDFSTOP=0xd4` HIRES window consumes 40 words per
+  bitplane row; the extra fetch needed by the narrower 1.3 window is applied
+  only to `0x3c–0xd0`. This prevents the row-by-row pointer drift that produced
+  diagonally offset blocks. The desktop is coherent, although its final PAL
+  viewport framing still needs refinement.
+  Byte reads outside the 32 readable custom-register byte handlers return open
+  bus instead of indexing beyond the dispatch table; this is shared by the
+  native and RP2350 memory backends.
 - Kickstart 2.04 no-disk boot: insert-disk screen renders correctly. ✅
   Rainbow V-checkmark, both floppy-disk icons, and all four copyright-text lines
   are visible. Fixed by: (a) floppy drive ID/motor-on reports `/DKRDY=0` for
@@ -74,13 +418,37 @@ any floppy image.
   fetch count corrected to the real OCS formula (`lastFetchCycle = ddfstop + 7`,
   giving `(ddfstop − ddfstrt)/4 + 2` words/line); (d) `BPL1MOD` sign-extended
   correctly (`(int16_t)value >> 1`).
-  Known cosmetic issues: white artefact on far-right edge; floppy-disk sprite
-  ghost on far-left edge; rendered content limited to top ≈ 55 % of the 400-line
-  framebuffer (NTSC lines 43–261 map to rows 1–218 of 400).
+  The native/RP2350 host presentation step now separates the raw DMA raster
+  from the displayed framebuffer, clips fetch-pipeline overscan, and doubles
+  visible scanlines. Narrow HIRES screens retain their native horizontal pixels
+  rather than passing through the former lossy 27:32 reduction, which had
+  compressed complete requester artwork and discarded columns from text.
+Vertically wrapped fetch rows discard their raw 40-pixel left origin after
+prefix reconstruction, keeping the complete logical row centred on-screen.
+Prefix clearing and centering are performed together per logical scanline,
+avoiding a redundant traversal of the complete framebuffer. The normal narrow
+raster span is contiguous and is copied as one bounded row segment rather than
+through a per-pixel loop.
+Presentation paths clear their intermediate raster explicitly through a shared
+fill helper; the former label-and-`goto` cleanup exit is no longer needed. The
+same helper fills the translated wrapped row's trailing border, leaving that
+operation entirely segment-based. All presentation paths also use one shared
+  scanline-duplication helper for their 2× vertical output.
+  This presentation is shared by Kickstart 1.3, 2.04, and 3.14.
+  The former top-line square flash during the 2.04 disk animation was caused by
+  a stale LORES plane-1 latch and destination row; both are now refreshed at
+  the DMA slot independently of the enabled-plane mask.
 - Kickstart 3.14 boots ROM-based Workbench (grey backdrop + title bar). ✅
   (Regression after CIA ICR fix was resolved by implementing the chipset
   slow-RAM mirror: reads at `0xCxxxxxx & 0xFFF < 0x20` now route to the
-  correct chipset read-register instead of raw chip RAM.)
+  correct chipset read-register instead of raw chip RAM.) Its full-width
+  `DDFSTRT=0x38`, `DDFSTOP=0xd8` desktop raster requires an 80-pixel circular
+  presentation correction; this keeps the rightmost segment on the right
+  instead of wrapping it to the left edge. The correction is shared by the
+  native and RP2350 hosts and does not affect the 1.3 or 2.04 desktop modes.
+  DMA associates those leading pipeline words with the preceding logical row,
+  so the rotated right edge no longer has a one-scanline seam or requires
+  presentation to join neighboring rows.
 - Battery-clock reads at `0xDC0000` return junk (`<invalid>` from `date`) — the
   Gayle/RTC path is a stub; unrelated to the RP2350 port.
 - The ROM diskette-logo bitmap renders horizontally mirrored on the insert
@@ -92,7 +460,9 @@ any floppy image.
 | File | Role |
 |---|---|
 | `main_native.c`   | entry: load ROM/ADF, run loop, dump PPM |
-| `host_native.c`   | `Host` layer; planar→chunky identical to `src/Host.c`; calls `sdl_display_push` each VBL |
+| `host_native.c`   | native framebuffer lifecycle, PPM inspection, and SDL frame submission |
+| `../src/Planar.c` | shared HIRES, LORES, and HAM planar-to-chunky conversion |
+| `../src/Presentation.c` | shared raster clipping, repair, scaling, and framebuffer presentation |
 | `memory_native.c` | upstream Omega `Memory.c` verbatim (`low16Meg`, `chipRead*/Write*`) |
 | `display_sdl.c`   | SDL2 window: open / push (30 fps cap) / poll / close |
 | `display_sdl.h`   | public API for `display_sdl.c` |

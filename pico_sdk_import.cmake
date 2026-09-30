@@ -1,64 +1,46 @@
-# This is a copy of <PICO_SDK_PATH>/external/pico_sdk_import.cmake
-#
-# This can be dropped into an external project to help locate the SDK
-# It should be include()d before the project() call
-#
-# Standard Pico SDK cmake import helper.
+# Locate an existing Pico SDK or download it into the CMake build directory.
+# This file must be included before project().
 
-if (DEFINED ENV{PICO_SDK_PATH} AND (NOT PICO_SDK_PATH))
-    set(PICO_SDK_PATH $ENV{PICO_SDK_PATH})
-    message("Using PICO_SDK_PATH from environment ('${PICO_SDK_PATH}')")
-endif ()
+if(DEFINED ENV{PICO_SDK_PATH} AND NOT PICO_SDK_PATH)
+    set(PICO_SDK_PATH "$ENV{PICO_SDK_PATH}")
+    message(STATUS "Using PICO_SDK_PATH from environment: ${PICO_SDK_PATH}")
+endif()
 
-if (DEFINED ENV{PICO_SDK_FETCH_FROM_GIT} AND (NOT PICO_SDK_FETCH_FROM_GIT))
-    set(PICO_SDK_FETCH_FROM_GIT $ENV{PICO_SDK_FETCH_FROM_GIT})
-    message("Setting PICO_SDK_FETCH_FROM_GIT from environment ('${PICO_SDK_FETCH_FROM_GIT}')")
-endif ()
+set(PICO_SDK_PATH "${PICO_SDK_PATH}" CACHE PATH
+    "Path to an existing Raspberry Pi Pico SDK")
+set(PICO_SDK_GIT_TAG "2.3.1" CACHE STRING
+    "Pico SDK Git tag downloaded when PICO_SDK_PATH is not set")
 
-if (DEFINED ENV{PICO_SDK_FETCH_FROM_GIT_PATH} AND (NOT PICO_SDK_FETCH_FROM_GIT_PATH))
-    set(PICO_SDK_FETCH_FROM_GIT_PATH $ENV{PICO_SDK_FETCH_FROM_GIT_PATH})
-    message("Setting PICO_SDK_FETCH_FROM_GIT_PATH from environment ('${PICO_SDK_FETCH_FROM_GIT_PATH}')")
-endif ()
+if(NOT PICO_SDK_PATH)
+    include(FetchContent)
 
-set(PICO_SDK_PATH "${PICO_SDK_PATH}" CACHE PATH "Path to the Raspberry Pi Pico SDK")
-set(PICO_SDK_FETCH_FROM_GIT "${PICO_SDK_FETCH_FROM_GIT}" CACHE BOOL "Set to ON to fetch copy of SDK from git if not otherwise locatable")
-set(PICO_SDK_FETCH_FROM_GIT_PATH "${PICO_SDK_FETCH_FROM_GIT_PATH}" CACHE FILEPATH "location to download SDK")
+    message(STATUS
+        "PICO_SDK_PATH is not set; downloading Pico SDK ${PICO_SDK_GIT_TAG}")
+    FetchContent_Declare(
+        pico_sdk
+        GIT_REPOSITORY https://github.com/raspberrypi/pico-sdk.git
+        GIT_TAG        ${PICO_SDK_GIT_TAG}
+        GIT_SHALLOW    TRUE
+        # Keep TinyUSB available for future USB HID/stdio builds without
+        # cloning every optional SDK dependency.
+        GIT_SUBMODULES lib/tinyusb
+        GIT_SUBMODULES_RECURSE TRUE
+        # Populate only; pico_sdk_init.cmake adds the SDK after project().
+        SOURCE_SUBDIR  _fetch_only
+    )
+    FetchContent_MakeAvailable(pico_sdk)
 
-if (NOT PICO_SDK_PATH)
-    if (PICO_SDK_FETCH_FROM_GIT)
-        include(FetchContent)
-        set(FETCHCONTENT_BASE_DIR_SAVE ${FETCHCONTENT_BASE_DIR})
-        if (PICO_SDK_FETCH_FROM_GIT_PATH)
-            get_filename_component(FETCHCONTENT_BASE_DIR "${PICO_SDK_FETCH_FROM_GIT_PATH}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
-        endif ()
-        FetchContent_Declare(
-                pico_sdk
-                GIT_REPOSITORY https://github.com/raspberrypi/pico-sdk
-                GIT_TAG master
-        )
-        if (NOT pico_sdk)
-            FetchContent_MakeAvailable(pico_sdk)
-            set(pico_sdk_POPULATED TRUE)
-        endif()
-        set(FETCHCONTENT_BASE_DIR ${FETCHCONTENT_BASE_DIR_SAVE})
-        set(PICO_SDK_PATH ${pico_sdk_SOURCE_DIR})
-    else ()
-        message(FATAL_ERROR
-                "SDK location was not specified. Please set PICO_SDK_PATH or set PICO_SDK_FETCH_FROM_GIT to on to fetch from git.\n"
-                )
-    endif ()
-endif ()
+    set(PICO_SDK_PATH "${pico_sdk_SOURCE_DIR}" CACHE PATH
+        "Path to the Raspberry Pi Pico SDK" FORCE)
+endif()
 
-get_filename_component(PICO_SDK_PATH "${PICO_SDK_PATH}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
-if (NOT EXISTS ${PICO_SDK_PATH})
-    message(FATAL_ERROR "Directory '${PICO_SDK_PATH}' not found")
-endif ()
+get_filename_component(PICO_SDK_PATH "${PICO_SDK_PATH}" REALPATH
+    BASE_DIR "${CMAKE_BINARY_DIR}")
 
-set(PICO_SDK_INIT_CMAKE_FILE ${PICO_SDK_PATH}/pico_sdk_init.cmake)
-if (NOT EXISTS ${PICO_SDK_INIT_CMAKE_FILE})
-    message(FATAL_ERROR "Directory '${PICO_SDK_PATH}' does not appear to contain the Raspberry Pi Pico SDK")
-endif ()
+set(PICO_SDK_INIT "${PICO_SDK_PATH}/pico_sdk_init.cmake")
+if(NOT EXISTS "${PICO_SDK_INIT}")
+    message(FATAL_ERROR
+        "${PICO_SDK_PATH} does not appear to contain the Pico SDK")
+endif()
 
-set(PICO_SDK_PATH ${PICO_SDK_PATH} CACHE PATH "Path to the Raspberry Pi Pico SDK" FORCE)
-
-include(${PICO_SDK_INIT_CMAKE_FILE})
+include("${PICO_SDK_INIT}")

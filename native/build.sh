@@ -7,11 +7,43 @@
 #
 # Runtime override (SDL2 binary only):
 #   OMEGA_HEADLESS=1  — suppress the window without recompiling
+#
+# Compile-time video standard:
+#   VIDEO=NTSC (default) or VIDEO=PAL
+#
+# Screenshot regression build:
+#   REGRESSION=1     — force headless output and suppress diagnostic dumps
+#
+# KickSmash ROM-switcher support:
+#   KICKSMASH_SIM=1  — answer the native ROM transport queries
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT=native/omega-native
 CC=${CC:-gcc}
+
+VIDEO=${VIDEO:-NTSC}
+case "$VIDEO" in
+    NTSC|ntsc) VIDEO_NAME=NTSC; VIDEO_DEFINE=0 ;;
+    PAL|pal)   VIDEO_NAME=PAL;  VIDEO_DEFINE=1 ;;
+    *) echo "VIDEO must be NTSC or PAL" >&2; exit 2 ;;
+esac
+echo "Video standard: $VIDEO_NAME"
+
+REGRESSION_FLAGS=""
+if [ "${REGRESSION:-0}" = "1" ]; then
+    HEADLESS=1
+    REGRESSION_FLAGS="-DOMEGA_SCREENSHOT_REGRESSION=1"
+    echo "REGRESSION=1 — deterministic headless screenshot build"
+fi
+
+KICKSMASH_FLAGS=""
+KICKSMASH_SRC=""
+if [ "${KICKSMASH_SIM:-0}" = "1" ]; then
+    KICKSMASH_FLAGS="-DOMEGA_KICKSMASH_SIM=1"
+    KICKSMASH_SRC="native/kicksmash_sim.c"
+    echo "KICKSMASH_SIM=1 — enabling native KickSmash query simulation"
+fi
 
 SDL_FLAGS=""
 SDL_LIBS=""
@@ -50,15 +82,15 @@ set -x
 
 SDL_OBJ=""
 if [ -n "$SDL_SRC" ]; then
-    # display_sdl.c includes SDL2/SDL.h directly.  Compiling it without
-    # -include sdl_shim.h avoids a conflict between the shim's static-inline
+    # display_sdl.c includes SDL.h using sdl2-config's include path. Compiling
+    # it without -include sdl_shim.h avoids a conflict between the shim's static-inline
     # SDL_AtomicGet stub and SDL2's extern declaration of the same function.
     # shellcheck disable=SC2086
     $CC -O2 -g -std=gnu11 \
         -Isrc -Iomega \
         -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
         -Wno-incompatible-pointer-types \
-        $SDL_FLAGS \
+        $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
         -c -o native/display_sdl.o native/display_sdl.c
     SDL_OBJ="native/display_sdl.o"
 fi
@@ -69,9 +101,10 @@ $CC -O2 -g -std=gnu11 \
     -Isrc -Iomega \
     -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
     -Wno-incompatible-pointer-types \
-    $SDL_FLAGS \
+    $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
     -o "$OUT" \
-    native/main_native.c native/host_native.c native/memory_native.c \
+    native/main_native.c native/host_native.c native/memory_native.c $KICKSMASH_SRC \
+    src/Planar.c src/Presentation.c \
     $SDL_OBJ \
     "${OMEGA_SRC[@]}" \
     $SDL_LIBS -lm

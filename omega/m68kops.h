@@ -1971,8 +1971,32 @@ void m68k_op_unpk_16_mm(void);
 /* Build the opcode handler table */
 void m68ki_build_opcode_table(void);
 
+#ifdef PICO_BUILD
+/* Two-level opcode -> handler index table. The 65536 opcodes fall into 1024
+   blocks of 64 (the effective-address field), and only ~245 distinct
+   blocks exist, so a byte per block selects a shared block of 16-bit
+   handler indices: ~33 KB of SRAM instead of a flat 128 KB table. */
+#define M68KI_BLOCK_BITS 6
+#define M68KI_BLOCK_SIZE (1 << M68KI_BLOCK_BITS)
+#define M68KI_MAX_BLOCKS 256
+extern unsigned char m68ki_opcode_block[0x10000 >> M68KI_BLOCK_BITS];
+extern unsigned short m68ki_opcode_blocks[M68KI_MAX_BLOCKS][M68KI_BLOCK_SIZE];
+#define m68ki_handler_index(ir) \
+	m68ki_opcode_blocks[m68ki_opcode_block[(ir) >> M68KI_BLOCK_BITS]] \
+	                   [(ir) & (M68KI_BLOCK_SIZE - 1)]
+extern void (*m68ki_handler_ptrs[])(void);
+/* Per-handler cycles; this flag marks register shifts by an immediate count. */
+#define M68KI_CYCLES_IMMEDIATE_SHIFT 0x100
+extern unsigned short m68ki_handler_cycles[];
+#define m68ki_call_instruction(ir) \
+	m68ki_handler_ptrs[m68ki_handler_index(ir)]()
+#else
 extern void (*m68ki_instruction_jump_table[0x10000])(void); /* opcode handler jump table */
+#define m68ki_call_instruction(ir) m68ki_instruction_jump_table[ir]()
+#endif
+#ifndef PICO_BUILD
 extern unsigned char m68ki_cycles[][0x10000];
+#endif
 
 
 /* ======================================================================== */

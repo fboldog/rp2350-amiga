@@ -47,17 +47,21 @@ void CIAInit(CIA_t* cia,uint16_t paulaMask){
     }
 }
 
+#ifndef PICO_BUILD
 static int ciab_prb_log = 0;
+#endif
 void CIAWrite(CIA_t* cia,int reg,uint8_t value){
 
     m68k_end_timeslice();
 
+#ifndef PICO_BUILD
     if (cia == &CIAB && reg == 1 && ciab_prb_log < 200) {
         uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
         printf("[CIAB.prb] 0x%02X -> 0x%02X  pra=0x%02X  PC=%08X (hit %d)\n",
                cia->prb, value, CIAA.pra, pc, ++ciab_prb_log);
         fflush(stdout);
     }
+#endif
 
     switch(reg){
 

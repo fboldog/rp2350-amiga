@@ -343,6 +343,23 @@
 #define CPU_RUN_MODE     m68ki_cpu.run_mode
 
 #define CYC_INSTRUCTION  m68ki_cpu.cyc_instruction
+#ifdef PICO_BUILD
+/* RP2350: 68000 cycles are stored per opcode handler rather than in a 64 KiB
+   per-opcode table. Register shifts by an immediate count (flagged by
+   M68KI_CYCLES_IMMEDIATE_SHIFT) add 2 cycles per bit shifted; a count
+   field of 0 encodes 8. */
+#include "m68kops.h"
+static inline uint m68ki_instruction_cycles(uint ir)
+{
+	uint cycles = m68ki_handler_cycles[m68ki_handler_index(ir)];
+	if(cycles & M68KI_CYCLES_IMMEDIATE_SHIFT)
+		cycles = (cycles & 0xff) + (((((ir >> 9) - 1) & 7) + 1) << 1);
+	return cycles;
+}
+#define CYC_INSTRUCTION_OF(ir) m68ki_instruction_cycles(ir)
+#else
+#define CYC_INSTRUCTION_OF(ir) CYC_INSTRUCTION[ir]
+#endif
 #define CYC_EXCEPTION    m68ki_cpu.cyc_exception
 #define CYC_BCC_NOTAKE_B m68ki_cpu.cyc_bcc_notake_b
 #define CYC_BCC_NOTAKE_W m68ki_cpu.cyc_bcc_notake_w
@@ -371,7 +388,7 @@
 /* Disable certain comparisons if we're not using all CPU types */
 #if M68K_EMULATE_020
 	#define CPU_TYPE_IS_020_PLUS(A)    ((A) & CPU_TYPE_020)
-	#define CPU_TYPE_IS_020_LESS(A)    1
+	#define CPU_TYPE_IS_020_LESS(A)    ((A) & (CPU_TYPE_000 | CPU_TYPE_010 | CPU_TYPE_EC020))
 #else
 	#define CPU_TYPE_IS_020_PLUS(A)    0
 	#define CPU_TYPE_IS_020_LESS(A)    1
@@ -752,7 +769,7 @@
 #define USE_CYCLES(A)    m68ki_remaining_cycles -= (A)
 #define SET_CYCLES(A)    m68ki_remaining_cycles = A
 #define GET_CYCLES()     m68ki_remaining_cycles
-#define USE_ALL_CYCLES() m68ki_remaining_cycles %= CYC_INSTRUCTION[REG_IR]
+#define USE_ALL_CYCLES() m68ki_remaining_cycles %= CYC_INSTRUCTION_OF(REG_IR)
 
 
 
@@ -1733,7 +1750,7 @@ INLINE void m68ki_exception_trap(uint vector)
 	m68ki_jump_vector(vector);
 
 	/* Use up some clock cycles and undo the instruction's cycles */
-	USE_CYCLES(CYC_EXCEPTION[vector] - CYC_INSTRUCTION[REG_IR]);
+	USE_CYCLES(CYC_EXCEPTION[vector] - CYC_INSTRUCTION_OF(REG_IR));
 }
 
 /* Trap#n stacks a 0 frame but behaves like group2 otherwise */
@@ -1744,7 +1761,7 @@ INLINE void m68ki_exception_trapN(uint vector)
 	m68ki_jump_vector(vector);
 
 	/* Use up some clock cycles and undo the instruction's cycles */
-	USE_CYCLES(CYC_EXCEPTION[vector] - CYC_INSTRUCTION[REG_IR]);
+	USE_CYCLES(CYC_EXCEPTION[vector] - CYC_INSTRUCTION_OF(REG_IR));
 }
 
 /* Exception for trace mode */
@@ -1790,7 +1807,7 @@ INLINE void m68ki_exception_privilege_violation(void)
 	m68ki_jump_vector(EXCEPTION_PRIVILEGE_VIOLATION);
 
 	/* Use up some clock cycles and undo the instruction's cycles */
-	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_PRIVILEGE_VIOLATION] - CYC_INSTRUCTION[REG_IR]);
+	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_PRIVILEGE_VIOLATION] - CYC_INSTRUCTION_OF(REG_IR));
 }
 
 /* Exception for A-Line instructions */
@@ -1808,7 +1825,7 @@ INLINE void m68ki_exception_1010(void)
 	m68ki_jump_vector(EXCEPTION_1010);
 
 	/* Use up some clock cycles and undo the instruction's cycles */
-	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_1010] - CYC_INSTRUCTION[REG_IR]);
+	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_1010] - CYC_INSTRUCTION_OF(REG_IR));
 }
 
 /* Exception for F-Line instructions */
@@ -1827,7 +1844,7 @@ INLINE void m68ki_exception_1111(void)
 	m68ki_jump_vector(EXCEPTION_1111);
 
 	/* Use up some clock cycles and undo the instruction's cycles */
-	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_1111] - CYC_INSTRUCTION[REG_IR]);
+	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_1111] - CYC_INSTRUCTION_OF(REG_IR));
 }
 
 /* Exception for illegal instructions */
@@ -1852,7 +1869,7 @@ INLINE void m68ki_exception_illegal(void)
 	m68ki_jump_vector(EXCEPTION_ILLEGAL_INSTRUCTION);
 
 	/* Use up some clock cycles and undo the instruction's cycles */
-	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_ILLEGAL_INSTRUCTION] - CYC_INSTRUCTION[REG_IR]);
+	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_ILLEGAL_INSTRUCTION] - CYC_INSTRUCTION_OF(REG_IR));
 }
 
 /* Exception for format errror in RTE */
@@ -1863,7 +1880,7 @@ INLINE void m68ki_exception_format_error(void)
 	m68ki_jump_vector(EXCEPTION_FORMAT_ERROR);
 
 	/* Use up some clock cycles and undo the instruction's cycles */
-	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_FORMAT_ERROR] - CYC_INSTRUCTION[REG_IR]);
+	USE_CYCLES(CYC_EXCEPTION[EXCEPTION_FORMAT_ERROR] - CYC_INSTRUCTION_OF(REG_IR));
 }
 
 /* Exception for address error */

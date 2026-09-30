@@ -518,6 +518,8 @@ typedef struct{
     int hPos;
     uint16_t* chipramW; //word addressed
     uint32_t palette[64]; //internally store the palette colours in rgba32, 32 colours (+32 extra half bright)
+    uint8_t palette332[64]; // same palette as RGB332 (3-3-2) for direct HDMI rendering
+    uint32_t paletteGeneration; // bumped on every palette332 write
     int bitplaneMask;
     
     int eClockCounter;  //aproximates a 700,000Hz timer
@@ -550,6 +552,7 @@ typedef struct{
 
 extern Chipset_t  chipset;
 extern Internal_t internal;
+extern uint8_t spriteArmed;  // bit n: sprite n armed (SPRxDATA written)
 
 void ChipsetInit();
 
@@ -558,6 +561,15 @@ void sprite_execute(Chipset_t*);
 void eclock_execute(Chipset_t*);
 
 uint16_t logicFunction(int minterm,uint16_t wordA, uint16_t wordB, uint16_t wordC);
+
+
+// ARGB32 -> RGB332 (bits 7-5 red, 4-2 green, 1-0 blue), as used by the RP2350
+// HDMI scanout frames.
+static inline uint8_t omegaRGB332(uint32_t argb) {
+    return (uint8_t)(((argb >> 16) & 0xe0u) |
+                     ((argb >> 11) & 0x1cu) |
+                     ((argb >> 6) & 0x03u));
+}
 
 #endif /* Chipset_h */
 

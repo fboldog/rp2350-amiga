@@ -1,13 +1,14 @@
 # Project Memory – Omega RP2350 Port
 
 Snapshot of all decisions, rationale, and context needed to resume work
-on a fresh machine or in a new Claude session.
+on a fresh machine or in a new development session.
 
 ---
 
 ## Goal
 
-Bare-metal Amiga emulator on **RP2350B** (Pimoroni Pico Plus 2, Cortex-M33).
+Bare-metal Amiga emulator on **RP2350B** (Waveshare RP2350-PiZero and WeAct
+Studio RP2350B Core, Cortex-M33).
 Source: [Omega](https://github.com/h5n1xp/Omega) – a clean-room, dependency-free
 Amiga emulator designed explicitly for bare-metal porting.
 
@@ -46,11 +47,12 @@ offset 0x200000 (absolute 0x10200000) means zero PSRAM consumed and zero startup
 copy needed. The Kickstart ROM is only ever read (never written). ROM reads in
 `src/Memory.c` just return `rom_ptr(address)` which is a direct flash pointer.
 
-### 5. Why overclock to 250 MHz?
-The original Omega on RPi3 ran at 1.2 GHz. Musashi 68K executing ~1 M68K instruction
-per Amiga system cycle needs all the speed available. At 150 MHz (stock) the emulator
-is noticeably slow. 250 MHz is stable with the VREG at 1.15 V on RP2350. PSRAM QSPI
-runs at 125 MHz (clkdiv=2) which is within the APS6404L spec.
+### 5. Why do HDMI builds use 252/270 MHz?
+PicoDVI serializes one TMDS bit per system-clock cycle, requiring 252 MHz for
+720×480p60 NTSC or 270 MHz for 720×576p50 PAL. Pico SDK `hardware_psram`
+configures QMI before `main()`; after changing `clk_sys`, the firmware calls
+`psram_configure_params()` and `psram_reinitialize()` before accessing PSRAM.
+Non-HDMI builds retain the SDK's default 150 MHz clock.
 
 ### 6. Why `#ifdef PICO_BUILD` instead of separate source files?
 Omega is designed so that only the "Host layer" needs porting. The few exceptions
@@ -65,25 +67,22 @@ handlers in Chipset.c (e.g. `chipset.bpl1pt = (value << 15) | ...`). So
 `chipramW[bpl1pt]` correctly addresses `byte_offset = bpl1pt * 2`. On PSRAM,
 `chipramW = (uint16_t*)(PSRAM_BASE + PSRAM_CHIPRAM_OFFSET)` is correct.
 
-### 8. Single-threaded for now (Phase 1)
-Omega's original SDL version had a commented-out CPU thread. Phase 1 runs
-DMA + CPU interleaved on core 0 (200 DMA+CPU pairs per main loop iteration,
-same as the original SDL main loop). Phase 2 will split: DMA on core 0 timer
-ISR, CPU on core 1.
+### 8. Emulator core on core 0, DVI on core 1
+DMA and CPU remain interleaved on core 0 (200 DMA+CPU pairs per main-loop
+iteration). PicoDVI TMDS encoding and PIO queueing run continuously on core 1.
+Core 0 waits for a FIFO acknowledgement after core 1 completes `dvi_start()`;
+without this handshake, emulator PSRAM traffic can race DVI initialization and
+produce no signal on cold startup.
 
 ---
 
 ## PSRAM init notes
 
-`src/psram.c` manually drives QMI CS1 to:
-1. Send Reset Enable (0x66) + Reset (0x99) in direct/SPI mode
-2. Send Enter Quad Mode (0x35)
-3. Configure QMI CS1 timing, read format (0xEB quad read, 6 dummy cycles), write format
-
-The PSRAM then appears at 0x11000000 and is accessed like regular memory.
-If the init fails (wrong clkdiv or dummy cycles for your clock rate), the symptom
-is garbled reads from PSRAM. Verify by writing a known pattern and reading it back
-immediately after `psram_init()` in `src/main.c`.
+Pico SDK `hardware_psram` detects and configures QMI before `main()`. CMake sets
+the 8 MB linker region and board-specific CS pin (GPIO0 WeAct, GPIO47 Waveshare).
+`src/psram.c` contains no QMI register programming; it checks availability and
+size, then verifies a 1024-byte deterministic pattern in a linker-placed PSRAM
+buffer. This mirrors `/home/fboldog/source/repos/rp2350b-psram`.
 
 ---
 
@@ -106,7 +105,7 @@ immediately after `psram_init()` in `src/main.c`.
 
 | Risk | Mitigation |
 |------|-----------|
-| PSRAM timing marginal at 250 MHz | Drop to 200 MHz if unstable; or adjust dummy cycles in psram.c |
+| HDMI clock changes QMI timing | Reconfigure and reinitialize PSRAM through the SDK immediately after selecting 252/270 MHz |
 | Musashi stack overflow | Add `pico_set_binary_type(omega-amiga no_flash)` or increase stack limit |
 | KS 2.x/3.x don't reach a GUI | Omega display/chipset gap (upstream), not RP2350 / not a CPU issue. Tested KS 3.1 (exec 40.10) in the native runner 2026-09-01: (1) FIXED a hard crash — `sprite2chunky()` had no lower-bound check and KS 3.1 parks sprite 0 at X=-254 → OOB write (segfault native / silent PSRAM corruption on device); fixed in `src/Host.c` + `native/host_native.c` + guarded negative `Ny` in `omega/DMA.c`. (2) KS 3.1 now shows its grey WB screen but not the insert-disk graphic — `omega/Blitter.c` lacks "single pixel per H-line" (line draw) and "exclusive fill" modes that graphics.library 40.x uses. Implement those next. A500/A600 KS 3.1 (40.63)/3.2 are plain 68000 + OCS/ECS; only AGA ROM dumps (40.68) also need an '020 core + AGA chipset. |
 | DMA cycle accuracy | Omega's DMA is approximate; will affect some demos, not WB |
@@ -115,12 +114,30 @@ immediately after `psram_init()` in `src/main.c`.
 
 ## Completed sessions
 
+### 2026-09-27 – WeAct PSRAM and DVI hardware validation
+- Added automatic Pico SDK 2.3.1 fetching, WeAct board support, and independent
+  CMake flags for HDMI, SD-card reading, and flash-backed floppy images.
+- Replaced the custom QMI setup with Pico SDK `hardware_psram`; verified the
+  populated WeAct 8 MB PSRAM through startup testing and full emulator use.
+- Wired an Adafruit DVI breakout to GPIO11..18 and UART1 to GPIO4/5. D0 had to
+  be reversed physically for correct colors. USB CDC remains disabled.
+- Added core-1 PicoDVI output, PSRAM RGB332 double buffering, uncached scanout,
+  and a core-1 startup acknowledgement that prevents a cold-boot DVI race.
+- Corrected the 400-row render path and LORES overscan origin. The complete,
+  centered Kickstart 1.3 hand/floppy animation is stable on captured hardware.
+- Flash Kickstart loading is verified. The bring-up image intentionally omits
+  ADFs; flash floppy and SD support remain compile-time disabled by default.
+- PAL and NTSC native regression suites pass with the intentional insert-screen
+  baseline updates. The verified combined UF2 contains firmware plus a legally
+  supplied Kickstart ROM only.
+
 ### 2026-08-31 – Session 1
 - Cloned Omega to `/tmp/omega-src`, analysed all source files
 - Built Phase 1 port: all files in `/home/fboldog/source/repos/rp2350-amiga/`
 - Created `combine_uf2.py` for ROM+firmware flashing
 - Created `AGENT.md`, `TODO.md`, this `MEMORY.md`
-- Next session: implement display output (Phase 2)
+- At that point, the next task was display output; it was completed and
+  hardware-validated in the 2026-09-27 session above.
 
 ### 2026-09-01 – Session 2 (different machine: repo at `/root/source/repos/rp2350-amiga`)
 - Set up toolchain: Arch Linux ARM (aarch64 host), pacman has no `arm-none-eabi-*`.
@@ -148,7 +165,8 @@ immediately after `psram_init()` in `src/main.c`.
   export PATH=/root/toolchains/arm-gnu-toolchain-14.2.rel1-aarch64-arm-none-eabi/bin:$PATH
   cd build && cmake .. -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release && ninja
   ```
-- Not yet done: no hardware to flash/test; display output (Phase 2) still open.
+- At that point no hardware had been flashed; see the 2026-09-27 validation
+  session above for the current result.
 
 **Native head-less runner added (`native/`)** to validate the core without hardware:
 - Builds the same `omega/*.c` with `PICO_BUILD` undefined (desktop paths) +
@@ -202,5 +220,150 @@ ROM (exec 40.10). Native runner gained `OMEGA_ROM=<file>` / `OMEGA_DISASM=1`.
   ~L434/438). Full implementation guide is in **TODO.md** under the KS 3.1
   item ("Implementing the two missing blitter modes"). This is the handoff
   point — continuing on the other machine.
-- Next: implement those two blitter modes; also still open: display output
-  (Phase 2) — PicoDVI via `BOARD_DVI_SERIALISER_CFG`.
+- Next for KS 3.1 remains implementing those two blitter modes. PicoDVI output
+  was completed later and is no longer an open item.
+
+**WeAct full-width HDMI (2026-09-28).** Goal: no upscaling on WeAct HDMI
+(GPIO12..19, Pico DVI Sock ordering).
+- The old 360-wide doubled path sampled every second raster column, dropping
+  half of each HIRES pixel: Workbench 1.3 fonts looked broken. WeAct now uses
+  720-wide RGB332 lines, 640 image columns 1:1.
+- PicoDVI has no full-res 8bpp encoder. `tmds_encode_palette_data` is an
+  interpolator/LUT path and far too slow on core 1 (solid red screen). The
+  fix drives the RP2350 SIO TMDS encoder directly with pixel doubling off
+  (`dvi_encode_channel_fullres_8bpp`, `tmds_encode_sio_loop_poppop_ratio2`).
+- Red DVI lines = PicoDVI "late scanline". Measured over SWD: encode <=20 us,
+  but 720-byte PSRAM line copies took up to 116 us under emulator QMI load.
+  PSRAM already runs at its 133 MHz limit. Fix: both 640x200 frames in SRAM
+  (250 KB), made possible by a 16-bit Musashi opcode index (Pico builds) plus a
+  flash-resident `const` opcode descriptor table (~150 KB SRAM freed). WeAct
+  uses 4 TMDS buffers (heap is tight: ~17 KB spare after them).
+- Core 1 must not touch flash either: libc `memcpy` (runs from flash) and a
+  `static const` blank line (in `.rodata`) each caused red lines.
+- Handy debugging: `openocd ... -c init -c "echo [capture {mdw ADDR N}]"` reads
+  RAM without halting; `dump_image` of the SRAM frames renders what core 1 is
+  scanning out.
+- Gotcha: `build-weact-hdmi/` had been copied from the `rp2350-amiga-codex`
+  checkout and built that tree's sources. Check `CMAKE_HOME_DIRECTORY` in
+  CMakeCache.txt when builds "do nothing".
+- The pending Floppy change moves the `/CHNG` acknowledge from drive select to
+  head step and reports `/DKRDY` on insert/eject, so runtime insertion is seen
+  by a waiting Kickstart.
+- Capture-chain gotcha: after reflashing, the HDMI capture device can lose
+  lock and stay black even though the board is fine. Confirm scanout over SWD
+  (DVI `timing_state` counter advancing, `dump_image` of `sram_frames`), then
+  reset the capture device.
+
+**Workbench 1.3 top line (2026-09-28).** The extra-word HIRES layout (DDF
+0x3c-0xd0) anchored raster row 0 at DIWSTRT line 5 + 40 = line 45, but
+Intuition's screen begins at line 44 (0x2c), so the title bar's top padding
+line was dropped on every target. `OMEGA_DDF_EXTRA_UPPER_OVERSCAN` is now 39;
+only the `wb13` regression baselines (NTSC and PAL) changed, after review.
+
+**NTSC DVI mode (2026-09-28).** NTSC builds ran PicoDVI's 720x480p60 timing
+(needs 270 MHz) at the 252 MHz NTSC clock, emitting a non-standard ~55.9 Hz
+mode; the capture device locked onto it unreliably. NTSC now uses VGA
+640x480p60 (exactly 252 MHz), which also fits the 640-wide image without side
+borders. Raising NTSC to 270 MHz was rejected: PSRAM would drop from 126 MHz
+(div 2) to 90 MHz (div 3). `dvi_display_init()` panics on any clk_sys/timing
+mismatch.
+
+**PAL boot screens / UF2 (2026-09-28).**
+- PAL lost capture lock during Kickstart's solid grey/white boot screens and
+  recovered at the AmigaDOS window. Not signal integrity (8 mA fast pads did
+  nothing) and not timing (`late_scanline_ctr` stayed 0). It was the content:
+  bright full-width image with black 40-pixel side columns. Borders now show
+  COLOR00 (per-frame `frame_border`, repainted by core 1 on change).
+- `combine_uf2.py` numbered appended ROM/ADF blocks separately from the
+  firmware in the same family; the RP2350 boot ROM stops after the first
+  block's numBlocks, so a new ADF was never written via BOOTSEL. Now one
+  sequence per family; other families (E10 workaround block) untouched.
+
+**PAL 256 lines (2026-09-28).** PAL HDMI showed only 200 of Workbench's 256
+lines. Freed 60 KB more SRAM by replacing Musashi's 64 KB per-opcode cycle
+table with per-handler cycles (`m68ki_handler_cycles`, flag 0x100 = register
+shift by immediate count, +2 cycles per bit, count 0 = 8), read through
+`CYC_INSTRUCTION_OF()`. Verified by linking the original and new
+`m68kops.c` against stub handlers: all 65,536 opcodes give the same handler
+and cycles. PAL frames are 640x256 x2 in SRAM with 3 TMDS buffers (~11 KB heap
+spare); NTSC keeps 200 lines and 4 buffers (~80 KB spare). The border stays
+COLOR00 by user choice, so Workbench has no visible screen outline (authentic).
+A PAL Workbench 1.3 boot takes ~4 min on device (~3.5 min after the AmigaDOS
+window appears); a long wait at the CLI is normal, not a hang.
+
+**Speed work (2026-09-28).** PC-sampling profile (DWT_PCSR over SWD) showed
+~70 % of core 0 in the display pipeline's PSRAM traffic, not the 68000.
+Fixes: skip the per-frame 1 MB raster clear (per-row written ranges), then
+render RGB332 directly into the SRAM scanout frame. PAL boot to Workbench:
+~250 s → 151.5 s → 93.5 s. Tried and dropped: hot code in SRAM (no gain, the
+bottleneck is PSRAM data; exhausted PAL SRAM) and turboFloppy 64 (breaks the
+native PAL wb13 case). A WB 1.3 boot is only ~16 s of Amiga time.
+- KEY insert on the hand screen: Kickstart takes ~7 s of Amiga time to notice
+  the disk; the hand screen is CPU-bound (~7 % speed), so ~100 s wall time.
+- Debugger hygiene: halting cores or setting watchpoints while PicoDVI runs,
+  then resetting through OpenOCD, left DMA/PIO wedged (core 1 stuck in
+  `dvi_dma_irq_handler`, once even a scratch-X overwrite). Only a power cycle
+  recovered it. Measure with non-halting reads (`mdw`, `DWT_PCSR`) instead.
+- CPU path (2026-09-28): chip-RAM-first accessors with REV loads, ROM-first
+  instruction fetch, and 4-slot CPU slices cut KEY-insert → AmigaDOS from
+  116 s to 79 s (NTSC). Measure KEY timing with the press *after* the hand
+  screen has been up a while; an early press is picked up almost at once.
+- Table-driven c2p to RGB332 (2026-09-28): NTSC KEY insert → AmigaDOS
+  64 s (from 116 s at the start of the day), PAL boot to Workbench 82 s
+  (from ~250 s). Remaining big costs: per-slot chipset emulation (~30 %).
+- KS 2.04 insert screen uses DDFSTRT 0x40 (narrow): it ran the old
+  presentation path at ~2 vblanks/s (animation looked frozen) until narrow
+  layouts got the direct path. Its shutter colour $998877 turns olive in
+  RGB332 — quantization, not a bug. NTSC now shows 240 rows (xsysinfo).
+
+**HSTX HDMI, WeAct only, DF0 only (2026-09-29).**
+- HDMI now uses the RP2350 HSTX peripheral: hardware TMDS encoding of RGB332,
+  command lists for sync/porches and `TMDS_REPEAT` borders, two ping-pong DMA
+  channels, one core-1 DMA_IRQ_1 interrupt per line (copies the next 640-byte
+  row, swaps frames at line 0). `clk_hstx` = `clk_sys / 2` (HSTX shifts two
+  bits per cycle). Verified NTSC (KS 2.04 insert screen) and PAL (xsysinfo).
+- Gotchas: the SDK runtime leaves HSTX in reset — call
+  `reset_unreset_block_num_wait_blocking(RESET_HSTX)` after configuring
+  `clk_hstx`, or all register writes are ignored (CSR reads 0x10050600).
+  HSTX starts a few seconds after reset (PSRAM check, boot pattern first), so
+  SWD reads right after a flash show it idle.
+- The Waveshare RP2350-PiZero was dropped with PicoDVI: its mini-HDMI is on
+  GPIO32..39 and HSTX is hard-wired to GPIO12..19. The SD-card code stays
+  (external SPI module planned); pins are overridable `BOARD_SD_*` defaults.
+- Only DF0 is supported. DF1-DF3 remain in `df[4]` purely as unconnected
+  drives for Kickstart's drive-ID probe (their `pra`/`idMode` from
+  floppyInit); `mfmData` is NULL for them and floppyDataRead returns 0.
+- Clocks (2026-09-29): HSTX moved to PLL_USB (retuned to 252/270 MHz,
+  clk_hstx = /2), so clk_sys is the `OMEGA_SYS_CLK_KHZ` option, default
+  320 MHz (PSRAM 107 MHz). CPU clock beats PSRAM clock: 266/133 79.4 s vs
+  320/107 66.7 s PAL boot. USB/ADC clocks are stopped; USB later needs a
+  48 MHz oscillator on GPIO20 (GPIN0) or clk_sys = n*48 MHz.
+- Frame pacing: acquiring the back buffer used to spin until core 1 took the
+  previous frame, quantising the emulator to 50/n fps (idle stuck at 16.7).
+  Now one atomic word (bit 0 displayed, bit 1 pending); the emulator takes
+  back unshown frames. Idle 17.9 fps.
+- Benchmark tooling: scratchpad `poll.py` (boot-to-first-AmigaDOS/WB frame via
+  SWD frame dumps; reads `frame_state` bit 0) and `tod.sh` (CIA-A TOD delta).
+- Per-slot DMA work (2026-09-29): cached per-line state (dirty flag from the
+  DIW/DDF/BPLCON0/DMACON handlers), VPOSR per line, inlined E-clock,
+  `dma_run(n)` batching. Native frames stayed bit-identical.
+- Core-1 pixel conversion: 8 KB SPSC ring (bitplane blocks, palette via
+  `internal.paletteGeneration`, frame begin/end); core 1 owns the frame.
+  Two traps hit on the way: (1) claiming the back buffer at frame begin took
+  back the just-published frame, so frames were almost never shown (also true
+  of the lazy-claim version in commit 450aa60); (2) any flash code on core 1
+  (veneers, libc memset/memcpy, time_us_64, even GCC turning loops into
+  memset) can stall behind PSRAM traffic and make the HSTX line IRQ miss its
+  deadline, killing the DMA chain (line counter stuck, no HDMI signal). Use
+  `C1_FUNC` (RAM + no-tree-loop-distribute-patterns) and check with objdump
+  that core-1 code only calls RAM.
+- Benchmarking: use a strict Workbench detector (title bar + empty left
+  area) and `dvi_frames_shown`; earlier "first AmigaDOS/WB frame" numbers
+  caught different screens across builds. PAL 320 MHz now: WB icons 48.0 s,
+  idle 26.9 emulated / ~17.5 shown fps. A hung chip (SWD reads fail) was
+  recovered with `-f target/rp2350-rescue.cfg`.
+- Floppy on core 1 was evaluated and rejected: during the disk-heavy boot all
+  floppy code is ~2 % of core 0 and must answer within the DMA slot.
+- Core-1 ring sized per mode (32 KB NTSC, 16 KB PAL): nothing calls malloc
+  any more, so all SRAM past `end` is free. Shown fps at idle Workbench: NTSC
+  22 → 27 of 32, PAL 17.5 → 18.6 of 27.

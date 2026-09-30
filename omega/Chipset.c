@@ -19,6 +19,15 @@
 #include "DMA.h"
 #include "debug.h"
 
+// Register-stub diagnostics are useful in the desktop debugger, but a ROM can
+// hit them continuously.  Printing every access over Pico USB stdio slows the
+// emulated CPU dramatically and obscures the boot/fault messages we need.
+#ifdef PICO_BUILD
+#define CHIPSET_STUB_LOG(...) ((void)0)
+#else
+#define CHIPSET_STUB_LOG(...) printf(__VA_ARGS__)
+#endif
+
 Chipset_t chipset;
 Internal_t internal;
 
@@ -44,11 +53,13 @@ void ChipsetInit(){
     chipset.cop1lc = 0;
     chipset.cop2lc = 0;
     chipset.dmaconr = 0;
+    chipset.serdatr = 0x3000; // Idle serial transmitter: TSRE and TBE set
     internal.copperPC = 0;
     internal.copperCycle = 0;
     internal.hPos = 0;
     internal.vPos = 0;
     internal.bitplaneMask = 0;
+    dmaLineStateDirty = 1;
     
     //For OS 1.x
     chipset.dsksync=0x4489;
@@ -81,7 +92,7 @@ uint32_t EHB2ARGB(uint16_t color){
 }
 
 uint16_t noRead(void){
-    printf("can't read a Write only Register %s\n",regNames[debugChipAddress]);
+    CHIPSET_STUB_LOG("can't read a Write only Register %s\n",regNames[debugChipAddress]);
     debugChipAddress = 0;
     return 0;
 }
@@ -201,9 +212,16 @@ void noopL(uint32_t value){
     
 }
 
+// A 32-bit write to a register pair without its own handler (e.g.
+// move.l to BPLxPTH/SPRxPTH) is two 16-bit writes, high word first, as the
+// 68000 performs it. chipWriteLong() sets debugChipAddress to the register.
 void longWrite(uint32_t value){
-    printf("32bit Write: to %s (%0x - %d) not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
-        debugChipAddress = 0;
+    const uint32_t reg = debugChipAddress;
+    if (reg + 1u < 256u) {
+        putChipReg16[reg]((uint16_t)(value >> 16));
+        putChipReg16[reg + 1u]((uint16_t)value);
+    }
+    debugChipAddress = 0;
 }
 
 //**********************************************************
@@ -234,7 +252,7 @@ uint16_t clxdat(){
 }
 uint16_t adkconr(){
     
-    printf("adkconr called\n");
+    CHIPSET_STUB_LOG("adkconr called\n");
     
     return chipset.adkconr;
 }
@@ -265,12 +283,12 @@ uint16_t deniseid(){
 }
 
 void wordWrite(uint16_t value){
-    printf("16bit Write: %d to %s (%0x - %d) Not implemented!\n", debugChipValue, regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
+    CHIPSET_STUB_LOG("16bit Write: %d to %s (%0x - %d) Not implemented!\n", debugChipValue, regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
     debugChipAddress = 0;
 }
 
 void wordIllegalWrite(uint16_t value){
-     printf("16bit Write: To a read only register %s\n",regNames[debugChipAddress]);
+    CHIPSET_STUB_LOG("16bit Write: To a read only register %s\n",regNames[debugChipAddress]);
     debugChipAddress = 0;
 }
 
@@ -322,6 +340,10 @@ void copcon(uint16_t  value){
 
 void serdat(uint16_t value){
     chipset.serdat = value;
+#ifdef OMEGA_KICKSMASH_SIM
+    if ((value & 0xff) == '\n' || ((value & 0xff) >= 32 && (value & 0xff) < 127))
+        fputc(value & 0xff, stdout);
+#endif
 }
 
 void serper(uint16_t value){
@@ -466,31 +488,29 @@ void copjmp2L(uint32_t value){
 
 void diwstrt(uint16_t value){
     chipset.diwstrt = value;
+    dmaLineStateDirty = 1;
     //printf("diwstart: %04x\n",value);
 }
 
 void diwstop(uint16_t value){
     chipset.diwstop = value;
+    dmaLineStateDirty = 1;
     
 }
 
 
 void ddfstrt(uint16_t value){
-    static int ddfLog = 0;
-    if (value != chipset.ddfstrt && ddfLog < 5)
-        printf("[DDF] DDFSTRT 0x%02X -> 0x%02X (lastFetch will be 0x%02X)\n",
-               chipset.ddfstrt, value, value + 160), ddfLog++;
     chipset.ddfstrt = value;
+    dmaLineStateDirty = 1;
 }
 
 void ddfstop(uint16_t value){
-    static int ddfStopLog = 0;
-    if (value != chipset.ddfstop && ddfStopLog < 5)
-        printf("[DDF] DDFSTOP 0x%02X -> 0x%02X\n", chipset.ddfstop, value), ddfStopLog++;
     chipset.ddfstop = value;
+    dmaLineStateDirty = 1;
 }
 
 void  dmacon(uint16_t value){
+    dmaLineStateDirty = 1;
     if( (value & 32768) ==0){
         chipset.dmaconr = chipset.dmaconr ^ (chipset.dmaconr & value);
     }else{
@@ -631,70 +651,84 @@ void aud3dat(uint16_t value){
 
 void bpl1pth(uint16_t value){
     chipset.bpl1pt = (value << 15) | (chipset.bpl1pt & 0x00007FFF); //this is only shifted by 15 because all bitplane addresses are word aligend
+    dmaBitplanePointerWrite(1, 1);
 }
 void bpl1ptl(uint16_t value){
     chipset.bpl1pt = (value >> 1)  | (chipset.bpl1pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(1, 0);
 }
 
 void bpl2pth(uint16_t value){
     chipset.bpl2pt = (value << 15) | (chipset.bpl2pt & 0x00007FFF);
+    dmaBitplanePointerWrite(2, 1);
 }
 void bpl2ptl(uint16_t value){
     chipset.bpl2pt = (value >> 1)  | (chipset.bpl2pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(2, 0);
 }
 
 void bpl3pth(uint16_t value){
     chipset.bpl3pt = (value << 15) | (chipset.bpl3pt & 0x00007FFF);
+    dmaBitplanePointerWrite(3, 1);
 }
 void bpl3ptl(uint16_t value){
     chipset.bpl3pt = (value >> 1)  | (chipset.bpl3pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(3, 0);
 }
 
 void bpl4pth(uint16_t value){
     chipset.bpl4pt = (value << 15) | (chipset.bpl4pt & 0x00007FFF);
+    dmaBitplanePointerWrite(4, 1);
 }
 void bpl4ptl(uint16_t value){
     chipset.bpl4pt = (value >> 1)  | (chipset.bpl4pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(4, 0);
 }
 
 void bpl5pth(uint16_t value){
     chipset.bpl5pt = (value << 15) | (chipset.bpl5pt & 0x00007FFF);
+    dmaBitplanePointerWrite(5, 1);
 }
 void bpl5ptl(uint16_t value){
     chipset.bpl5pt = (value >> 1)  | (chipset.bpl5pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(5, 0);
 }
 
 void bpl6pth(uint16_t value){
     chipset.bpl6pt = (value << 15) | (chipset.bpl6pt & 0x00007FFF);
+    dmaBitplanePointerWrite(6, 1);
 }
 void bpl6ptl(uint16_t value){
     chipset.bpl6pt = (value >> 1)  | (chipset.bpl6pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(6, 0);
 }
 
 void bpl7pth(uint16_t value){
     chipset.bpl7pt = (value << 15) | (chipset.bpl7pt & 0x00007FFF);
+    dmaBitplanePointerWrite(7, 1);
 }
 void bpl7ptl(uint16_t value){
     chipset.bpl7pt = (value >> 1)  | (chipset.bpl7pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(7, 0);
 }
 
 void bpl8pth(uint16_t value){
     chipset.bpl8pt = (value << 15) | (chipset.bpl8pt & 0x00007FFF);
+    dmaBitplanePointerWrite(8, 1);
 }
 void bpl8ptl(uint16_t value){
     chipset.bpl8pt = (value >> 1)  | (chipset.bpl8pt & 0xFFFF8000);
+    dmaBitplanePointerWrite(8, 0);
 }
 
 void bplcon0(uint16_t value){
-    displayLineReset(); //restart drawing if the bplcon has changed. This might need to take a value as to how many lines were needed to change the mode
-
-    static int bplLog = 0;
-    if (value != chipset.bplcon0 && bplLog < 20)
-        printf("[BPLCON0] 0x%04X -> 0x%04X (planes=%d hires=%d)\n", chipset.bplcon0, value, (value>>12)&7, (value>>15)&1), bplLog++;
-
     chipset.bplcon0 = value;
+    dmaLineStateDirty = 1;
 
     int planes = (value >> 12) & 7 ;
+    int maximumPlanes = (value & 0x8000) ? 4 : 6;
+    if (planes > maximumPlanes)
+        planes = maximumPlanes;
 
     internal.bitplaneMask = planeMask[planes];
 }
@@ -711,8 +745,6 @@ void bplcon3(uint16_t value){
 
 void bpl1mod(uint16_t value){
     chipset.bpl1mod = (int16_t)value >> 1; // signed: preserves negative modulo
-    static int modLog = 0;
-    if (modLog < 5) printf("[MOD] BPL1MOD reg=0x%04X -> chipset.bpl1mod=%d\n", value, chipset.bpl1mod), modLog++;
 }
 void bpl2mod(uint16_t value){
     chipset.bpl2mod = (int16_t)value >> 1;
@@ -795,226 +827,186 @@ void spr7ptl(uint16_t value){
     chipset.spr7pt = (value>>1)    | (chipset.spr7pt & 0xFFFF8000);
 }
 
-void spr0pos(uint16_t value){
-    chipset.spr0pos = value;
-}
-void spr0ctl(uint16_t value){
-    chipset.spr0ctl = value;
-}
-
-void spr1pos(uint16_t value){
-    chipset.spr1pos = value;
-}
-void spr1ctl(uint16_t value){
-    chipset.spr1ctl = value;
-}
-
-void spr2pos(uint16_t value){
-    chipset.spr2pos = value;
-}
-void spr2ctl(uint16_t value){
-    chipset.spr2ctl = value;
-}
-
-void spr3pos(uint16_t value){
-    chipset.spr3pos = value;
-}
-void spr3ctl(uint16_t value){
-    chipset.spr3ctl = value;
-}
-
-void spr4pos(uint16_t value){
-    chipset.spr4pos = value;
-}
-void spr4ctl(uint16_t value){
-    chipset.spr4ctl = value;
-}
-
-void spr5pos(uint16_t value){
-    chipset.spr5pos = value;
-}
-void spr5ctl(uint16_t value){
-    chipset.spr5ctl = value;
-}
-
-void spr6pos(uint16_t value){
-    chipset.spr6pos = value;
-}
-void spr6ctl(uint16_t value){
-    chipset.spr6ctl = value;
-}
-
-void spr7pos(uint16_t value){
-    chipset.spr7pos = value;
-}
-void spr7ctl(uint16_t value){
-    chipset.spr7ctl = value;
-}
-
-void spr7data(uint16_t value){
-    chipset.spr7data = value;
-}
+// Sprite registers. As in Denise, writing SPRxCTL disarms sprite x and
+// writing SPRxDATA arms it; an armed sprite shows DATA/DATB on its lines.
+// Sprite DMA (DMA.c) writes them through these handlers like the CPU does.
+uint8_t spriteArmed;
+#define SPRITE_REGISTERS(n) \
+void spr##n##pos(uint16_t value){ chipset.spr##n##pos = value; } \
+void spr##n##ctl(uint16_t value){ \
+    chipset.spr##n##ctl = value; spriteArmed &= (uint8_t)~(1u << (n)); } \
+void spr##n##data(uint16_t value){ \
+    chipset.spr##n##data = value; spriteArmed |= (uint8_t)(1u << (n)); } \
+void spr##n##datb(uint16_t value){ chipset.spr##n##datb = value; }
+SPRITE_REGISTERS(0)
+SPRITE_REGISTERS(1)
+SPRITE_REGISTERS(2)
+SPRITE_REGISTERS(3)
+SPRITE_REGISTERS(4)
+SPRITE_REGISTERS(5)
+SPRITE_REGISTERS(6)
+SPRITE_REGISTERS(7)
 
 void color00(uint16_t value){
     chipset.color00 = value; //old register
-    internal.palette[0] = OCS2ARGB(value);
-    internal.palette[32] = EHB2ARGB(value);
+    internal.palette[0] = OCS2ARGB(value); internal.palette332[0] = omegaRGB332(internal.palette[0]); internal.paletteGeneration++;
+    internal.palette[32] = EHB2ARGB(value); internal.palette332[32] = omegaRGB332(internal.palette[32]); internal.paletteGeneration++;
 }
 void color01(uint16_t value){
     chipset.color01 = value; //old register
-    internal.palette[1] = OCS2ARGB(value);
-    internal.palette[33] = EHB2ARGB(value);
+    internal.palette[1] = OCS2ARGB(value); internal.palette332[1] = omegaRGB332(internal.palette[1]); internal.paletteGeneration++;
+    internal.palette[33] = EHB2ARGB(value); internal.palette332[33] = omegaRGB332(internal.palette[33]); internal.paletteGeneration++;
 }
 
 void color02(uint16_t value){
     chipset.color02 = value; //old register
-    internal.palette[2] = OCS2ARGB(value);
-    internal.palette[34] = EHB2ARGB(value);
+    internal.palette[2] = OCS2ARGB(value); internal.palette332[2] = omegaRGB332(internal.palette[2]); internal.paletteGeneration++;
+    internal.palette[34] = EHB2ARGB(value); internal.palette332[34] = omegaRGB332(internal.palette[34]); internal.paletteGeneration++;
 }
 void color03(uint16_t value){
     chipset.color03 = value; //old register
-    internal.palette[3] = OCS2ARGB(value);
-    internal.palette[35] = EHB2ARGB(value);
+    internal.palette[3] = OCS2ARGB(value); internal.palette332[3] = omegaRGB332(internal.palette[3]); internal.paletteGeneration++;
+    internal.palette[35] = EHB2ARGB(value); internal.palette332[35] = omegaRGB332(internal.palette[35]); internal.paletteGeneration++;
 }
 void color04(uint16_t value){
     chipset.color04 = value; //old register
-    internal.palette[4] = OCS2ARGB(value);
-    internal.palette[36] = EHB2ARGB(value);
+    internal.palette[4] = OCS2ARGB(value); internal.palette332[4] = omegaRGB332(internal.palette[4]); internal.paletteGeneration++;
+    internal.palette[36] = EHB2ARGB(value); internal.palette332[36] = omegaRGB332(internal.palette[36]); internal.paletteGeneration++;
 }
 void color05(uint16_t value){
     chipset.color05 = value; //old register
-    internal.palette[5] = OCS2ARGB(value);
-    internal.palette[37] = EHB2ARGB(value);
+    internal.palette[5] = OCS2ARGB(value); internal.palette332[5] = omegaRGB332(internal.palette[5]); internal.paletteGeneration++;
+    internal.palette[37] = EHB2ARGB(value); internal.palette332[37] = omegaRGB332(internal.palette[37]); internal.paletteGeneration++;
 }
 void color06(uint16_t value){
     chipset.color06 = value; //old register
-    internal.palette[6] = OCS2ARGB(value);
-    internal.palette[38] = EHB2ARGB(value);
+    internal.palette[6] = OCS2ARGB(value); internal.palette332[6] = omegaRGB332(internal.palette[6]); internal.paletteGeneration++;
+    internal.palette[38] = EHB2ARGB(value); internal.palette332[38] = omegaRGB332(internal.palette[38]); internal.paletteGeneration++;
 }
 void color07(uint16_t value){
     chipset.color07 = value; //old register
-    internal.palette[7] = OCS2ARGB(value);
-    internal.palette[39] = EHB2ARGB(value);
+    internal.palette[7] = OCS2ARGB(value); internal.palette332[7] = omegaRGB332(internal.palette[7]); internal.paletteGeneration++;
+    internal.palette[39] = EHB2ARGB(value); internal.palette332[39] = omegaRGB332(internal.palette[39]); internal.paletteGeneration++;
 }
 void color08(uint16_t value){
     chipset.color08 = value; //old register
-    internal.palette[8] = OCS2ARGB(value);
-    internal.palette[40] = EHB2ARGB(value);
+    internal.palette[8] = OCS2ARGB(value); internal.palette332[8] = omegaRGB332(internal.palette[8]); internal.paletteGeneration++;
+    internal.palette[40] = EHB2ARGB(value); internal.palette332[40] = omegaRGB332(internal.palette[40]); internal.paletteGeneration++;
 }
 void color09(uint16_t value){
     chipset.color09 = value; //old register
-    internal.palette[9] = OCS2ARGB(value);
-    internal.palette[41] = EHB2ARGB(value);
+    internal.palette[9] = OCS2ARGB(value); internal.palette332[9] = omegaRGB332(internal.palette[9]); internal.paletteGeneration++;
+    internal.palette[41] = EHB2ARGB(value); internal.palette332[41] = omegaRGB332(internal.palette[41]); internal.paletteGeneration++;
 }
 void color10(uint16_t value){
     chipset.color10 = value; //old register
-    internal.palette[10] = OCS2ARGB(value);
-    internal.palette[42] = EHB2ARGB(value);
+    internal.palette[10] = OCS2ARGB(value); internal.palette332[10] = omegaRGB332(internal.palette[10]); internal.paletteGeneration++;
+    internal.palette[42] = EHB2ARGB(value); internal.palette332[42] = omegaRGB332(internal.palette[42]); internal.paletteGeneration++;
 }
 void color11(uint16_t value){
     chipset.color11 = value; //old register
-    internal.palette[11] = OCS2ARGB(value);
-    internal.palette[43] = EHB2ARGB(value);
+    internal.palette[11] = OCS2ARGB(value); internal.palette332[11] = omegaRGB332(internal.palette[11]); internal.paletteGeneration++;
+    internal.palette[43] = EHB2ARGB(value); internal.palette332[43] = omegaRGB332(internal.palette[43]); internal.paletteGeneration++;
 }
 void color12(uint16_t value){
     chipset.color12 = value; //old register
-    internal.palette[12] = OCS2ARGB(value);
-    internal.palette[44] = EHB2ARGB(value);
+    internal.palette[12] = OCS2ARGB(value); internal.palette332[12] = omegaRGB332(internal.palette[12]); internal.paletteGeneration++;
+    internal.palette[44] = EHB2ARGB(value); internal.palette332[44] = omegaRGB332(internal.palette[44]); internal.paletteGeneration++;
 }
 void color13(uint16_t value){
     chipset.color13 = value; //old register
-    internal.palette[13] = OCS2ARGB(value);
-    internal.palette[45] = EHB2ARGB(value);
+    internal.palette[13] = OCS2ARGB(value); internal.palette332[13] = omegaRGB332(internal.palette[13]); internal.paletteGeneration++;
+    internal.palette[45] = EHB2ARGB(value); internal.palette332[45] = omegaRGB332(internal.palette[45]); internal.paletteGeneration++;
 }
 void color14(uint16_t value){
     chipset.color14 = value; //old register
-    internal.palette[14] = OCS2ARGB(value);
-    internal.palette[46] = EHB2ARGB(value);
+    internal.palette[14] = OCS2ARGB(value); internal.palette332[14] = omegaRGB332(internal.palette[14]); internal.paletteGeneration++;
+    internal.palette[46] = EHB2ARGB(value); internal.palette332[46] = omegaRGB332(internal.palette[46]); internal.paletteGeneration++;
 }
 void color15(uint16_t value){
     chipset.color15 = value; //old register
-    internal.palette[15] = OCS2ARGB(value);
-    internal.palette[47] = EHB2ARGB(value);
+    internal.palette[15] = OCS2ARGB(value); internal.palette332[15] = omegaRGB332(internal.palette[15]); internal.paletteGeneration++;
+    internal.palette[47] = EHB2ARGB(value); internal.palette332[47] = omegaRGB332(internal.palette[47]); internal.paletteGeneration++;
 }
 void color16(uint16_t value){
     chipset.color16 = value; //old register
-    internal.palette[16] = OCS2ARGB(value);
-    internal.palette[48] = EHB2ARGB(value);
+    internal.palette[16] = OCS2ARGB(value); internal.palette332[16] = omegaRGB332(internal.palette[16]); internal.paletteGeneration++;
+    internal.palette[48] = EHB2ARGB(value); internal.palette332[48] = omegaRGB332(internal.palette[48]); internal.paletteGeneration++;
 }
 void color17(uint16_t value){
     chipset.color17 = value; //old register
-    internal.palette[17] = OCS2ARGB(value);
-    internal.palette[49] = EHB2ARGB(value);
+    internal.palette[17] = OCS2ARGB(value); internal.palette332[17] = omegaRGB332(internal.palette[17]); internal.paletteGeneration++;
+    internal.palette[49] = EHB2ARGB(value); internal.palette332[49] = omegaRGB332(internal.palette[49]); internal.paletteGeneration++;
 }
 void color18(uint16_t value){
     chipset.color18 = value; //old register
-    internal.palette[18] = OCS2ARGB(value);
-    internal.palette[50] = EHB2ARGB(value);
+    internal.palette[18] = OCS2ARGB(value); internal.palette332[18] = omegaRGB332(internal.palette[18]); internal.paletteGeneration++;
+    internal.palette[50] = EHB2ARGB(value); internal.palette332[50] = omegaRGB332(internal.palette[50]); internal.paletteGeneration++;
 }
 void color19(uint16_t value){
     chipset.color19 = value; //old register
-    internal.palette[19] = OCS2ARGB(value);
-    internal.palette[51] = EHB2ARGB(value);
+    internal.palette[19] = OCS2ARGB(value); internal.palette332[19] = omegaRGB332(internal.palette[19]); internal.paletteGeneration++;
+    internal.palette[51] = EHB2ARGB(value); internal.palette332[51] = omegaRGB332(internal.palette[51]); internal.paletteGeneration++;
 }
 void color20(uint16_t value){
     chipset.color20 = value; //old register
-    internal.palette[20] = OCS2ARGB(value);
-    internal.palette[52] = EHB2ARGB(value);
+    internal.palette[20] = OCS2ARGB(value); internal.palette332[20] = omegaRGB332(internal.palette[20]); internal.paletteGeneration++;
+    internal.palette[52] = EHB2ARGB(value); internal.palette332[52] = omegaRGB332(internal.palette[52]); internal.paletteGeneration++;
 }
 void color21(uint16_t value){
     chipset.color21 = value; //old register
-    internal.palette[21] = OCS2ARGB(value);
-    internal.palette[53] = EHB2ARGB(value);
+    internal.palette[21] = OCS2ARGB(value); internal.palette332[21] = omegaRGB332(internal.palette[21]); internal.paletteGeneration++;
+    internal.palette[53] = EHB2ARGB(value); internal.palette332[53] = omegaRGB332(internal.palette[53]); internal.paletteGeneration++;
 }
 void color22(uint16_t value){
     chipset.color22 = value; //old register
-    internal.palette[22] = OCS2ARGB(value);
-    internal.palette[54] = EHB2ARGB(value);
+    internal.palette[22] = OCS2ARGB(value); internal.palette332[22] = omegaRGB332(internal.palette[22]); internal.paletteGeneration++;
+    internal.palette[54] = EHB2ARGB(value); internal.palette332[54] = omegaRGB332(internal.palette[54]); internal.paletteGeneration++;
 }
 void color23(uint16_t value){
     chipset.color23 = value; //old register
-    internal.palette[23] = OCS2ARGB(value);
-    internal.palette[55] = EHB2ARGB(value);
+    internal.palette[23] = OCS2ARGB(value); internal.palette332[23] = omegaRGB332(internal.palette[23]); internal.paletteGeneration++;
+    internal.palette[55] = EHB2ARGB(value); internal.palette332[55] = omegaRGB332(internal.palette[55]); internal.paletteGeneration++;
 }
 void color24(uint16_t value){
     chipset.color24 = value; //old register
-    internal.palette[24] = OCS2ARGB(value);
-    internal.palette[56] = EHB2ARGB(value);
+    internal.palette[24] = OCS2ARGB(value); internal.palette332[24] = omegaRGB332(internal.palette[24]); internal.paletteGeneration++;
+    internal.palette[56] = EHB2ARGB(value); internal.palette332[56] = omegaRGB332(internal.palette[56]); internal.paletteGeneration++;
 }
 void color25(uint16_t value){
     chipset.color25 = value; //old register
-    internal.palette[25] = OCS2ARGB(value);
-    internal.palette[57] = EHB2ARGB(value);
+    internal.palette[25] = OCS2ARGB(value); internal.palette332[25] = omegaRGB332(internal.palette[25]); internal.paletteGeneration++;
+    internal.palette[57] = EHB2ARGB(value); internal.palette332[57] = omegaRGB332(internal.palette[57]); internal.paletteGeneration++;
 }
 void color26(uint16_t value){
     chipset.color26 = value; //old register
-    internal.palette[26] = OCS2ARGB(value);
-    internal.palette[58] = EHB2ARGB(value);
+    internal.palette[26] = OCS2ARGB(value); internal.palette332[26] = omegaRGB332(internal.palette[26]); internal.paletteGeneration++;
+    internal.palette[58] = EHB2ARGB(value); internal.palette332[58] = omegaRGB332(internal.palette[58]); internal.paletteGeneration++;
 }
 void color27(uint16_t value){
     chipset.color27 = value; //old register
-    internal.palette[27] = OCS2ARGB(value);
-    internal.palette[59] = EHB2ARGB(value);
+    internal.palette[27] = OCS2ARGB(value); internal.palette332[27] = omegaRGB332(internal.palette[27]); internal.paletteGeneration++;
+    internal.palette[59] = EHB2ARGB(value); internal.palette332[59] = omegaRGB332(internal.palette[59]); internal.paletteGeneration++;
 }
 void color28(uint16_t value){
     chipset.color28 = value; //old register
-    internal.palette[28] = OCS2ARGB(value);
-    internal.palette[60] = EHB2ARGB(value);
+    internal.palette[28] = OCS2ARGB(value); internal.palette332[28] = omegaRGB332(internal.palette[28]); internal.paletteGeneration++;
+    internal.palette[60] = EHB2ARGB(value); internal.palette332[60] = omegaRGB332(internal.palette[60]); internal.paletteGeneration++;
 }
 void color29(uint16_t value){
     chipset.color29 = value; //old register
-    internal.palette[29] = OCS2ARGB(value);
-    internal.palette[61] = EHB2ARGB(value);
+    internal.palette[29] = OCS2ARGB(value); internal.palette332[29] = omegaRGB332(internal.palette[29]); internal.paletteGeneration++;
+    internal.palette[61] = EHB2ARGB(value); internal.palette332[61] = omegaRGB332(internal.palette[61]); internal.paletteGeneration++;
 }
 void color30(uint16_t value){
     chipset.color30 = value; //old register
-    internal.palette[30] = OCS2ARGB(value);
-    internal.palette[62] = EHB2ARGB(value);
+    internal.palette[30] = OCS2ARGB(value); internal.palette332[30] = omegaRGB332(internal.palette[30]); internal.paletteGeneration++;
+    internal.palette[62] = EHB2ARGB(value); internal.palette332[62] = omegaRGB332(internal.palette[62]); internal.paletteGeneration++;
 }
 void color31(uint16_t value){
     chipset.color31 = value; //old register
-    internal.palette[31] = OCS2ARGB(value);
-    internal.palette[63] = EHB2ARGB(value);
+    internal.palette[31] = OCS2ARGB(value); internal.palette332[31] = omegaRGB332(internal.palette[31]); internal.paletteGeneration++;
+    internal.palette[63] = EHB2ARGB(value); internal.palette332[63] = omegaRGB332(internal.palette[63]); internal.paletteGeneration++;
 }
 
 void color00L(uint32_t value){
@@ -1116,7 +1108,7 @@ void noop(uint16_t value){
 
 //***********************************************************************************************
 uint32_t noReadL(void){
-    printf("32bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
+    CHIPSET_STUB_LOG("32bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
     return 0;
 }
 
@@ -1125,7 +1117,7 @@ uint32_t vposrL(){  //0x2
 }
 
 uint8_t noReadB(void){
-    printf("8bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
+    CHIPSET_STUB_LOG("8bit Read: from %s (%0x - %d) Not implemented!\n",regNames[debugChipAddress],debugChipAddress<<1,debugChipAddress);
     return 0;
 }
 
@@ -1175,6 +1167,14 @@ uint8_t potgorBH(){
 
 uint8_t potgorBL(){ //  0xB
     return chipset.potinp & 0xFF; // only read the bottom 8bits
+}
+
+uint8_t serdatrBH(){
+    return chipset.serdatr >> 8;
+}
+
+uint8_t serdatrBL(){
+    return chipset.serdatr & 0xFF;
 }
 
 uint8_t intenarBH(){ //0xE
@@ -1230,8 +1230,8 @@ uint8_t (*getChipReg8[])() = {
     noReadB,
     potgorBH,
     potgorBL,
-    noReadB,
-    noReadB,
+    serdatrBH,
+    serdatrBL,
     noReadB,
     noReadB,
     intenarBH,
@@ -2234,36 +2234,36 @@ void (*putChipReg16[])(uint16_t) ={
     spr7ptl,
     spr0pos,
     spr0ctl,
-    wordWrite,
-    wordWrite,
+    spr0data,
+    spr0datb,
     spr1pos,
     spr1ctl,
-    wordWrite,
-    wordWrite,
+    spr1data,
+    spr1datb,
     spr2pos,
     spr2ctl,
-    wordWrite,
-    wordWrite,
+    spr2data,
+    spr2datb,
     spr3pos,
     spr3ctl,
-    wordWrite,
-    wordWrite,
+    spr3data,
+    spr3datb,
     spr4pos,
     spr4ctl,
-    wordWrite,
-    wordWrite,
+    spr4data,
+    spr4datb,
     spr5pos,
     spr5ctl,
-    wordWrite,
-    wordWrite,
+    spr5data,
+    spr5datb,
     spr6pos,
     spr6ctl,
-    wordWrite,
-    wordWrite,
+    spr6data,
+    spr6datb,
     spr7pos,
     spr7ctl,
     spr7data,
-    wordWrite,
+    spr7datb,
     color00,
     color01,
     color02,
@@ -2350,6 +2350,3 @@ void eclock_execute(Chipset_t* chipset){
     }
     
 }
-
-
-

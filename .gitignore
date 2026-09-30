@@ -1,4 +1,7 @@
 /build/
+/build*/
+/sd_card/
+/image_refs/
 *.uf2
 *.elf
 *.bin

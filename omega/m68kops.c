@@ -4,10 +4,35 @@
 
 #include "m68kops.h"
 
-#define NUM_CPU_TYPES 3
+#define OPCODE_CPU_TYPES 3
+#ifdef PICO_BUILD
+// The RP2350 port always configures an A500-class 68000. Do not reserve two
+// unused 64 KiB cycle tables for the 68010 and 68020 in scarce internal SRAM.
+#define NUM_CPU_TYPES 1
+#else
+#define NUM_CPU_TYPES OPCODE_CPU_TYPES
+#endif
 
+#ifdef PICO_BUILD
+// Internal SRAM is scarce on RP2350. Store a 16-bit handler index per opcode
+// instead of a 256 KiB pointer table, deduplicated into shared 64-opcode
+// blocks (see m68kops.h), and keep the handler descriptions in flash; they
+// are only read while building the index.
+#include "../src/psram.h"
+#include "pico/platform.h"
+#include <stdio.h>
+#define M68KI_HANDLER_TABLE_CONST const
+unsigned char m68ki_opcode_block[0x10000 >> M68KI_BLOCK_BITS];
+unsigned short m68ki_opcode_blocks[M68KI_MAX_BLOCKS][M68KI_BLOCK_SIZE];
+/* The flat table is built in PSRAM scratch at boot, then compressed. */
+static unsigned short *m68ki_instruction_index;
+#else
+#define M68KI_HANDLER_TABLE_CONST
 void  (*m68ki_instruction_jump_table[0x10000])(void); /* opcode handler jump table */
+#endif
+#ifndef PICO_BUILD
 unsigned char m68ki_cycles[NUM_CPU_TYPES][0x10000]; /* Cycles used by CPU type */
+#endif
 
 /* This is used to generate the opcode handler jump table */
 typedef struct
@@ -15,12 +40,12 @@ typedef struct
 	void (*opcode_handler)(void);        /* handler function */
 	unsigned int  mask;                  /* mask on opcode */
 	unsigned int  match;                 /* what to match after masking */
-	unsigned char cycles[NUM_CPU_TYPES]; /* cycles each cpu type takes */
+	unsigned char cycles[OPCODE_CPU_TYPES]; /* cycles each cpu type takes */
 } opcode_handler_struct;
 
 
 /* Opcode handler table */
-static opcode_handler_struct m68k_opcode_handler_table[] =
+static M68KI_HANDLER_TABLE_CONST opcode_handler_struct m68k_opcode_handler_table[] =
 {
 /*   function                      mask    match    000  010  020 */
 	{m68k_op_1010                , 0xf000, 0xa000, {  4,   4,   4}},
@@ -1988,23 +2013,113 @@ static opcode_handler_struct m68k_opcode_handler_table[] =
 	{0, 0, 0, {0, 0, 0}}
 };
 
+#ifdef PICO_BUILD
+#define M68KI_HANDLER_COUNT \
+	(sizeof(m68k_opcode_handler_table) / sizeof(m68k_opcode_handler_table[0]))
+/* The terminating entry's slot dispatches illegal opcodes. */
+#define M68KI_ILLEGAL_INDEX (M68KI_HANDLER_COUNT - 1)
+void (*m68ki_handler_ptrs[M68KI_HANDLER_COUNT])(void);
+/* Per-handler 68000 cycles; replaces the 64 KiB per-opcode cycle table. */
+unsigned short m68ki_handler_cycles[M68KI_HANDLER_COUNT];
+#define M68KI_SET_HANDLER(op, os) \
+	(m68ki_instruction_index[op] = \
+		(unsigned short)((os) - m68k_opcode_handler_table))
+#define M68KI_SET_ILLEGAL(op) \
+	(m68ki_instruction_index[op] = M68KI_ILLEGAL_INDEX)
+/* Cycles are per handler (see m68ki_instruction_cycles()). */
+#define M68KI_SET_CYCLES(op, os)
+#define M68KI_CLEAR_CYCLES(op)
+#else
+#define M68KI_SET_HANDLER(op, os) \
+	(m68ki_instruction_jump_table[op] = (os)->opcode_handler)
+#define M68KI_SET_ILLEGAL(op) \
+	(m68ki_instruction_jump_table[op] = m68k_op_illegal)
+#define M68KI_SET_CYCLES(op, os) \
+	do { \
+		int k_; \
+		for(k_ = 0; k_ < NUM_CPU_TYPES; k_++) \
+			m68ki_cycles[k_][op] = (os)->cycles[k_]; \
+	} while(0)
+#define M68KI_CLEAR_CYCLES(op) \
+	do { \
+		int k_; \
+		for(k_ = 0; k_ < NUM_CPU_TYPES; k_++) \
+			m68ki_cycles[k_][op] = 0; \
+	} while(0)
+#endif
+
+
+#ifdef PICO_BUILD
+/* Share identical 64-opcode blocks of the flat table built in PSRAM. */
+static void m68ki_compress_opcode_table(void)
+{
+	int blocks = 0;
+	for(int b = 0; b < (0x10000 >> M68KI_BLOCK_BITS); b++)
+	{
+		const unsigned short *src = &m68ki_instruction_index[b << M68KI_BLOCK_BITS];
+		int u;
+		for(u = 0; u < blocks; u++)
+		{
+			int k;
+			for(k = 0; k < M68KI_BLOCK_SIZE && m68ki_opcode_blocks[u][k] == src[k]; k++)
+				;
+			if(k == M68KI_BLOCK_SIZE)
+				break;
+		}
+		if(u == blocks)
+		{
+			if(blocks == M68KI_MAX_BLOCKS)
+				panic("m68k: more than %d distinct opcode blocks", M68KI_MAX_BLOCKS);
+			for(int k = 0; k < M68KI_BLOCK_SIZE; k++)
+				m68ki_opcode_blocks[blocks][k] = src[k];
+			blocks++;
+		}
+		m68ki_opcode_block[b] = (unsigned char)u;
+	}
+	/* Verify against the flat table. */
+	for(int op = 0; op < 0x10000; op++)
+		if(m68ki_handler_index(op) != m68ki_instruction_index[op])
+			panic("m68k: opcode table compression mismatch at %04x", op);
+	printf("M68K: opcode table %d unique blocks (%u bytes)\n", blocks,
+	       (unsigned)(sizeof(m68ki_opcode_block) +
+	                  (unsigned)blocks * M68KI_BLOCK_SIZE * 2u));
+}
+#endif
 
 /* Build the opcode handler jump table */
 void m68ki_build_opcode_table(void)
 {
-	opcode_handler_struct *ostruct;
+	const opcode_handler_struct *ostruct;
 	int cycle_cost;
 	int instr;
 	int i;
 	int j;
 	int k;
 
+#ifdef PICO_BUILD
+	m68ki_instruction_index =
+		(unsigned short *)psram_ptr(BOARD_MAP_OPCODE_BUILD_OFFSET);
+	for(i = 0; i < (int)M68KI_HANDLER_COUNT; i++)
+		m68ki_handler_ptrs[i] = m68k_opcode_handler_table[i].opcode_handler;
+	m68ki_handler_ptrs[M68KI_ILLEGAL_INDEX] = m68k_op_illegal;
+	for(i = 0; i < (int)M68KI_HANDLER_COUNT; i++)
+	{
+		ostruct = &m68k_opcode_handler_table[i];
+		m68ki_handler_cycles[i] = ostruct->cycles[0];
+		/* Register shifts by an immediate count cost 2 cycles per bit;
+		   m68ki_instruction_cycles() adds them from the opcode. */
+		if(ostruct->mask == 0xf1f8 &&
+		   (ostruct->match & 0xf000) == 0xe000 && !(ostruct->match & 0x20))
+			m68ki_handler_cycles[i] |= M68KI_CYCLES_IMMEDIATE_SHIFT;
+	}
+	m68ki_handler_cycles[M68KI_ILLEGAL_INDEX] = 0;
+#endif
+
 	for(i = 0; i < 0x10000; i++)
 	{
 		/* default to illegal */
-		m68ki_instruction_jump_table[i] = m68k_op_illegal;
-		for(k=0;k<NUM_CPU_TYPES;k++)
-			m68ki_cycles[k][i] = 0;
+		M68KI_SET_ILLEGAL(i);
+		M68KI_CLEAR_CYCLES(i);
 	}
 
 	ostruct = m68k_opcode_handler_table;
@@ -2014,9 +2129,8 @@ void m68ki_build_opcode_table(void)
 		{
 			if((i & ostruct->mask) == ostruct->match)
 			{
-				m68ki_instruction_jump_table[i] = ostruct->opcode_handler;
-				for(k=0;k<NUM_CPU_TYPES;k++)
-					m68ki_cycles[k][i] = ostruct->cycles[k];
+				M68KI_SET_HANDLER(i, ostruct);
+				M68KI_SET_CYCLES(i, ostruct);
 			}
 		}
 		ostruct++;
@@ -2025,9 +2139,8 @@ void m68ki_build_opcode_table(void)
 	{
 		for(i = 0;i <= 0xff;i++)
 		{
-			m68ki_instruction_jump_table[ostruct->match | i] = ostruct->opcode_handler;
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | i] = ostruct->cycles[k];
+			M68KI_SET_HANDLER(ostruct->match | i, ostruct);
+			M68KI_SET_CYCLES(ostruct->match | i, ostruct);
 		}
 		ostruct++;
 	}
@@ -2038,20 +2151,23 @@ void m68ki_build_opcode_table(void)
 			for(j = 0;j < 8;j++)
 			{
 				instr = ostruct->match | (i << 9) | j;
-				m68ki_instruction_jump_table[instr] = ostruct->opcode_handler;
-				for(k=0;k<NUM_CPU_TYPES;k++)
-					m68ki_cycles[k][instr] = ostruct->cycles[k];
+				M68KI_SET_HANDLER(instr, ostruct);
+				M68KI_SET_CYCLES(instr, ostruct);
 				// For all shift operations with known shift distance (encoded in instruction word)
+#ifndef PICO_BUILD
 				if((instr & 0xf000) == 0xe000 && (!(instr & 0x20)))
 				{
 					// On the 68000 and 68010 shift distance affect execution time.
 					// Add the cycle cost of shifting; 2 times the shift distance
 					cycle_cost = ((((i-1)&7)+1)<<1);
 					m68ki_cycles[0][instr] += cycle_cost;
+#if NUM_CPU_TYPES > 1
 					m68ki_cycles[1][instr] += cycle_cost;
 					// On the 68020 shift distance does not affect execution time
 					m68ki_cycles[2][instr] += 0;
+#endif
 				}
+#endif
 			}
 		}
 		ostruct++;
@@ -2060,9 +2176,8 @@ void m68ki_build_opcode_table(void)
 	{
 		for(i = 0;i <= 0x0f;i++)
 		{
-			m68ki_instruction_jump_table[ostruct->match | i] = ostruct->opcode_handler;
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | i] = ostruct->cycles[k];
+			M68KI_SET_HANDLER(ostruct->match | i, ostruct);
+			M68KI_SET_CYCLES(ostruct->match | i, ostruct);
 		}
 		ostruct++;
 	}
@@ -2070,9 +2185,8 @@ void m68ki_build_opcode_table(void)
 	{
 		for(i = 0;i <= 0x07;i++)
 		{
-			m68ki_instruction_jump_table[ostruct->match | (i << 9)] = ostruct->opcode_handler;
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | (i << 9)] = ostruct->cycles[k];
+			M68KI_SET_HANDLER(ostruct->match | (i << 9), ostruct);
+			M68KI_SET_CYCLES(ostruct->match | (i << 9), ostruct);
 		}
 		ostruct++;
 	}
@@ -2080,24 +2194,24 @@ void m68ki_build_opcode_table(void)
 	{
 		for(i = 0;i <= 0x07;i++)
 		{
-			m68ki_instruction_jump_table[ostruct->match | i] = ostruct->opcode_handler;
-			for(k=0;k<NUM_CPU_TYPES;k++)
-				m68ki_cycles[k][ostruct->match | i] = ostruct->cycles[k];
+			M68KI_SET_HANDLER(ostruct->match | i, ostruct);
+			M68KI_SET_CYCLES(ostruct->match | i, ostruct);
 		}
 		ostruct++;
 	}
 	while(ostruct->mask == 0xffff)
 	{
-		m68ki_instruction_jump_table[ostruct->match] = ostruct->opcode_handler;
-		for(k=0;k<NUM_CPU_TYPES;k++)
-			m68ki_cycles[k][ostruct->match] = ostruct->cycles[k];
+		M68KI_SET_HANDLER(ostruct->match, ostruct);
+		M68KI_SET_CYCLES(ostruct->match, ostruct);
 		ostruct++;
 	}
+#ifdef PICO_BUILD
+	m68ki_compress_opcode_table();
+#endif
 }
 
 
 /* ======================================================================== */
 /* ============================== END OF FILE ============================= */
 /* ======================================================================== */
-
 

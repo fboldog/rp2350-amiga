@@ -12,8 +12,6 @@
 //  Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed
 //  with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#include <stdlib.h>   // rand()
-
 #include "DMA.h"
 #include "Memory.h"
 #include "Chipset.h"
@@ -27,6 +25,8 @@
 #include "debug.h"
 
 #include "Floppy.h"
+#include "VideoStandard.h"
+#include "DisplayLayout.h"
 
 
 
@@ -583,121 +583,313 @@ void waitFreeSlot(){
 #endif
 }
 
-int lastFetchCycle;
-static int hiresCallsThisLine = 0;
+typedef struct {
+    int lastCycle;
+    int hiresWords;
+    int loresWords;
+    uint8_t enabledMask;
+    uint8_t fetchEligibleMask;
+    uint8_t inDisplayWindow;        // the line was inside DIW's vertical range
+    uint8_t fetchedMask;
+    uint8_t fetchWindowComplete;
+    uint32_t pointerAtFetchCompletion[4];
+    uint8_t pointerHighWriteMask;
+    uint8_t pointerLowWriteMask;
+    uint8_t pointerReloadBeforeFetchMask;
+} BitplaneLineState;
 
-void dma_execute(){
-    
-    chipset.vposr   = (0x1000) | internal.vPos >> 8; //the internal.LOF might be needed, 0x1000 is for NTSC / 0x0000 is for PAL
-    chipset.vhposr  = internal.vPos << 8;
-    chipset.vhposr |= internal.hPos;
-    
+static BitplaneLineState bitplaneLine;
+static uint8_t lastFetchedMask;
+static uint32_t copperWaitPosition = 0;
 
-    // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
+static void resetBitplaneLine(void) {
+    bitplaneLine.hiresWords = 0;
+    bitplaneLine.loresWords = 0;
+    bitplaneLine.enabledMask = 0;
+    bitplaneLine.fetchEligibleMask = 0;
+    bitplaneLine.inDisplayWindow = 0;
+    bitplaneLine.fetchedMask = 0;
+    bitplaneLine.fetchWindowComplete = 0;
+    bitplaneLine.pointerHighWriteMask = 0;
+    bitplaneLine.pointerLowWriteMask = 0;
+    bitplaneLine.pointerReloadBeforeFetchMask = 0;
+    for (unsigned plane = 0; plane < 4; plane++)
+        bitplaneLine.pointerAtFetchCompletion[plane] = 0;
+}
+
+static void markBitplaneFetched(unsigned plane) {
+    uint8_t planeMask = (uint8_t)(1u << (plane - 1));
+    bitplaneLine.fetchedMask |= planeMask;
+}
+
+void dmaBitplanePointerWrite(unsigned plane, int highWord) {
+    if (plane >= 1 && plane <= 8) {
+        uint8_t planeMask = (uint8_t)(1u << (plane - 1));
+        if (highWord)
+            bitplaneLine.pointerHighWriteMask |= planeMask;
+        else
+            bitplaneLine.pointerLowWriteMask |= planeMask;
+        if ((bitplaneLine.pointerHighWriteMask &
+             bitplaneLine.pointerLowWriteMask & planeMask) != 0 &&
+            internal.hPos < chipset.ddfstrt)
+            bitplaneLine.pointerReloadBeforeFetchMask |= planeMask;
+    }
+}
+
+static void applyBitplaneModulo(uint8_t planes) {
+    if (planes & 0x01)
+        chipset.bpl1pt += chipset.bpl1mod;
+    if (planes & 0x02)
+        chipset.bpl2pt += chipset.bpl2mod;
+    if (planes & 0x04)
+        chipset.bpl3pt += chipset.bpl1mod;
+    if (planes & 0x08)
+        chipset.bpl4pt += chipset.bpl2mod;
+    if (planes & 0x10)
+        chipset.bpl5pt += chipset.bpl1mod;
+    if (planes & 0x20)
+        chipset.bpl6pt += chipset.bpl2mod;
+    if (planes & 0x40)
+        chipset.bpl7pt += chipset.bpl1mod;
+    if (planes & 0x80)
+        chipset.bpl8pt += chipset.bpl2mod;
+}
+
+static void advanceBitplanePointers(void) {
+    uint8_t fetched = bitplaneLine.fetchedMask;
+
+    if (fetched != 0) {
+        lastFetchedMask = fetched;
+        return;
+    }
+
+    // Like OCS Agnus, a line outside the vertical display window fetches
+    // nothing and adds no modulo. Adding it there moved every plane of a
+    // game that loads BPLxPT at the top of the frame (RemGame: HAM, modulo
+    // 212, display from line $2c) 44 lines of modulo too far on. Inside the
+    // window the compatibility advancement stays: Kickstart 2.x/3.x load
+    // their pointers mid-line just before a few no-fetch lines, and the
+    // display layout is calibrated with the modulo applied there.
+    if (!bitplaneLine.inDisplayWindow)
+        return;
+    fetched = bitplaneLine.fetchEligibleMask != 0
+        ? bitplaneLine.fetchEligibleMask
+        : lastFetchedMask;
+    fetched &= (uint8_t)~(bitplaneLine.pointerReloadBeforeFetchMask &
+                          bitplaneLine.enabledMask);
+    applyBitplaneModulo(fetched);
+}
+
+static uint8_t enabledBitplaneMask(void) {
+    return (uint8_t)internal.bitplaneMask;
+}
+
+static int displayWindowContainsLine(int vpos) {
+    int start = omegaDiwVerticalStart(chipset.diwstrt);
+    // On OCS the missing ninth comparator bits are fixed: VSTART8 is zero and
+    // VSTOP8 is the inverse of VSTOP7 (see omegaDiwVerticalStop()). ECS/AGA
+    // DIWHIGH programmability is outside this OCS chipset model.
+    int stop = omegaDiwVerticalStop(chipset.diwstop);
+    return vpos >= start && vpos < stop;
+}
+
+static void hiresDisplayPrefetch(void) {
+    if (!bitplaneLine.fetchWindowComplete ||
+        (chipset.bplcon0 & 0x8000) == 0 ||
+        omegaDdfIsFullWidth(chipset.ddfstrt) ||
+        (chipset.dmaconr & 0x300) != 0x300 ||
+        !displayWindowContainsLine(internal.vPos) ||
+        host.pixels == NULL ||
+        host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
+        host.rasterX < 0 || host.rasterX + 15 >= HOST_RASTER_W)
+        return;
+
+    uint16_t p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+    if (internal.bitplaneMask & 0x01)
+        p1 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[0]];
+    if (internal.bitplaneMask & 0x02)
+        p2 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[1]];
+    if (internal.bitplaneMask & 0x04)
+        p3 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[2]];
+    if (internal.bitplaneMask & 0x08)
+        p4 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[3]];
+
+    if (hostDirectActive) {
+        hostDirectHires(host.rasterRow, host.rasterX, p1, p2, p3, p4);
+    } else {
+        hiresPlanar2Chunky(hostRasterPixels(host.rasterRow, host.rasterX),
+                           p1, p2, p3, p4);
+        hostRasterWritten(host.rasterRow, host.rasterX, 16);
+    }
+    host.rasterX += 16;
+}
+
+int dmaLineStateDirty = 1;
+// Cached with the line state (see dmaUpdateLineState()).
+static int lineBitplaneWindow;   // bitplane DMA on and line in the window
+static int lineFullWidth;        // omegaDdfIsFullWidth(DDFSTRT)
+static int lineHiresDisplayTop;  // DIWSTRT line + upper overscan
+static int lineRowRotation;      // omegaDdfRowRotation(DDFSTRT, DDFSTOP)
+
+// Per-line display state. It only changes at a line boundary or when one of
+// the registers listed in DMA.h is written, so it is recomputed then instead
+// of on every slot. OR-ing unchanged plane masks again is a no-op, so the
+// accumulated masks are identical to per-slot recomputation.
+static void dmaUpdateLineState(void) {
+    uint8_t enabledPlanes = enabledBitplaneMask();
+    int dmaEnabled = (chipset.dmaconr & 0x300) == 0x300;
+    int displayWindowActive = displayWindowContainsLine(internal.vPos);
+    bitplaneLine.enabledMask |= enabledPlanes;
+    bitplaneLine.inDisplayWindow |= (uint8_t)displayWindowActive;
+    if (dmaEnabled && displayWindowActive)
+        bitplaneLine.fetchEligibleMask |= enabledPlanes;
+    lineBitplaneWindow = dmaEnabled && displayWindowActive;
+    lineFullWidth = omegaDdfIsFullWidth(chipset.ddfstrt);
+    lineHiresDisplayTop = (chipset.diwstrt >> 8) +
+                          omegaDdfUpperOverscan(chipset.ddfstop);
+    lineRowRotation = omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
+
     if(chipset.bplcon0 & 0x8000){
-        // HIRES: words/line = (ddfstop - ddfstrt)/4 + 2  (real OCS formula).
-        // hiresPlane1 is 3 slots after the group start, so the last active call
-        // is at ddfstop+3.  We add +7 to also cover the plane4/2/3 prefetch of
-        // the last group (ddfstop+0..+2) while keeping hiresPlane1 at ddfstop+3.
-        lastFetchCycle = chipset.ddfstop + 7;
-        DMAHires[internal.hPos]();
+        // The 0x3c full-width window consumes one more word than the narrower
+        // 0x40 fetch window. The latter's right-edge word is supplied by
+        // hiresDisplayPrefetch() without changing its stride.
+        bitplaneLine.lastCycle = chipset.ddfstop +
+            omegaDdfHiresFetchTail(chipset.ddfstrt, chipset.ddfstop);
     }else{
         // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
-        lastFetchCycle = chipset.ddfstrt + 159;
-        DMALores[internal.hPos]();
+        bitplaneLine.lastCycle =
+            chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
     }
-    eclock_execute(&chipset);   // CIA timers
+    dmaLineStateDirty = 0;
+}
 
-    internal.hPos++;
-    
+static void spriteFrameStart(void);
+static void spriteRenderLine(void);
+// Raster row of this line's bitplane blocks, or -1 (no block this line).
+static int spriteLineRow = -1;
 
-    
-    
-    //end of line reached! 227 colour clocks have executed
-    if(internal.hPos > 0xE3){
-        // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
+// End of a line (rare): kept out of the per-slot path so dma_run() stays
+// small and saves few registers.
+static void __attribute__((noinline)) dmaEndOfLine(void) {
+    // Denise still presents the next HIRES word at the right edge even
+    // though Agnus does not consume it as part of the line stride. Peek
+    // at it for display only; do not advance any bitplane pointer.
+    hiresDisplayPrefetch();
 
-        // Per-line HIRES diagnostic (first 60 visible HIRES lines ever seen)
-        static int lineLog = 0;
-        if (hiresCallsThisLine > 0 && internal.vPos >= 44 && lineLog < 10) {
-            printf("[LINE] vPos=%d bpl1pt=0x%05X calls=%d bpl1mod=%d ddfstrt=0x%02X ddfstop=0x%02X lastFC=%d\n",
-                   internal.vPos, chipset.bpl1pt, hiresCallsThisLine,
-                   chipset.bpl1mod, chipset.ddfstrt, chipset.ddfstop, lastFetchCycle);
-            lineLog++;
-        }
-        hiresCallsThisLine = 0;
+    internal.hPos = 0;
+    internal.vPos +=1;
+    CIATODEvent(&CIAB);
 
-        if(internal.vPos>=43){
-            host.FBCounter = (internal.vPos - 42) * (SCREEN_W / 2);
-        }
-        
-        
-        
-        
-        
-        internal.hPos = 0;
-        internal.vPos +=1;
-        CIATODEvent(&CIAB);
-        
-        
-        //Update bitplane modulo
-        chipset.bpl1pt += chipset.bpl1mod;
-        chipset.bpl3pt += chipset.bpl1mod;
-        chipset.bpl5pt += chipset.bpl1mod;
-        chipset.bpl7pt += chipset.bpl1mod;
-        chipset.bpl2pt += chipset.bpl2mod;
-        chipset.bpl4pt += chipset.bpl2mod;
-        chipset.bpl6pt += chipset.bpl2mod;
-        chipset.bpl8pt += chipset.bpl2mod;
-        
-        //VBL Time
-        if(internal.vPos > 0x106 ){ //0x106 is the propper ntsc vbl
-            internal.vPos = 0;
-            //chipset.vposr   = (internal.LOF | 0x1000); //0x1000 is for NTSC / 0x0000 is for PAL
+    advanceBitplanePointers();
+    resetBitplaneLine();
+    dmaLineStateDirty = 1;  // new line: masks cleared, vPos changed
 
-            //Reset Copper.
-            putChipReg16[COPJMP1](0);
-            CIATODEvent(&CIAA);
-            
-            
-            //need to generate a vbl int
-            putChipReg16[INTREQ](0x8020);
-            
-            host.FBCounter = 0; // restart the frambuffer pointer
-            
-            
-            hostDisplay(); //Call the host to update the display.
-        }
-        
+    //VBL Time
+    if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
+        internal.vPos = 0;
+        copperWaitPosition = 0;
+        spriteFrameStart();
+
+        //Reset Copper.
+        putChipReg16[COPJMP1](0);
+        CIATODEvent(&CIAA);
+
+        //need to generate a vbl int
+        putChipReg16[INTREQ](0x8020);
+
+        host.rasterRow = 0;
+        host.rasterX = 0;
+
+        hostDisplay(); //Call the host to update the display.
     }
 }
 
-
-void displayLineReset(){
-    
-    host.FBCounter -= (host.FBCounter%320);
-    
-    
-    //int temp = (host.FBCounter / 640);
-    //temp = (temp) * 640;
-    //host.FBCounter= temp;
+// Fetch-window end (rare, once per line).
+static void __attribute__((noinline)) dmaFetchWindowComplete(void) {
+    spriteRenderLine();
+    spriteLineRow = -1;
+    bitplaneLine.fetchWindowComplete = 1;
+    bitplaneLine.pointerAtFetchCompletion[0] = chipset.bpl1pt;
+    bitplaneLine.pointerAtFetchCompletion[1] = chipset.bpl2pt;
+    bitplaneLine.pointerAtFetchCompletion[2] = chipset.bpl3pt;
+    bitplaneLine.pointerAtFetchCompletion[3] = chipset.bpl4pt;
+    if (bitplaneLine.fetchedMask != 0) {
+        lastFetchedMask = bitplaneLine.fetchedMask;
+        applyBitplaneModulo(bitplaneLine.fetchedMask);
+    }
 }
 
-void setDisplayMode(int mode){
-    
-    int temp = host.FBCounter / 640;
-    temp = (temp) * 640;
-    host.FBCounter= temp;
-    
+// Runs `slots` DMA slots (one colour clock each). Batching avoids a call and
+// register save per slot from the main loop.
+void dma_run(int slots){
+    while (slots-- > 0) {
+        // VPOSR only changes with the line.
+        if (internal.hPos == 0)
+            chipset.vposr = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
+        chipset.vhposr  = internal.vPos << 8;
+        chipset.vhposr |= internal.hPos;
+        if (dmaLineStateDirty)
+            dmaUpdateLineState();
+
+        // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
+        if(chipset.bplcon0 & 0x8000){
+            DMAHires[internal.hPos]();
+        }else{
+            DMALores[internal.hPos]();
+        }
+
+        if (internal.hPos == bitplaneLine.lastCycle)
+            dmaFetchWindowComplete();
+
+        // CIA timers: the E clock ticks every fifth slot (eclock_execute(),
+        // inlined).
+        if (--internal.eClockCounter < 0) {
+            internal.eClockCounter = 4;
+            CIAExecute(&CIAA);
+            CIAExecute(&CIAB);
+        }
+
+        //end of line reached! 227 colour clocks have executed
+        if (++internal.hPos > 0xE3)
+            dmaEndOfLine();
+    }
+}
+
+void dma_execute(){
+    dma_run(1);
 }
 
 
+// Copper WAIT comparison (copperExecute() state 3).
+// The Copper compares only the low 8 bits of the beam line (VP7-VP0), as on
+// OCS: lines 256+ are reached by a wait near the end of line 255 followed by
+// low-byte waits, which then compare against line - 256. On hardware the
+// Copper wakes from that first wait late enough that the next WAIT is first
+// compared on line 256; here it can be fetched still on line 255, so such a
+// WAIT (fetched on line 255 for an earlier low-byte line) is held until the
+// beam wraps.
+static uint8_t copperWaitNextBank;
+
+static inline uint32_t copperBeam(void) {
+    return ((uint32_t)(internal.vPos & 0xff) << 8) | internal.hPos;
+}
+
+static inline int copperWaitReached(void) {
+    if (copperWaitNextBank && (internal.vPos & 0xff) == 0xff)
+        return 0;
+    return (copperBeam() & internal.IR2) >= copperWaitPosition;
+}
 
 void evenCycle(void){
 
-    
-    if(copperExecute()==1){
-        return;
+    // An idle Copper (DMA off, frozen until VBL, or waiting for a beam
+    // position not yet reached) does not take the slot; skip the call. On
+    // the slot a WAIT completes copperExecute() still runs and returns 0.
+    if ((chipset.dmaconr & 0x280) == 0x280 && internal.copperCycle != 4 &&
+        (internal.copperCycle != 3 || copperWaitReached())) {
+        if(copperExecute()==1){
+            return;
+        }
     }
     
     //if the copper doesn't want the even cycle, give it to the odd cycle devices.
@@ -705,11 +897,14 @@ void evenCycle(void){
 
 }
 
+static int blitterState = 0;
+
 void oddCycle(void){
     
-    if(blitterExecute()==1){
+    // An idle Blitter (no blit started) does nothing; skip the call.
+    if (blitterState == 0 && (chipset.dmaconr & 0x4240) != 0x4240)
         return;
-    }
+    blitterExecute();
     
     //A Free slot for CPU... but the CPU isn't currently bound to the DMA timing
     // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
@@ -743,18 +938,12 @@ void diskCycle(void){
 
                 uint16_t syncword = b1 << 8 | b2;
 
-                static int rdLog = 0;
-                if (rdLog < 8) { printf("[RD] cyl=%d side=%d idx=%d b1=%02X b2=%02X sw=%04X dsksync=%04X\n", df[driveSelected].cylinder, df[driveSelected].side, df[driveSelected].index-2, b1, b2, syncword, chipset.dsksync); rdLog++; }
-
                 if(syncword==chipset.dsksync){
                 
                     putChipReg16[INTREQ](0x9000);   //DSKSYNC INT
                     chipset.dskbytr |= 0x1000;  // set word sync bit
                 
                     if(floppySync==0){
-
-                        static int syncHits = 0;
-                        if (syncHits < 5) printf("[SYNC] found cyl=%d side=%d idx=%d dsklen=%04X (hit %d)\n", df[driveSelected].cylinder, df[driveSelected].side, df[driveSelected].index-2, chipset.dsklen, ++syncHits);
                         floppySync=1;
                         return;
                     }
@@ -772,8 +961,6 @@ void diskCycle(void){
                     chipset.dsklen -= 1;
                 
                     if( (chipset.dsklen & 0x3FFF) == 0){
-                        static int dskblkHits = 0;
-                        if (dskblkHits < 5) printf("[DSKBLK] fired (hit %d) cyl=%d side=%d\n", ++dskblkHits, df[driveSelected].cylinder, df[driveSelected].side);
                         putChipReg16[INTREQ](0x8002);   //Disk block loaded INT
                         floppySync = 0;
                         return;
@@ -886,39 +1073,199 @@ void audio3Cycle(void){
 }
 
 
-void spriteCycle(void){
+// ── Sprites ───────────────────────────────────────────────────────────────
+// Sprite n owns two DMA slots per line (0x15 + 4n and 0x17 + 4n). On the
+// first line after vertical blanking it fetches SPRxPOS/SPRxCTL; from
+// VSTART it fetches SPRxDATA/SPRxDATB on every line until VSTOP, where the
+// next POS/CTL pair follows (a sprite reused further down). Words go
+// through the register handlers, so DATA arms and CTL disarms the sprite
+// exactly as CPU writes do. Unused slots stay free for the blitter.
+enum { SPRITE_CONTROL, SPRITE_WAIT, SPRITE_ACTIVE, SPRITE_DONE };
+enum { SPRITE_FETCH_NONE, SPRITE_FETCH_CONTROL, SPRITE_FETCH_DATA };
+static uint8_t spriteState[8];
+static uint8_t spriteLineFetch[8];
 
-    oddCycle();
+static inline uint16_t *spriteRegisters(unsigned n) {
+    return &chipset.spr0pos + 4u * n;  // POS, CTL, DATA, DATB
+}
+
+static inline int spriteVStart(const uint16_t *r) {
+    return (r[0] >> 8) | ((r[1] & 0x4) << 6);
+}
+
+static inline int spriteVStop(const uint16_t *r) {
+    return (r[1] >> 8) | ((r[1] & 0x2) << 7);
+}
+
+static void spriteFrameStart(void) {
+    for (unsigned n = 0; n < 8; ++n)
+        spriteState[n] = SPRITE_CONTROL;
+}
+
+void spriteCycle(void){
+    const unsigned slot = internal.hPos - 0x15u;
+    const unsigned n = slot >> 2;
+    const unsigned second = (slot >> 1) & 1u;
+    if (n > 7u || (chipset.dmaconr & 0x220) != 0x220 ||
+        internal.vPos < OMEGA_SPRITE_FIRST_LINE) {
+        oddCycle();
+        return;
+    }
+    uint16_t *r = spriteRegisters(n);
+    if (!second) {
+        uint8_t fetch = SPRITE_FETCH_NONE;
+        switch (spriteState[n]) {
+        case SPRITE_CONTROL:
+            fetch = SPRITE_FETCH_CONTROL;
+            break;
+        case SPRITE_WAIT:
+            if (internal.vPos == spriteVStart(r)) {
+                spriteState[n] = SPRITE_ACTIVE;
+                fetch = internal.vPos == spriteVStop(r)
+                      ? SPRITE_FETCH_CONTROL : SPRITE_FETCH_DATA;
+            }
+            break;
+        case SPRITE_ACTIVE:
+            fetch = internal.vPos == spriteVStop(r)
+                  ? SPRITE_FETCH_CONTROL : SPRITE_FETCH_DATA;
+            break;
+        default:
+            break;
+        }
+        spriteLineFetch[n] = fetch;
+    }
+    const uint8_t fetch = spriteLineFetch[n];
+    if (fetch == SPRITE_FETCH_NONE) {
+        oddCycle();
+        return;
+    }
+    uint32_t *pt = &chipset.spr0pt + n;
+    uint16_t word = internal.chipramW[*pt];
+    word = (uint16_t)((word << 8) | (word >> 8));   // chip RAM is byte-swapped
+    *pt += 1;
+    const unsigned reg = fetch == SPRITE_FETCH_CONTROL ? SPR0POS : SPR0DATA;
+    putChipReg16[reg + 4u * n + second](word);
+    if (fetch == SPRITE_FETCH_CONTROL && second)
+        spriteState[n] = (r[0] == 0 && r[1] == 0) ? SPRITE_DONE : SPRITE_WAIT;
+}
+
+
+// Draws one sprite (or attached pair) into the ARGB raster (native build
+// and the RP2350 fallback layouts).
+static void spriteDrawArgb(int row, int x, int colour_base, int attached,
+                           int behind, uint16_t a, uint16_t b, uint16_t c,
+                           uint16_t d) {
+    for (int i = 0; i < 16; ++i) {
+        const int bit = 15 - i;
+        unsigned v = ((a >> bit) & 1u) | (((b >> bit) & 1u) << 1);
+        if (attached)
+            v |= (((c >> bit) & 1u) << 2) | (((d >> bit) & 1u) << 3);
+        if (!v)
+            continue;
+        const uint32_t colour = internal.palette[colour_base + v];
+        for (int j = 0; j < 2; ++j) {
+            const int px = x + 2 * i + j;
+            if (px < 0 || px >= HOST_RASTER_W)
+                continue;
+            uint32_t *p = hostRasterPixels(row, px);
+            if (behind && *p != internal.palette[0])
+                continue;
+            *p = colour;
+        }
+    }
+}
+
+// Shows the armed sprites of this line over its bitplane pixels. Lower
+// numbered sprites are in front; an odd sprite with ATT set joins its even
+// partner as one 15-colour sprite. BPLCON2 (PF2P, single playfield) puts
+// sprite pairs at or above its code behind the playfield.
+static void spriteRenderLine(void) {
+    const int row = spriteLineRow;
+    if (row < 0 || row >= HOST_RASTER_H || !spriteArmed)
+        return;
+    // Raster column 0 is the first pixel of the first fetched word; OCS
+    // shows it at lores position 2 * DDFSTRT + 17 (LORES) or + 9 (HIRES).
+    const int hires = (chipset.bplcon0 & 0x8000) != 0;
+    const int first = 2 * chipset.ddfstrt +
+                      (hires ? OMEGA_SPRITE_HIRES_OFFSET
+                             : OMEGA_SPRITE_LORES_OFFSET);
+    const unsigned front_pairs = (chipset.bplcon2 >> 3) & 7u;
+    // Sprites show only inside the display window: DIWSTRT/DIWSTOP low
+    // bytes in lores beam positions (OCS: HSTOP8 is fixed at 1).
+    const int diw_start = chipset.diwstrt & 0xff;
+    const int diw_stop = (chipset.diwstop & 0xff) | 0x100;
+    for (int pair = 3; pair >= 0; --pair) {
+        const unsigned even = 2u * (unsigned)pair, odd = even + 1u;
+        const uint16_t *re = spriteRegisters(even), *ro = spriteRegisters(odd);
+        const int behind = (unsigned)pair >= front_pairs;
+        // OCS: the odd sprite's ATT bit makes the pair one 15-colour sprite
+        // (colours 17-31). Each keeps its own position; their bits combine
+        // where they overlap, so a pair at one position is drawn together
+        // and otherwise each half is drawn with its attached colours.
+        const int attached = (ro[1] & 0x80) != 0;
+        const int even_on = (spriteArmed >> even) & 1u;
+        const int odd_on = (spriteArmed >> odd) & 1u;
+        const int hs_even = ((re[0] & 0xff) << 1) | (re[1] & 1);
+        const int hs_odd = ((ro[0] & 0xff) << 1) | (ro[1] & 1);
+        // Lower sprites are in front: odd first, then even over it.
+        for (int k = 1; k >= 0; --k) {
+            const int is_odd = k;
+            if (!(is_odd ? odd_on : even_on))
+                continue;
+            if (attached && is_odd && even_on && hs_odd == hs_even)
+                continue;               // drawn with the even half
+            const uint16_t *rn = is_odd ? ro : re;
+            const int hstart = is_odd ? hs_odd : hs_even;
+            const int x = 2 * (hstart - first);
+            // Clip to the display window: bit 15 is at hstart.
+            uint32_t mask = 0xffffu;
+            if (hstart < diw_start)
+                mask &= diw_start - hstart >= 16 ? 0u
+                      : 0xffffu >> (diw_start - hstart);
+            if (hstart + 16 > diw_stop)
+                mask &= hstart >= diw_stop ? 0u
+                      : (0xffffu << (hstart + 16 - diw_stop)) & 0xffffu;
+            if (!mask)
+                continue;
+            uint16_t a = 0, b = 0, c = 0, d = 0;
+            int base = 16 + 4 * pair, att = 0;
+            if (!attached) {
+                a = rn[2] & mask; b = rn[3] & mask;
+            } else {
+                base = 16; att = 1;
+                if (!is_odd) {
+                    a = re[2] & mask; b = re[3] & mask;
+                    if (odd_on && hs_odd == hs_even) {
+                        c = ro[2] & mask; d = ro[3] & mask;
+                    }
+                } else {
+                    c = ro[2] & mask; d = ro[3] & mask;  // bits 2-3 only
+                }
+            }
+            if (!(a | b | c | d))
+                continue;
+            if (hostDirectActive)
+                hostDirectSprite(row, x, base, att, behind, a, b, c, d);
+            else
+                spriteDrawArgb(row, x, base, att, behind, a, b, c, d);
+        }
+    }
 }
 
 
 int bitplaneActive(){
-    
-    //check if DMA is on, if not let the Copper and Blitter run.
-    if((chipset.dmaconr & 0x300) != 0x300){
+    //check if DMA is on and the line is inside the display window (cached
+    //per line); if not let the Copper and Blitter run.
+    if (!lineBitplaneWindow)
         return 0;
-    }
     
     //too early horisonal position let the Copper and Blitter run
     if(internal.hPos<(chipset.ddfstrt)){
         return 0;
     }
  
-    //too late horisonal position let the Copper and Blitter run... why + 16?
-    
-    if(internal.hPos>lastFetchCycle){// 0xd7+16 (chipset.ddfstop+16)){     //not sure why the ddfstop sometimes have wrong values.
-    //if(internal.hPos>(chipset.ddfstop+4)){
+    if (internal.hPos > bitplaneLine.lastCycle) {
         return 0;
-    }
-    
-    //too early vertical position let the Copper and Blitter run
-    if(internal.vPos<(chipset.diwstrt>>8)){
-        return 0;
-    }
-    
-    // vpos not working...
-    if(internal.vPos> ((chipset.diwstop>>8)| 256)){
-       // return 0;
     }
     
     return 1;
@@ -935,6 +1282,7 @@ void plane6(void){
     
     chipset.bpl6dat = 0;
     if( (internal.bitplaneMask & 0x20)  == 0x20){
+        markBitplaneFetched(6);
         uint16_t* p = &internal.chipramW[chipset.bpl6pt];
         chipset.bpl6pt +=1;
         chipset.bpl6dat = *p;
@@ -954,6 +1302,7 @@ void plane5(void){
     
     chipset.bpl5dat = 0;
     if( (internal.bitplaneMask & 0x10)  == 0x10){
+        markBitplaneFetched(5);
         uint16_t* p = &internal.chipramW[chipset.bpl5pt];
         chipset.bpl5pt +=1;
         chipset.bpl5dat = *p;
@@ -963,37 +1312,73 @@ void plane5(void){
     evenCycle();
     
 }
+// This line's LORES rows are anchored at DIWSTRT (full width, one raster row
+// per line).
+static int loresRowsFromDiw;
+
 void loresPlane1(void){
     
     
     if(bitplaneActive()==0){
-        //drawBlank();
         return;
     }
     
     if(host.pixels == NULL){
         return;
     }
-    
+    if (bitplaneLine.loresWords++ == 0) {
+        int full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
+        int alternate_rows =
+            full_width &&
+            omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
+                                               chipset.diwstop);
+        // Overscan screens such as the Kickstart 1.3 requester start their
+        // display window before the standard visible raster. Anchor those
+        // rows at the first visible beam line instead of DIWSTRT, otherwise
+        // the artwork is shifted down and its lower edge is clipped.
+        int raster_origin = alternate_rows
+                          ? OMEGA_LORES_FIRST_RENDER_LINE
+                          : full_width ? (chipset.diwstrt >> 8)
+                                       : OMEGA_DISPLAY_RASTER_ORIGIN;
+        int display_line = internal.vPos - raster_origin;
+        host.rasterRow =
+            alternate_rows ? display_line * 2 : display_line;
+        host.rasterX = 0;
+        loresRowsFromDiw = full_width && !alternate_rows;
+    }
+    chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
+        markBitplaneFetched(1);
+        host.displayIsLores = 1;
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
     }
 
-    //don't start actually rendering a deiplay before 44 lines
-    if(internal.vPos<44){
+    // Layouts anchored at a fixed first line start rendering there; rows
+    // anchored at DIWSTRT are valid from the window's first line (RemGame's
+    // NTSC window opens at line 34).
+    if (!loresRowsFromDiw && internal.vPos < OMEGA_LORES_FIRST_RENDER_LINE) {
         evenCycle();
         return;
     }
+    if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
+        host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W)
+        return;
     
-    uint32_t* pixbuff = (uint32_t*)host.pixels;
-    if(chipset.bplcon0 & 0x800){
-        loresHAM2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
-    }else{
-        loresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+    spriteLineRow = host.rasterRow;
+    if (hostDirectActive) {
+        hostDirectLores(host.rasterRow, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat, chipset.bpl5dat, chipset.bpl6dat, chipset.bplcon0 & 0x800);
+    } else {
+        uint32_t *pixels = hostRasterPixels(host.rasterRow, host.rasterX);
+        if(chipset.bplcon0 & 0x800){
+            loresHAM2Chunky(pixels, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        }else{
+            loresPlanar2Chunky(pixels, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat,chipset.bpl5dat, chipset.bpl6dat);
+        }
+        hostRasterWritten(host.rasterRow, host.rasterX, 32);
     }
-    host.FBCounter +=16;
+    host.rasterX += 32;
     
 }
 
@@ -1008,6 +1393,7 @@ void plane4(){
     
     chipset.bpl4dat = 0;
     if( (internal.bitplaneMask & 0x8)  == 0x8){
+        markBitplaneFetched(4);
         uint16_t* p = &internal.chipramW[chipset.bpl4pt];
         chipset.bpl4pt +=1;
         chipset.bpl4dat = *p;
@@ -1027,6 +1413,7 @@ void plane2(){
     
     chipset.bpl2dat = 0;
     if( (internal.bitplaneMask & 0x2)  == 0x2){
+        markBitplaneFetched(2);
         uint16_t* p = &internal.chipramW[chipset.bpl2pt];
         chipset.bpl2pt +=1;
         chipset.bpl2dat = *p;
@@ -1046,6 +1433,7 @@ void plane3(){
     
     chipset.bpl3dat = 0;
     if( (internal.bitplaneMask & 0x4)  == 0x4){
+        markBitplaneFetched(3);
         uint16_t* p = &internal.chipramW[chipset.bpl3pt];
         chipset.bpl3pt +=1;
         chipset.bpl3dat = *p;
@@ -1067,53 +1455,65 @@ void hiresPlane1(){
     if(host.pixels == NULL){
         return;
     }
-
     chipset.bpl1dat = 0;
+    bitplaneLine.hiresWords++;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
+        markBitplaneFetched(1);
+        host.displayIsLores = 0;
         uint16_t* p = &internal.chipramW[chipset.bpl1pt];
         chipset.bpl1pt +=1;
         chipset.bpl1dat = *p;
-        hiresCallsThisLine++;
     }
 
-    //don't start actually rendering a display before 44 lines
-    if(internal.vPos<43){
+    // The full-width raster begins 40 PAL beam lines below DIWSTRT. Remove
+    // that upper overscan so all 200 useful rows fit in the host framebuffer.
+    if (lineFullWidth) {
+        int display_line = internal.vPos - lineHiresDisplayTop;
+        if (display_line < 0)
+            return;
+        if (bitplaneLine.hiresWords == 1) {
+            host.rasterRow = display_line;
+            host.rasterX = 0;
+        }
+    } else if (bitplaneLine.hiresWords == 1) {
+        host.rasterRow = internal.vPos - OMEGA_DISPLAY_RASTER_ORIGIN;
+        host.rasterX = 0;
+    }
+
+    if (internal.vPos < OMEGA_DISPLAY_RASTER_ORIGIN) {
         evenCycle();
         return;
     }
-
-    uint32_t* pixbuff = (uint32_t*)host.pixels;
-    hiresPlanar2Chunky(&pixbuff[host.FBCounter], internal.palette, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
-    host.FBCounter += 8;
-    return;
-    
-
-    
-    evenCycle();
-    
-}
-
-
-
-
-
-
-
-void drawBlank(){
-    
-    uint32_t* pixbuff = (uint32_t*)host.pixels;
-    
-    if(pixbuff==NULL || internal.vPos<44){
+    if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
+        host.rasterX < 0 || host.rasterX + 15 >= HOST_RASTER_W)
         return;
+
+    int raster_row = host.rasterRow;
+    int row_rotation = lineRowRotation;
+    spriteLineRow = host.rasterRow;
+    // The leading words in this layout are the pipeline suffix of the
+    // preceding logical scanline. Keep that association in the raw raster.
+    if (row_rotation && host.rasterX < row_rotation) {
+        if (raster_row == 0) {
+            host.rasterX += 16;
+            return;
+        }
+        raster_row--;
     }
-    
-    for(int i=0;i<16;++i){
-        //pixbuff[host.FBCounter+i]=internal.palette[0];
-        pixbuff[host.FBCounter+i]=rand()%4294967296;
+
+    if (hostDirectActive) {
+        hostDirectHires(raster_row, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+    } else {
+        uint32_t *line = hostRasterPixels(raster_row, host.rasterX);
+        hiresPlanar2Chunky(line, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+        hostRasterWritten(raster_row, host.rasterX, 16);
     }
-    host.FBCounter +=16;
-    
+    host.rasterX += 16;
+    return;
 }
+
+
+
 
 
 
@@ -1165,10 +1565,24 @@ int copperExecute(){
             internal.copperPC += 1;
             
             internal.IR2 = (internal.IR2 <<8) | (internal.IR2 >>8);
+
+            // FFFF FFFE is the Copper-list terminator.  It is commonly
+            // described as an unreachable WAIT, but a PAL beam position with
+            // bit 8 set compares above 0xFFFE in this extended representation.
+            // Freeze explicitly so execution cannot fall into adjacent data
+            // after scanline 255.
+            if (internal.IR1 == 0xFFFF && internal.IR2 == 0xFFFE) {
+                internal.copperCycle = 4;
+                return 1;
+            }
             
             internal.comparisonMask = (internal.IR2 | 0x0000); //ignore the instruction bits
 
             internal.IR1 &= internal.comparisonMask; //mask the wait position
+
+            copperWaitPosition = internal.IR1;
+            copperWaitNextBank = (internal.vPos & 0xff) == 0xff &&
+                                 (internal.IR1 >> 8) < 0xff;
 
             internal.copperCycle = 3;
             
@@ -1198,7 +1612,7 @@ int copperExecute(){
             */
             
             //Wait
-            if( (chipset.vhposr & internal.IR2)  >= internal.IR1){
+            if(copperWaitReached()){
                 internal.copperCycle = 0;
             }
             
@@ -1219,7 +1633,7 @@ int copperExecute(){
 
 int blitterExecute(){
     
-    static int state = 0;
+    int state = blitterState;
     
     
     switch(state){
@@ -1299,7 +1713,7 @@ int blitterExecute(){
             break;
     }
     
-    
+    blitterState = state;
     
     return 0;
 }

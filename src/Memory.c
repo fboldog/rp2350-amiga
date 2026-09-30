@@ -28,22 +28,32 @@ static uint8_t *slow_ram;   // PSRAM + PSRAM_SLOWRAM_OFFSET
 static const uint8_t *rom_base;
 static uint32_t       rom_size;
 
+static void psram_clear_words(uint8_t *memory, uint32_t bytes) {
+    memset(memory, 0, bytes);
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-// Big-endian word stored in RAM ↔ little-endian ARM read/write helpers
+// Big-endian word stored in RAM ↔ little-endian ARM read/write helpers.
+// One (possibly unaligned) load or store plus REV/REV16 instead of separate
+// byte accesses; Cortex-M33 permits unaligned access to XIP/PSRAM and SRAM.
 static inline uint16_t ram_read_word(const uint8_t *p) {
-    return (uint16_t)(p[0] << 8) | p[1];
+    uint16_t v;
+    memcpy(&v, p, sizeof(v));
+    return __builtin_bswap16(v);
 }
 static inline uint32_t ram_read_long(const uint8_t *p) {
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-           ((uint32_t)p[2] <<  8) |  (uint32_t)p[3];
+    uint32_t v;
+    memcpy(&v, p, sizeof(v));
+    return __builtin_bswap32(v);
 }
 static inline void ram_write_word(uint8_t *p, uint16_t v) {
-    p[0] = (uint8_t)(v >> 8); p[1] = (uint8_t)v;
+    v = __builtin_bswap16(v);
+    memcpy(p, &v, sizeof(v));
 }
 static inline void ram_write_long(uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
-    p[2] = (uint8_t)(v >>  8); p[3] = (uint8_t)v;
+    v = __builtin_bswap32(v);
+    memcpy(p, &v, sizeof(v));
 }
 
 // ── ROM helper: 256 KB ROM mirrored to fill 512 KB slot ──────────────────
@@ -80,19 +90,41 @@ void memory_init(void) {
         // ROM not found – ROM region will return 0 / open bus
         rom_base = NULL;
         rom_size = 0;
+        printf("ROM: no Kickstart header at flash 0x%08x\n",
+               (unsigned)ROM_FLASH_BASE);
+    } else {
+        uint16_t opcode = ram_read_word(rom_base + 2);
+        uint32_t entry = ram_read_long(rom_base + 4);
+        printf("ROM: flash 0x%08x, header=%02x%02x opcode=%04x entry=%08lx\n",
+               (unsigned)ROM_FLASH_BASE, rom_base[0], rom_base[1], opcode,
+               (unsigned long)entry);
     }
 
+    printf("Memory: clearing chip RAM\n");
     memory_clear_chipram();
-    memset(slow_ram, 0, PSRAM_SLOWRAM_SIZE);
+    printf("Memory: clearing slow RAM\n");
+    psram_clear_words(slow_ram, PSRAM_SLOWRAM_SIZE);
+    printf("Memory: PSRAM clear complete\n");
+}
+
+int memory_set_rom(const uint8_t *data, uint32_t size) {
+    if (!data || (size != 0x40000u && size != 0x80000u) || data[0] != 0x11) {
+        return 0;
+    }
+    rom_base = data;
+    rom_size = size;
+    return 1;
 }
 
 void memory_clear_chipram(void) {
     // Leave longword at 0x000000 (Guru indicator) intact; clear from 4 up
-    memset(chip_ram + 4, 0, PSRAM_CHIPRAM_SIZE - 4);
+    psram_clear_words(chip_ram + 4, PSRAM_CHIPRAM_SIZE - 4);
 }
 
 // ── chipReadByte ──────────────────────────────────────────────────────────
 unsigned int chipReadByte(unsigned int address) {
+    // Chip RAM is by far the most common target; test it first.
+    if (address <= CHIPTOP) return chip_ram[address];
     // ROM
     if (address >= 0xF80000u) {
         if (!rom_base) return 0;
@@ -104,6 +136,7 @@ unsigned int chipReadByte(unsigned int address) {
     if (address > 0xDFEFFFu) {
         uint32_t off = address - 0xDFF000u;
         debugChipAddress = off;
+        if (off >= 32u) return 0;
         return getChipReg8[off]();
     }
     // Gayle/IDE
@@ -124,6 +157,7 @@ unsigned int chipReadByte(unsigned int address) {
 
 // ── chipReadWord ─────────────────────────────────────────────────────────
 unsigned int chipReadWord(unsigned int address) {
+    if (address <= CHIPTOP) return ram_read_word(&chip_ram[address]);
     // ROM
     if (address > 0xF7FFFFu) {
         if (!rom_base) return 0;
@@ -162,6 +196,7 @@ unsigned int chipReadWord(unsigned int address) {
 
 // ── chipReadLong ─────────────────────────────────────────────────────────
 unsigned int chipReadLong(unsigned int address) {
+    if (address <= CHIPTOP) return ram_read_long(&chip_ram[address]);
     // ROM
     if (address > 0xF7FFFFu) {
         if (!rom_base) return 0;
@@ -170,7 +205,9 @@ unsigned int chipReadLong(unsigned int address) {
     // Custom chipset registers (32-bit = two 16-bit reads)
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
-        off &= 0xFFu;
+        // getChipReg32 covers only the first 16 registers; everything else
+        // (including autoconfig space) reads 0 like its noReadL entries.
+        if (off >= 16u) return 0;
         debugChipAddress = off;
         return getChipReg32[off]();
     }
@@ -193,6 +230,7 @@ unsigned int chipReadLong(unsigned int address) {
 
 // ── chipWriteByte ─────────────────────────────────────────────────────────
 void chipWriteByte(unsigned int address, unsigned int value) {
+    if (address <= CHIPTOP) { chip_ram[address] = (uint8_t)value; return; }
     if (address >= 0xF80000u) return;  // ROM: no-op
     // Custom chipset (byte writes uncommon, ignore)
     if (address > 0xDFEFFFu) return;
@@ -218,10 +256,18 @@ void chipWriteByte(unsigned int address, unsigned int value) {
 
 // ── chipWriteWord ─────────────────────────────────────────────────────────
 void chipWriteWord(unsigned int address, unsigned int value) {
+    if (address <= CHIPTOP) {
+        ram_write_word(&chip_ram[address], (uint16_t)value);
+        return;
+    }
     if (address >= 0xF80000u) return;
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
+        // The tables cover 0xDFF000..0xDFF1FF. A runaway 68k can write
+        // anywhere up to the ROM; ignore it rather than jump through a
+        // pointer read past the table.
+        if (off >= 256u) return;
         debugChipAddress = off;
         debugChipValue   = value;
         putChipReg16[off]((uint16_t)value);
@@ -245,10 +291,15 @@ void chipWriteWord(unsigned int address, unsigned int value) {
 
 // ── chipWriteLong ─────────────────────────────────────────────────────────
 void chipWriteLong(unsigned int address, unsigned int value) {
+    if (address <= CHIPTOP) {
+        ram_write_long(&chip_ram[address], value);
+        return;
+    }
     if (address >= 0xF80000u) return;
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
+        if (off >= 256u) return;    // see chipWriteWord
         debugChipAddress = off;
         putChipReg32[off](value);
         return;
@@ -271,4 +322,23 @@ void chipWriteLong(unsigned int address, unsigned int value) {
     // Chip RAM
     address &= CHIPTOP;
     ram_write_long(&chip_ram[address], value);
+}
+
+// ── Instruction fetch (Musashi prefetch) ─────────────────────────────────
+// Kickstart code runs from ROM, so test it before chip RAM; everything else
+// takes the general data path.
+unsigned int chipFetchLong(unsigned int address) {
+    if (address >= 0xF80000u && rom_base)
+        return ram_read_long(rom_ptr(address));
+    if (address <= CHIPTOP)
+        return ram_read_long(&chip_ram[address]);
+    return chipReadLong(address);
+}
+
+unsigned int chipFetchWord(unsigned int address) {
+    if (address >= 0xF80000u && rom_base)
+        return ram_read_word(rom_ptr(address));
+    if (address <= CHIPTOP)
+        return ram_read_word(&chip_ram[address]);
+    return chipReadWord(address);
 }

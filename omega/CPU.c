@@ -35,8 +35,8 @@ void cpu_pulse_reset(void){
     uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
     uint32_t sp = m68k_get_reg(NULL, M68K_REG_SP);
 
-    printf("PC:%0x6\n",pc);
-    printf("SP:%0x6\n",sp);
+    printf("PC:%06lx\n",(unsigned long)pc);
+    printf("SP:%06lx\n",(unsigned long)sp);
     
     printf("Machine reset...\n");
     
@@ -62,6 +62,7 @@ void cpu_init(){
     
     m68k_init();
     m68k_set_cpu_type(M68K_CPU_TYPE_68000); //Pretend to be an A500 for now...
+    m68k_set_reg(M68K_REG_SR, 0x2700); // Reset enters supervisor mode, IRQs masked
     m68k_set_reg(M68K_REG_PC, 0xF80002); //start executing at the ROM + 2
 
 }
@@ -164,9 +165,6 @@ unsigned int cpu_read_byte(unsigned int address){
     //If Address > 0xFFFFFF (the low16Meg), then access the BCM2837 chip
     //Not needed if running on a real RaspberryPi. just allow the CPU to access the memory.
     
-    //maskout 32bit address for now
-    address &=0xFFFFFF;
-    
     return chipReadByte(address);
     
 }
@@ -184,9 +182,6 @@ unsigned int cpu_read_long(unsigned int address){
     
     //If Address > 0xFFFFFF (the low16Meg), then access the BCM2837 chip
     //Not needed if running on a real RaspberryPi. just allow the CPU to access the memory.
-    
-    //maskout 32bit address for now
-    address &=0xFFFFFF;
     
     return chipReadLong(address);
     

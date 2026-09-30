@@ -1,103 +1,59 @@
-// PSRAM initialisation for RP2350 – APS6404L on QMI CS1
-// Based on Raspberry Pi / Pimoroni RP2350 examples (SDK 2.x)
+// Minimal PSRAM validation built on Pico SDK hardware_psram.
 //
-// After this call, 8MB of PSRAM is accessible at PSRAM_BASE (0x11000000).
+// Linking hardware_psram makes the SDK detect and configure QMI PSRAM before
+// main() runs. This file deliberately does not touch QMI registers; it mirrors
+// the known-good rp2350b-psram test project's availability and byte-pattern
+// checks.
 
 #include "psram.h"
-#include "board_config.h"
-#include "hardware/structs/qmi.h"
-#include "hardware/xip_cache.h"
-#include "hardware/clocks.h"
-#include "hardware/gpio.h"
+
+#include "hardware/psram.h"
 #include "pico/stdlib.h"
 
-// QMI register field helpers (SDK 2.x symbols)
-#ifndef QMI_M1_TIMING_CLKDIV_LSB
-#define QMI_M1_TIMING_CLKDIV_LSB    0
-#endif
+#include <stddef.h>
+#include <stdio.h>
 
-static void _psram_set_qspi_timing(void) {
-    // QSPI clock = sys_clk / clkdiv.  At 250 MHz sys and clkdiv=2 that is
-    // 125 MHz, within the APS6404L 133 MHz quad-read rating.  Board-tunable.
-    const uint32_t clkdiv = BOARD_PSRAM_CLKDIV;
+#define PSRAM_TEST_SIZE 1024u
 
-    // Timing register: clkdiv, min-deselect, max-select, rxdelay
-    qmi_hw->m[1].timing =
-        (clkdiv    << QMI_M1_TIMING_CLKDIV_LSB)        |
-        (2u        << QMI_M1_TIMING_MIN_DESELECT_LSB)   |  // ≥12 ns
-        (0x3fu     << QMI_M1_TIMING_MAX_SELECT_LSB)     |  // max CS active
-        (2u        << QMI_M1_TIMING_SELECT_HOLD_LSB)    |
-        (BOARD_PSRAM_RXDELAY << QMI_M1_TIMING_RXDELAY_LSB);
+// Reserve the probe through the SDK's PSRAM linker region. The emulator later
+// owns the complete fixed PSRAM map, so this startup-only buffer may safely
+// overlap the beginning of chip RAM after psram_init() returns.
+static volatile uint8_t __uninitialized_psram("omega_probe")
+    psram_test_buffer[PSRAM_TEST_SIZE];
 
-    // Read format: Quad I/O, EBh command, 6 dummy cycles
-    qmi_hw->m[1].rfmt =
-        (QMI_M1_RFMT_PREFIX_WIDTH_VALUE_Q << QMI_M1_RFMT_PREFIX_WIDTH_LSB) |
-        (QMI_M1_RFMT_ADDR_WIDTH_VALUE_Q   << QMI_M1_RFMT_ADDR_WIDTH_LSB)   |
-        (QMI_M1_RFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M1_RFMT_SUFFIX_WIDTH_LSB) |
-        (QMI_M1_RFMT_DUMMY_WIDTH_VALUE_Q  << QMI_M1_RFMT_DUMMY_WIDTH_LSB)  |
-        (BOARD_PSRAM_READ_DUMMY << QMI_M1_RFMT_DUMMY_LEN_LSB)              |
-        (QMI_M1_RFMT_DATA_WIDTH_VALUE_Q   << QMI_M1_RFMT_DATA_WIDTH_LSB)   |
-        (1u << QMI_M1_RFMT_PREFIX_LEN_LSB);   // 8-bit prefix
-
-    qmi_hw->m[1].rcmd = 0xEB;   // Quad Fast Read command
-
-    // Write format: Quad, 38h command, no dummy
-    qmi_hw->m[1].wfmt =
-        (QMI_M1_WFMT_PREFIX_WIDTH_VALUE_Q << QMI_M1_WFMT_PREFIX_WIDTH_LSB) |
-        (QMI_M1_WFMT_ADDR_WIDTH_VALUE_Q   << QMI_M1_WFMT_ADDR_WIDTH_LSB)   |
-        (QMI_M1_WFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M1_WFMT_SUFFIX_WIDTH_LSB) |
-        (QMI_M1_WFMT_DATA_WIDTH_VALUE_Q   << QMI_M1_WFMT_DATA_WIDTH_LSB)   |
-        (1u << QMI_M1_WFMT_PREFIX_LEN_LSB);
-
-    qmi_hw->m[1].wcmd = 0x38;   // Quad Write command
+static uint8_t test_pattern(size_t index) {
+    return (uint8_t)((index * 37u + 0x5au) & 0xffu);
 }
 
-static void _psram_send_direct_byte(uint8_t byte) {
-    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_TXFULL_BITS) tight_loop_contents();
-    qmi_hw->direct_tx = byte;
-    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS)  tight_loop_contents();
-}
+bool psram_init(void) {
+    if (!psram_is_available()) {
+        printf("PSRAM: SDK did not detect or initialize a device\n");
+        return false;
+    }
 
-static void _psram_reset(void) {
-    // Assert CS1, send Reset Enable (66h) then Reset (99h)
-    hw_set_bits(&qmi_hw->direct_csr,
-                QMI_DIRECT_CSR_EN_BITS | QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
+    const size_t detected_size = psram_get_size();
+    printf("PSRAM: detected %lu bytes on GPIO%u\n",
+           (unsigned long)detected_size, (unsigned)PICO_PSRAM_CS_PIN);
+    if (detected_size < PSRAM_SIZE) {
+        printf("PSRAM: need at least %u bytes\n", (unsigned)PSRAM_SIZE);
+        return false;
+    }
 
-    _psram_send_direct_byte(0x66);  // Reset Enable
-    hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
+    for (size_t i = 0; i < PSRAM_TEST_SIZE; ++i) {
+        psram_test_buffer[i] = test_pattern(i);
+    }
 
-    hw_set_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
-    _psram_send_direct_byte(0x99);  // Reset
-    hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
+    for (size_t i = 0; i < PSRAM_TEST_SIZE; ++i) {
+        const uint8_t expected = test_pattern(i);
+        const uint8_t actual = psram_test_buffer[i];
+        if (actual != expected) {
+            printf("PSRAM: test failed at byte %u (expected %02x, read %02x)\n",
+                   (unsigned)i, expected, actual);
+            return false;
+        }
+    }
 
-    hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_EN_BITS);
-
-    // tRST = 5 µs minimum
-    busy_wait_us(10);
-}
-
-static void _psram_enter_quad_mode(void) {
-    // Send Quad Enable command (35h) in SPI mode
-    hw_set_bits(&qmi_hw->direct_csr,
-                QMI_DIRECT_CSR_EN_BITS | QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
-    _psram_send_direct_byte(0x35);  // Enter Quad Mode
-    hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
-    hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_EN_BITS);
-    busy_wait_us(1);
-}
-
-void psram_init(void) {
-    // Route the QMI CS1 (chip-select 1) signal to the board's PSRAM CS GPIO.
-    // On the Pimoroni Pico Plus 2 the SDK board header does this; on a bare
-    // pico2 / generic RP2350B target nobody does, so do it explicitly.
-    gpio_set_function(BOARD_PSRAM_CS_PIN, GPIO_FUNC_XIP_CS1);
-
-    _psram_reset();
-    _psram_enter_quad_mode();
-    _psram_set_qspi_timing();
-
-    // Invalidate the XIP cache so any stale lines covering the PSRAM
-    // window (CS1) are dropped.  On RP2350 the cache-maintenance path
-    // replaces the RP2040 xip_ctrl_hw->flush register.
-    xip_cache_invalidate_all();
+    printf("PSRAM: %u-byte read/write test passed at %p\n",
+           (unsigned)PSRAM_TEST_SIZE, (void *)psram_test_buffer);
+    return true;
 }

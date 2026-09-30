@@ -18,6 +18,12 @@
 #include <stdio.h>
 
 void dma_execute();
+// Runs several DMA slots; equivalent to calling dma_execute() `slots` times.
+void dma_run(int slots);
+// Set by writes to DIWSTRT/DIWSTOP, DDFSTRT/DDFSTOP, BPLCON0 and DMACON:
+// dma_execute() then recomputes its cached per-line display state.
+extern int dmaLineStateDirty;
+void dmaBitplanePointerWrite(unsigned plane, int highWord);
 int copperExecute();
 int blitterExecute();
 
@@ -45,11 +51,6 @@ void plane5(void);
 
 void loresPlane1(void);
 void hiresPlane1(void);
-
-void drawBlank();
-
-void displayLineReset(void);
-void setDisplayMode(int); // 0 = lores, 1 = highres
 
 int blitterCopyCycle();
 int blitterLineCycle();

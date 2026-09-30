@@ -16,6 +16,7 @@
 #include "Floppy.h"
 #include "Chipset.h"
 #include "Memory.h"
+#include <string.h>
 
 #ifndef PICO_BUILD
 #include <unistd.h>
@@ -305,6 +306,7 @@ void ADF2MFM_from_mem(const uint8_t* adf, uint32_t size, uint8_t* mfm) {
         }
     }
 }
+
 //*******************************
 
 
@@ -313,6 +315,153 @@ int floppySync = 0;
 int driveSelected=0;
 Fd_t df[4];
 
+#ifndef PICO_BUILD
+// Native builds keep DF0's whole disk as MFM (tracks * sides).
+static uint8_t df0_mfm_image[FLOPPY_MFM_TRACK_SIZE * 82 * 2];
+#endif
+
+#ifdef PICO_BUILD
+// The flash-backed DF0 path keeps only the selected side as MFM, in the
+// otherwise unused DF0 area of PSRAM. It is accessed through the uncached
+// XIP alias so disk streaming never evicts emulator code or chip RAM from
+// the shared 16 KB XIP cache; SRAM is left for the core-1 ring.
+#define df0_track_cache ((uint8_t *)(PSRAM_BASE - XIP_BASE + \
+                                     XIP_NOCACHE_NOALLOC_BASE + \
+                                     PSRAM_DF0_OFFSET))
+#define DF0_TRACK_WORDS ((FLOPPY_MFM_TRACK_SIZE + 3) / 4)
+// Streams MFM bytes, clock bits included, as 32-bit writes to the
+// uncached PSRAM track buffer.
+typedef struct {
+    volatile uint32_t *dst;
+    uint32_t word;
+    unsigned bytes;
+    uint8_t prev;
+} MfmWriter;
+
+static inline void mfmPut(MfmWriter *w, uint8_t value) {
+    w->word |= (uint32_t)value << (8u * w->bytes);
+    w->prev = value;
+    if (++w->bytes == 4u) {
+        *w->dst++ = w->word;
+        w->word = 0;
+        w->bytes = 0;
+    }
+}
+
+static inline void mfmPutClocked(MfmWriter *w, uint8_t data) {
+    mfmPut(w, addClockBits(w->prev, data));
+}
+
+// encodeBlock() followed by the clock-bit pass, streamed.
+static void mfmPutBlock(MfmWriter *w, const uint8_t *src, int size) {
+    for (int i = 0; i < size; i++)
+        mfmPutClocked(w, (uint8_t)(src[i] >> 1));
+    for (int i = 0; i < size; i++)
+        mfmPutClocked(w, src[i]);
+}
+
+// XOR of encodeBlock(src, size) by byte lane, as the sector checksums take
+// it. Both halves of byte i land in lane i % 4 (size is a multiple of 4).
+static uint32_t mfmBlockSum(const uint32_t *src, int size) {
+    uint32_t sum = 0;
+    for (int i = 0; i < size / 4; i++)
+        sum ^= (src[i] ^ (src[i] >> 1)) & 0x55555555u;
+    return sum;
+}
+
+// Encode one cylinder side into a 12,798-byte MFM track, bit-identical to
+// ADF2MFM(). The raw ADF remains in flash; the track is written straight to
+// `mfm` in PSRAM without a staging copy in SRAM.
+static int ADF2MFM_track_from_mem(const uint8_t *adf, uint32_t size,
+                                  int track, int side, uint8_t *mfm) {
+    if (!adf || !mfm || track < 0 || track >= 80 || side < 0 || side > 1)
+        return 0;
+
+    // Sector bytes 4..543 of lowlevelSector in ADF2MFM(): info, label,
+    // header and data checksums, then the 512 data bytes.
+    uint32_t sector_words[135];
+    uint8_t *info = (uint8_t *)sector_words;
+    MfmWriter w = { (volatile uint32_t *)mfm, 0, 0, 0 };
+
+    for (int sector = 0; sector < 11; sector++) {
+        uint32_t source_offset =
+            (uint32_t)(((track * 2 + side) * 11 + sector) * 512);
+        if (source_offset + 512u > size)
+            return 0;
+
+        info[0] = 0xFF;
+        info[1] = (uint8_t)((track << 1) | side);
+        info[2] = (uint8_t)sector;
+        info[3] = (uint8_t)(11 - sector);
+        memset(&info[4], 0, 16);
+        memcpy(&info[28], adf + source_offset, 512);
+        sector_words[5] = mfmBlockSum(&sector_words[0], 4) ^
+                          mfmBlockSum(&sector_words[1], 16);
+        sector_words[6] = mfmBlockSum(&sector_words[7], 512);
+
+        mfmPut(&w, 0xAA); mfmPut(&w, 0xAA);
+        mfmPut(&w, 0xAA); mfmPut(&w, 0xAA);
+        mfmPut(&w, 0x44); mfmPut(&w, 0x89);
+        mfmPut(&w, 0x44); mfmPut(&w, 0x89);
+        mfmPutBlock(&w, &info[0], 4);
+        mfmPutBlock(&w, &info[4], 16);
+        mfmPutBlock(&w, &info[20], 4);
+        mfmPutBlock(&w, &info[24], 4);
+        mfmPutBlock(&w, &info[28], 512);
+    }
+
+    mfmPutClocked(&w, 0);
+    mfmPut(&w, 0xA8); mfmPut(&w, 0x55);
+    mfmPut(&w, 0x55); mfmPut(&w, 0xAA);
+    for (int i = 5; i < 700; i++)
+        mfmPutClocked(&w, 0);
+    for (int i = 11 * 1088 + 700; i < FLOPPY_MFM_TRACK_SIZE; i++)
+        mfmPut(&w, 0);
+    if (w.bytes)
+        *w.dst = w.word;    // the buffer is padded to a word multiple
+    return 1;
+}
+
+static const uint8_t *df0_adf;
+static uint32_t df0_adf_size;
+static int df0_cached_cylinder = -1;
+static int df0_cached_side = -1;
+
+static int floppyEnsureTrackCached(int drive) {
+    if (drive != 0 || !df0_adf)
+        return 0;
+    if (df0_cached_cylinder == df[0].cylinder &&
+        df0_cached_side == df[0].side)
+        return 1;
+    if (!ADF2MFM_track_from_mem(df0_adf, df0_adf_size,
+                                df[0].cylinder, df[0].side,
+                                df0_track_cache))
+        return 0;
+    df0_cached_cylinder = df[0].cylinder;
+    df0_cached_side = df[0].side;
+    return 1;
+}
+
+int floppyMountADF(int drive, const uint8_t *adf, uint32_t size) {
+    if (drive != 0 || !adf || size != FLOPPY_ADF_SIZE)
+        return 0;
+    df0_adf = adf;
+    df0_adf_size = size;
+    df0_cached_cylinder = -1;
+    df0_cached_side = -1;
+    df[0].mfmData = df0_track_cache;
+    df[0].hasDisk = 0;
+
+    // Before insertion expose an invalid header rather than mounted data, so
+    // Kickstart can finish its no-disk retry and display the hand screen.
+    volatile uint32_t *track = (volatile uint32_t *)df0_track_cache;
+    track[0] = 0x8944u;
+    for (int i = 1; i < DF0_TRACK_WORDS; i++)
+        track[i] = 0;
+    return 1;
+}
+#endif
+
 void floppyIndexReset(){
     
        df[driveSelected].index = 4;
@@ -320,8 +469,21 @@ void floppyIndexReset(){
 }
 
 uint8_t floppyDataRead(){ //this function should be called by the DMA
-    
-    int position   = (df[driveSelected].cylinder * (12798 * 2)) + (df[driveSelected].side  * 12798) + df[driveSelected].index;
+
+#ifdef PICO_BUILD
+    int streamed = driveSelected == 0 && df0_adf;
+    if (streamed && df[0].hasDisk && !floppyEnsureTrackCached(0))
+        return 0;
+    int position = streamed
+        ? df[driveSelected].index
+        : (df[driveSelected].cylinder * (FLOPPY_MFM_TRACK_SIZE * 2)) +
+          (df[driveSelected].side * FLOPPY_MFM_TRACK_SIZE) +
+          df[driveSelected].index;
+#else
+    int position = (df[driveSelected].cylinder * (FLOPPY_MFM_TRACK_SIZE * 2)) +
+                   (df[driveSelected].side * FLOPPY_MFM_TRACK_SIZE) +
+                   df[driveSelected].index;
+#endif
     
     df[driveSelected].index +=1;
 
@@ -335,7 +497,9 @@ uint8_t floppyDataRead(){ //this function should be called by the DMA
         
     }
     
-    uint8_t retVal = df[driveSelected].mfmData[position];
+    // DF1-DF3 are unconnected and have no data.
+    uint8_t retVal = df[driveSelected].mfmData
+                   ? df[driveSelected].mfmData[position] : 0;
     
     /*
     if(retVal==0){
@@ -348,6 +512,9 @@ uint8_t floppyDataRead(){ //this function should be called by the DMA
 
 
 void floppyInsert(int drive){
+    if(drive != 0){
+        return;     // only DF0 takes disks
+    }
 
     if(df[drive].idMode !=0){
         //Only Vaild drives have an ID Mode == 0 
@@ -357,10 +524,21 @@ void floppyInsert(int drive){
     if(df[drive].hasDisk){
         df[drive].hasDisk = 0;
         df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk removed)
+        df[drive].pra |= 0x20;      // /DKRDY=1 (no media ready)
         printf("Disk ejected from df%d:\n",drive);
     }else{
+#ifdef PICO_BUILD
+        if (drive == 0 && df0_adf && !floppyEnsureTrackCached(0))
+            return;
+#endif
         df[drive].hasDisk = 1;
         df[drive].pra &= 0xFB;      // /CHNG=0 (change: disk inserted)
+        // The motor-control output may not change while Kickstart polls the
+        // hand screen, so floppySetState() may have no edge on which to
+        // recalculate readiness. Present the inserted medium immediately;
+        // a subsequent motor-off write restores /DKRDY=1.
+        df[drive].pra &= 0xDF;      // /DKRDY=0 (inserted medium ready)
+        df[drive].index = 0;
         printf("Disk inserted in df%d:\n",drive);
     }
     
@@ -376,13 +554,16 @@ uint8_t* floppyInit(int drive){
     df[drive].pra  &= 0xEF;   // cylinder 0 (bit4=0)
     df[drive].pra  |= 0x20;   // drive not ready (/DKRDY=1, no disk)
 #ifdef PICO_BUILD
-    // Assign MFM buffer into PSRAM; only drives 0 and 1 are supported
-    static const uint32_t psram_offsets[4] = {
-        PSRAM_DF0_OFFSET,
-        PSRAM_DF1_OFFSET,
-        0, 0   // drives 2/3 unsupported on RP2350 (insufficient PSRAM)
-    };
-    df[drive].mfmData = (drive < 2) ? psram_ptr(psram_offsets[drive]) : NULL;
+    // Only DF0 has an MFM buffer (in PSRAM); DF1-DF3 are unconnected.
+    df[drive].mfmData = drive == 0 ? psram_ptr(PSRAM_DF0_OFFSET) : NULL;
+    if (drive == 0) {
+        df0_adf = NULL;
+        df0_adf_size = 0;
+        df0_cached_cylinder = -1;
+        df0_cached_side = -1;
+    }
+#else
+    df[drive].mfmData = drive == 0 ? df0_mfm_image : NULL;
 #endif
     return df[drive].mfmData;
 }
@@ -395,7 +576,9 @@ void floppyState(){
 void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
     static uint8_t PRB;
+#ifndef PICO_BUILD
     static int count = 0;
+#endif
     
     PRB = CIAB.prb;
     
@@ -407,22 +590,18 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
             
         case 0x70:
             driveSelected = 0;
-            df[0].pra |= 0x04;   // /CHNG ack: SEL asserted → clear /CHNG latch
             break;
 
         case 0x68:
             driveSelected = 1;
-            df[1].pra |= 0x04;
             break;
 
         case 0x58:
             driveSelected = 2;
-            df[2].pra |= 0x04;
             break;
 
         case 0x38:
             driveSelected = 3;
-            df[3].pra |= 0x04;
             break;
             
         default:
@@ -492,7 +671,9 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
     //Step head (don't step again if we've already stepped)
     if( (PRB & 0x1) && !(df[driveSelected].prb & 0x1) ){
+#ifndef PICO_BUILD
         printf("%04x - DF%d Click\n",count,driveSelected);
+#endif
         
         if(PRB & 0x2){
             df[driveSelected].cylinder -=1;
@@ -510,6 +691,11 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
         if(df[driveSelected].cylinder >79){    //not sure why sometimes the drive tries to go up to track 80.. with ks1.3
             df[driveSelected].cylinder = 79;
         }
+
+        // A real Amiga drive keeps /CHNG asserted after an insertion or
+        // ejection until the controller steps the head. Clearing it merely on
+        // drive selection makes a waiting Kickstart miss runtime insertion.
+        df[driveSelected].pra |= 0x04;
         
         //floppySync = 0;
         
@@ -549,4 +735,3 @@ void floppySetState(){            //To be called when Writes to CIAB prb happen.
     
 
 }
-

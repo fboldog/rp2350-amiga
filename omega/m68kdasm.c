@@ -325,7 +325,8 @@ static char* make_signed_hex_str_32(uint val)
 /* make string of immediate value */
 static char* get_imm_str_s(uint size)
 {
-	static char str[15];
+	/* '#' + a make_signed_hex_str_*() result (up to 19 chars) + NUL */
+	static char str[21];
 	if(size == 0)
 		sprintf(str, "#%s", make_signed_hex_str_8(read_imm_8()));
 	else if(size == 1)

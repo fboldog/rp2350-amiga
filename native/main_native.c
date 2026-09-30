@@ -13,10 +13,12 @@
 //                Kickstart must finish drive identification first)
 //
 // Environment:
-//   OMEGA_ROM=<file>   load this Kickstart ROM (256 KB mirrored, or 512 KB)
+//   OMEGA_ROM=<file>   load this Kickstart ROM (images up to 256 KB are
+//                      zero-padded and mirrored; larger images fill 512 KB)
 //                      instead of the built-in Kickstart 1.3.
 //   OMEGA_DISASM=1     turn on the Musashi disassembler (to UART/stdout) -
 //                      useful for seeing where a ROM's early init diverges.
+//   OMEGA_CPU=68020     use Musashi's 68020 core instead of the default 68000.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +38,7 @@
 #include "../omega/CIA.h"
 #include "../omega/DMA.h"
 #include "../omega/Floppy.h"
+#include "../omega/VideoStandard.h"
 #include "../omega/m68k.h"
 
 #include "../omega/Kick13.h" // const unsigned char kick13[524288]
@@ -44,28 +47,47 @@ extern unsigned long native_frame_counter;
 extern unsigned long native_nonblack_pixels(void);
 extern void          native_dump_ppm(const char *path);
 
+static uint32_t native_read_u32(uint32_t address) {
+    return ((uint32_t)low16Meg[address] << 24) |
+           ((uint32_t)low16Meg[address + 1] << 16) |
+           ((uint32_t)low16Meg[address + 2] << 8) |
+           low16Meg[address + 3];
+}
+
 int screenWidth  = 640;   // referenced by some omega translation units
 int screenHeight = 200;
 int disass       = 0;     // Musashi disassembler (toggled by OMEGA_DISASM)
 
-// Load a Kickstart ROM file into low16Meg at 0xF80000.
-// 512 KB -> straight copy;  256 KB -> mirrored into 0xF80000 and 0xFC0000.
+// Load a Kickstart ROM file into low16Meg at 0xF80000. Images no larger than
+// 256 KB occupy a zero-padded 256 KB bank which is mirrored at 0xFC0000.
+// Images between 256 KB and 512 KB occupy a zero-padded 512 KB window.
 // Returns 0 on success.
 static int load_rom_file(const char *path) {
     int fd = open(path, O_RDONLY);
-    if (fd < 1) { printf("  ROM: cannot open %s\n", path); return 1; }
+    if (fd < 0) { printf("  ROM: cannot open %s\n", path); return 1; }
     off_t sz = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    if (sz == 0x40000) {                       // 256 KB
-        (void)!read(fd, &low16Meg[0xF80000], 0x40000);
-        memcpy(&low16Meg[0xFC0000], &low16Meg[0xF80000], 0x40000);
-    } else if (sz == 0x80000) {                // 512 KB
-        (void)!read(fd, &low16Meg[0xF80000], 0x80000);
-    } else {
-        printf("  ROM: %s is %lld bytes (expected 262144 or 524288)\n",
+    if (sz <= 0 || sz > 0x80000) {
+        printf("  ROM: %s is %lld bytes (expected 1 to 524288)\n",
                path, (long long)sz);
         close(fd);
         return 1;
+    }
+
+    memset(&low16Meg[0xF80000], 0, 0x80000);
+    size_t loaded = 0;
+    while (loaded < (size_t)sz) {
+        ssize_t got = read(fd, &low16Meg[0xF80000 + loaded],
+                           (size_t)sz - loaded);
+        if (got <= 0) {
+            printf("  ROM: failed to read %s\n", path);
+            close(fd);
+            return 1;
+        }
+        loaded += (size_t)got;
+    }
+    if (sz <= 0x40000) {
+        memcpy(&low16Meg[0xFC0000], &low16Meg[0xF80000], 0x40000);
     }
     close(fd);
     printf("  ROM: %s loaded (%lld KB)\n", path, (long long)(sz >> 10));
@@ -77,12 +99,16 @@ int main(int argc, char **argv) {
     long         iterations = (argc > 2) ? strtol(argv[2], NULL, 0) : 40000;
     long         dumpEvery  = (argc > 3) ? strtol(argv[3], NULL, 0) : 4000;
     long         insertAt   = (argc > 4) ? strtol(argv[4], NULL, 0) : 3000;
-    int          haveDisk   = 0;
+    int          haveImage  = 0;
 
     const char *romPath = getenv("OMEGA_ROM");
     if (getenv("OMEGA_DISASM")) disass = 1;
 
     printf("Omega native runner\n");
+    printf("  video=%s  lines=%d  refresh=%.3f Hz\n",
+           OMEGA_VIDEO_NAME, OMEGA_VIDEO_FRAME_LINES,
+           (double)OMEGA_VIDEO_RATE_NUMERATOR /
+           OMEGA_VIDEO_RATE_DENOMINATOR);
     printf("  iterations=%ld  dump_every=%ld  disasm=%d\n",
            iterations, dumpEvery, disass);
 
@@ -115,13 +141,20 @@ int main(int argc, char **argv) {
         } else {
             ADF2MFM(fd, floppyInit(0));
             close(fd);
-            haveDisk = 1;
-            // Disk is in the drive at power-on: set hasDisk and assert /CHNG=0
-            // so the ROM's initial drive probe detects it.  The insertAt loop
-            // is suppressed once hasDisk is already set.
-            df[0].hasDisk = 1;
-            df[0].pra &= 0xFB;   // /CHNG=0 (change: disk was in drive at power-on)
-            printf("  DF0: %s encoded to MFM — disk in drive at boot\n", adfPath);
+            haveImage = 1;
+            if (insertAt <= 0) {
+                // A non-positive insert time models media present at reset.
+                df[0].hasDisk = 1;
+                df[0].pra &= 0xFB;   // /CHNG=0 (media changed)
+                df[0].pra &= 0xDF;   // /DKRDY=0 (media ready)
+                printf("  DF0: %s encoded to MFM — disk in drive at boot\n",
+                       adfPath);
+            } else {
+                // Keep the encoded image available, but expose an empty drive
+                // until the emulation loop calls floppyInsert().
+                printf("  DF0: %s encoded to MFM — insert scheduled at %ld\n",
+                       adfPath, insertAt);
+            }
         }
     } else {
         floppyInit(0);
@@ -134,7 +167,7 @@ int main(int argc, char **argv) {
     // insert a Workbench disk" requester never opens.  The zero data after each
     // sync produces invalid sector headers so trackdisk returns TDERR_NoSecHdr
     // after its retry limit and the OS shows the insert-disk screen.
-    if (!haveDisk) {
+    if (!haveImage) {
         uint8_t *mfm = df[0].mfmData;
         for (int cyl = 0; cyl < 82; cyl++) {
             for (int side = 0; side < 2; side++) {
@@ -154,6 +187,21 @@ int main(int argc, char **argv) {
     // ── Bring up the emulator ───────────────────────────────────────────
     hostInit();
     cpu_init();
+    /* Normal Kickstarts place an absolute JMP opcode at ROM offset 2, which
+     * is Omega's historical reset entry.  DiagROM uses "DG" there and stores
+     * its explicit startup address in the following longword instead. */
+    if (low16Meg[0xF80002] == 'D' && low16Meg[0xF80003] == 'G') {
+        uint32_t diag_entry = native_read_u32(0xF80004);
+        if (diag_entry >= 0xF80000u && diag_entry < 0x1000000u) {
+            m68k_set_reg(M68K_REG_PC, diag_entry);
+            printf("  ROM: DiagROM entry %08x\n", diag_entry);
+        }
+    }
+    const char *cpuType = getenv("OMEGA_CPU");
+    if (cpuType && strcmp(cpuType, "68020") == 0) {
+        m68k_set_cpu_type(M68K_CPU_TYPE_68020);
+        printf("  CPU: 68020\n");
+    }
     ChipsetInit();
 
     printf("Entering emulation loop\n");
@@ -177,7 +225,7 @@ int main(int argc, char **argv) {
         // Kickstart only accepts a disk-change once the drive has finished
         // ID mode (df[0].idMode == 0).  Keep trying from insertAt onward
         // until floppyInsert latches hasDisk.
-        if (haveDisk && it >= insertAt && !df[0].hasDisk &&
+        if (haveImage && insertAt > 0 && it >= insertAt && !df[0].hasDisk &&
             (it % 200) == 0) {
             floppyInsert(0);
             if (df[0].hasDisk) {
@@ -187,8 +235,13 @@ int main(int argc, char **argv) {
             }
         }
 
+        // The detailed boot-state sampler is useful interactively, but makes
+        // automated screenshot regression logs enormous and needlessly slow.
+#ifndef OMEGA_SCREENSHOT_REGRESSION
         // PC sampler: after screen is up, print once then stop
-        if (native_frame_counter > 20 && (it % 4000) == 0) {
+        uint32_t exec_base = native_read_u32(4);
+        if (native_frame_counter > 20 && (it % 4000) == 0 &&
+            exec_base >= 0x13Eu && exec_base < 0xF00000u) {
             uint32_t pc  = m68k_get_reg(NULL, M68K_REG_PC);
             uint32_t a0  = m68k_get_reg(NULL, M68K_REG_A0);
             uint32_t a3  = m68k_get_reg(NULL, M68K_REG_A3);
@@ -206,7 +259,7 @@ int main(int argc, char **argv) {
             // Read signal words at (A3)=tc_SigRecvd and (A3-4)=tc_SigWait
             #define RD32(base) ((uint32_t)((low16Meg[(base)]<<24)|(low16Meg[(base)+1]<<16)| \
                                            (low16Meg[(base)+2]<<8)|low16Meg[(base)+3]))
-            uint32_t a6  = RD32(4);  // ExecBase from exception vector table address 4
+            uint32_t a6  = exec_base;
             printf("    PC=%08X A0=%08X A3=%08X ExecBase(addr4)=%08X D0=%08X\n",
                    pc, a0, a3, a6, d0);
             uint32_t tc_sigrecvd = (a3 < 0xF00000u) ? RD32(a3)   : 0xDEADBEEF;
@@ -243,7 +296,7 @@ int main(int argc, char **argv) {
                        RD32(sigt+0x12), RD32(sigt+0x16), RD32(sigt+0x1A));
             }
             // Decode ExecBase LVO -0x13E: 6-byte JMP entry at ExecBase-0x13E = 0xC0094A
-            if (a6 < 0xF00000u) {
+            if (a6 >= 0x13Eu && a6 < 0xF00000u) {
                 uint32_t lvo_addr = a6 - 0x13Eu;
                 uint16_t opcode   = (uint16_t)((low16Meg[lvo_addr]<<8)|low16Meg[lvo_addr+1]);
                 uint32_t tgt      = RD32(lvo_addr + 2);
@@ -529,6 +582,7 @@ int main(int argc, char **argv) {
             #undef RD32
             fflush(stdout);
         }
+#endif
 
         if (dumpEvery > 0 && (it % dumpEvery) == 0) {
             char name[64];
