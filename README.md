@@ -281,6 +281,20 @@ were silently never written and the previous disk stayed in flash.
 Hold BOOTSEL and connect USB, then copy the generated combined UF2 to the
 `RPI-RP2` drive.
 
+## CPU timing
+
+The 68000 gets `OMEGA_CPU_CYCLES_PER_SLOT` cycles per DMA slot (colour clock),
+default 2 as on an A500 (7.09 MHz CPU, 3.55 MHz colour clock); Musashi's
+overrun past a slice's budget is carried into the next slice so the ratio is
+exact. Omega used 16, a 68000 running ~8x fast against the beam: software
+that races the beam (RemGame refills its sprite bands behind the beam) then
+misbehaves. At the real ratio, busy-wait loops cost 8x less host time (RemGame
+~9 -> ~18 frames/s) but CPU-bound work such as booting Kickstart and
+Workbench takes its real Amiga time (Workbench 1.3 boot ~98 s instead of
+~61 s). Chip-bus wait states are not modelled. The native runner keeps its
+own 16-cycle loop. Board helper scripts are in `tooling/` (frame capture,
+speed, boot timing, DF0 slot selection).
+
 ## Sprites
 
 `omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per

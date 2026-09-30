@@ -264,14 +264,31 @@ How to measure (no halt, firmware keeps running):
       idle 28.0 -> 27.2 frames/s, RemGame 10.5 -> 9.6 (PAL).
 - [ ] **Sprite collisions (CLXDAT/CLXCON)** and **dual playfield** (full
       BPLCON2 priorities) are not emulated.
-- [ ] **RemGame item colours.** The heart shows white and coin edges show
-      white. Verified 2026-09-30 against a synchronised capture of the Copper
-      list and sprite data: the display matches what the game wrote (the heart
-      is sprite 4 sharing pair 2's colours 25-27 = white/dark/orange with a
-      flask; its fill uses colour 25). On real hardware the fill would have
-      to use colour 27, but the heart's DATB plane holds only its outline, so
-      the difference is in the game's run on the emulator (CPU, blitter or
-      timing), not in sprite display. Needs a reference emulator state.
+- [x] **RemGame item colours: CPU:beam ratio.** The emulated 68000 got 16
+      cycles per DMA slot (Omega's value) where an A500 gets 2 (7.09 MHz CPU,
+      3.55 MHz colour clock), so it ran ~8x fast against the beam, and the
+      Musashi overrun was dropped on top. RemGame races the beam (it polls
+      VPOSR/VHPOSR ~240k times/s, never CLXDAT) to refill each 16-line band's
+      sprites and colours; too fast, it gave the heart a flask's colours and
+      lost items. `OMEGA_CPU_CYCLES_PER_SLOT` (default 2) with the overrun
+      carried: 2 and 4 match the reference (image_refs/remgame-*.png), 6 and
+      8 do not. PAL: RemGame 9.0 -> ~17-18 fps (busy-waits no longer emulated
+      8x), Workbench idle unchanged (26.7), Workbench 1.3 boot 60.7 -> ~98 s
+      (Kickstart/Workbench boot is CPU-bound in Amiga time). The native
+      runner keeps its own 16-cycle loop (regression baselines unchanged).
+- [x] **Copper vertical compare is 8-bit.** WAITs compare VP7-VP0 only, so a
+      low-byte wait after the line-255 wait completes on lines 256+ (RemGame's
+      PAL bottom bands were late); a WAIT fetched still on line 255 is held
+      until the wrap.
+- [x] **DIWSTOP ninth bit.** OCS takes VSTOP8 = NOT VSTOP7 (stop lines
+      $80-$17f); Omega forced it to 1, so RemGame's NTSC window (DIWSTOP $ea
+      = line 234) never closed and drew past its bottom. Full-width LORES
+      screens are now centred in the frame (a fixed 32-row offset cut the
+      last 32 lines of 256-line PAL screens) and DIWSTRT-anchored LORES lines
+      above line 44 are drawn (RemGame's NTSC window opens at line 34).
+- [ ] **Boot time at the real CPU ratio.** Kickstart 1.3 + Workbench 1.3
+      now needs ~98 s (was ~61 s at 16 cycles/slot); faster emulation of
+      CPU-bound work, or a turbo option for booting, would win it back.
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [x] **Pixel conversion on core 1.** Core 0 enqueues bitplane blocks,
@@ -330,7 +347,8 @@ appears only ~2 min 12 s later.
       `chipWrite*` test chip RAM first and use one load/store plus REV
       instead of byte accesses; Musashi's prefetch uses `chipFetch*`
       (ROM first) via `M68K_SEPARATE_READS` on Pico builds.
-- [x] **CPU slices.** The main loop runs `m68k_execute(16 * N)` after every
+- [x] **CPU slices** (now `OMEGA_CPU_CYCLES_PER_SLOT`, see above). The main
+      loop runs `m68k_execute(16 * N)` after every
       N DMA slots (`OMEGA_CPU_SLICE_SLOTS`, default 4) instead of
       `m68k_execute(16)` per slot. Same CPU:DMA cycle ratio; the CPU sees
       chipset state at N-slot (~1.1 µs) granularity. Watch beam-racing

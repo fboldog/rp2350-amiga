@@ -687,8 +687,8 @@ static uint8_t enabledBitplaneMask(void) {
 static int displayWindowContainsLine(int vpos) {
     int start = omegaDiwVerticalStart(chipset.diwstrt);
     // On OCS the missing ninth comparator bits are fixed: VSTART8 is zero and
-    // VSTOP8 is one. Thus the common DIWSTOP=$f4xx means line $1f4, not $0f4.
-    // ECS/AGA DIWHIGH programmability is outside this OCS chipset model.
+    // VSTOP8 is the inverse of VSTOP7 (see omegaDiwVerticalStop()). ECS/AGA
+    // DIWHIGH programmability is outside this OCS chipset model.
     int stop = omegaDiwVerticalStop(chipset.diwstop);
     return vpos >= start && vpos < stop;
 }
@@ -861,10 +861,23 @@ void dma_execute(){
 
 
 // Copper WAIT comparison (copperExecute() state 3).
+// The Copper compares only the low 8 bits of the beam line (VP7-VP0), as on
+// OCS: lines 256+ are reached by a wait near the end of line 255 followed by
+// low-byte waits, which then compare against line - 256. On hardware the
+// Copper wakes from that first wait late enough that the next WAIT is first
+// compared on line 256; here it can be fetched still on line 255, so such a
+// WAIT (fetched on line 255 for an earlier low-byte line) is held until the
+// beam wraps.
+static uint8_t copperWaitNextBank;
+
+static inline uint32_t copperBeam(void) {
+    return ((uint32_t)(internal.vPos & 0xff) << 8) | internal.hPos;
+}
+
 static inline int copperWaitReached(void) {
-    uint32_t beamPosition = ((uint32_t)internal.vPos << 8) | internal.hPos;
-    uint32_t maskedBeam = beamPosition & (0xFFFF0000u | internal.IR2);
-    return maskedBeam >= copperWaitPosition;
+    if (copperWaitNextBank && (internal.vPos & 0xff) == 0xff)
+        return 0;
+    return (copperBeam() & internal.IR2) >= copperWaitPosition;
 }
 
 void evenCycle(void){
@@ -1299,6 +1312,10 @@ void plane5(void){
     evenCycle();
     
 }
+// This line's LORES rows are anchored at DIWSTRT (full width, one raster row
+// per line).
+static int loresRowsFromDiw;
+
 void loresPlane1(void){
     
     
@@ -1327,6 +1344,7 @@ void loresPlane1(void){
         host.rasterRow =
             alternate_rows ? display_line * 2 : display_line;
         host.rasterX = 0;
+        loresRowsFromDiw = full_width && !alternate_rows;
     }
     chipset.bpl1dat = 0;
     if( (internal.bitplaneMask & 0x1)  == 0x1){
@@ -1337,7 +1355,10 @@ void loresPlane1(void){
         chipset.bpl1dat = *p;
     }
 
-    if (internal.vPos < OMEGA_LORES_FIRST_RENDER_LINE) {
+    // Layouts anchored at a fixed first line start rendering there; rows
+    // anchored at DIWSTRT are valid from the window's first line (RemGame's
+    // NTSC window opens at line 34).
+    if (!loresRowsFromDiw && internal.vPos < OMEGA_LORES_FIRST_RENDER_LINE) {
         evenCycle();
         return;
     }
@@ -1560,14 +1581,8 @@ int copperExecute(){
             internal.IR1 &= internal.comparisonMask; //mask the wait position
 
             copperWaitPosition = internal.IR1;
-            // PAL Copper lists cross the 8-bit vertical comparator boundary
-            // with a wait near line 255 followed by a low-byte wait.  Keep
-            // that second wait in the next 256-line bank instead of allowing
-            // it to complete immediately at the wrap.
-            if (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
-                internal.vPos >= 255 &&
-                ((internal.IR1 >> 8) & 0xff) < (internal.vPos & 0xff))
-                copperWaitPosition += 0x10000;
+            copperWaitNextBank = (internal.vPos & 0xff) == 0xff &&
+                                 (internal.IR1 >> 8) < 0xff;
 
             internal.copperCycle = 3;
             
@@ -1597,10 +1612,7 @@ int copperExecute(){
             */
             
             //Wait
-            uint32_t beamPosition = ((uint32_t)internal.vPos << 8) |
-                                    internal.hPos;
-            uint32_t maskedBeam = beamPosition & (0xFFFF0000u | internal.IR2);
-            if(maskedBeam >= copperWaitPosition){
+            if(copperWaitReached()){
                 internal.copperCycle = 0;
             }
             

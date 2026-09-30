@@ -62,6 +62,11 @@
 #endif
 _Static_assert(DMA_CPU_BATCH % OMEGA_CPU_SLICE_SLOTS == 0,
                "the DMA batch must hold whole CPU slices");
+// 68000 cycles per DMA slot (colour clock). A real A500 runs 2 (7.09 MHz
+// CPU, 3.55 MHz colour clock); Omega has always used 16.
+#ifndef OMEGA_CPU_CYCLES_PER_SLOT
+#define OMEGA_CPU_CYCLES_PER_SLOT 2
+#endif
 
 // ── Flash location of the DF0 ADF images (optional) ──────────────────────
 // Standard raw ADF images are placed back to back from this absolute address
@@ -366,9 +371,15 @@ int main(void) {
         // 16 cycles every slot spent more time in call overhead than in the
         // 1-3 instructions it ran. The CPU:DMA cycle ratio is unchanged; the
         // CPU just observes chipset state at slice granularity.
+        // Musashi finishes whole instructions, so it can overrun the budget;
+        // the overrun is carried into the next slice to keep the ratio exact.
+        static int cpu_cycle_balance;
         for (int i = 0; i < DMA_CPU_BATCH; i += OMEGA_CPU_SLICE_SLOTS) {
             dma_run(OMEGA_CPU_SLICE_SLOTS);
-            m68k_execute(16 * OMEGA_CPU_SLICE_SLOTS);
+            cpu_cycle_balance +=
+                OMEGA_CPU_CYCLES_PER_SLOT * OMEGA_CPU_SLICE_SLOTS;
+            if (cpu_cycle_balance > 0)
+                cpu_cycle_balance -= m68k_execute(cpu_cycle_balance);
         }
 #if OMEGA_ENABLE_FLASH_FLOPPY
         disk_button_poll();

@@ -195,13 +195,19 @@ static void hostDirectBegin(void) {
             omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
                                                chipset.diwstop);
         step = alternate_rows ? 2 : 1;
-        // dvi_display_submit_raster() skips y_offset / 2 image rows (64 / 2).
-        first_row = host.displayIsLores && !alternate_rows ? 32 : 0;
         rotation = omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
     }
     int height = dvi_display_direct_height();
     if (height > DIRECT_MAX_ROWS)
         height = DIRECT_MAX_ROWS;
+    if (!narrow && step == 1 && host.displayIsLores) {
+        // LORES raster row 0 is the DIWSTRT line: centre the display window
+        // in the frame. A fixed 32-row offset (for 200-line screens) pushed
+        // the last 32 lines of full 256-line PAL screens (RemGame) off the
+        // frame.
+        const int span = omegaDiwVerticalSpan(chipset.diwstrt, chipset.diwstop);
+        first_row = span > 0 && span < height ? (height - span) / 2 : 0;
+    }
     const uint32_t msg[3] = {
         MSG_HEADER(MSG_BEGIN, 0, 0, 0),
         (uint16_t)first_row | (uint32_t)step << 16 | (uint32_t)narrow << 24,

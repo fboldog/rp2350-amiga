@@ -29,8 +29,11 @@ static inline int omegaDiwVerticalStart(uint16_t diwstrt) {
     return diwstrt >> 8;
 }
 
+// OCS has no ninth DIWSTOP bit: the hardware takes VSTOP8 as the inverse of
+// VSTOP7, so stop lines run from $80 to $17f ($f4 is line 244, $2c is 300).
 static inline int omegaDiwVerticalStop(uint16_t diwstop) {
-    return 0x100 | (diwstop >> 8);
+    const int low = diwstop >> 8;
+    return (low & 0x80) ? low : 0x100 | low;
 }
 
 static inline int omegaDiwVerticalSpan(uint16_t diwstrt, uint16_t diwstop) {
