@@ -1,4 +1,4 @@
-# Omega Amiga Emulator - RP2350 Bare-Metal Port
+# Omega Amiga Emulator - RP2350 Port
 
 Port of [Omega](https://github.com/h5n1xp/Omega) (bare-metal 68K + Amiga chipset emulator)
 to the **RP2350B**, targeting the [**WeAct Studio RP2350B Core**](https://github.com/WeActStudio/WeActStudio.RP2350BCoreBoard) + [Adafruit DVI breakout](https://www.adafruit.com/product/4984). 
