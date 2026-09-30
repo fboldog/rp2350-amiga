@@ -35,8 +35,8 @@ void cpu_pulse_reset(void){
     uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
     uint32_t sp = m68k_get_reg(NULL, M68K_REG_SP);
 
-    printf("PC:%0x6\n",pc);
-    printf("SP:%0x6\n",sp);
+    printf("PC:%06lx\n",(unsigned long)pc);
+    printf("SP:%06lx\n",(unsigned long)sp);
     
     printf("Machine reset...\n");
     

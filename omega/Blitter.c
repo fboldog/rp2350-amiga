@@ -423,14 +423,7 @@ void blitter_execute(Chipset_t* chipset){
             
         }else{
             
-            static int count = 0;
-            
-            //printf("Blitter Copy Mode: %d\n",count);
-            
-            count++;
-            
             //Area Copy Blitter
-            //printf("blit %d: A-%06x (%d) B-%06x (%d) C-%06x (%d) D-%06x (%d) W-%d H-%d\n",count,chipset->bltapt,chipset->bltamod,chipset->bltbpt,chipset->bltbmod,chipset->bltcpt,chipset->bltcmod,chipset->bltdpt,chipset->bltdmod,chipset->bltsizh,chipset->bltsizv);
             
             int useMask = chipset->bltcon0 >> 8;
             int shiftA = chipset->bltcon0 >> 12;
