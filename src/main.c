@@ -63,7 +63,9 @@
 _Static_assert(DMA_CPU_BATCH % OMEGA_CPU_SLICE_SLOTS == 0,
                "the DMA batch must hold whole CPU slices");
 // 68000 cycles per DMA slot (colour clock). A real A500 runs 2 (7.09 MHz
-// CPU, 3.55 MHz colour clock); Omega has always used 16.
+// CPU, 3.55 MHz colour clock); Omega used 16. Set with
+// -DOMEGA_CPU_CYCLES_PER_SLOT=<n> (CMakeLists.txt); the default here covers
+// builds outside CMake.
 #ifndef OMEGA_CPU_CYCLES_PER_SLOT
 #define OMEGA_CPU_CYCLES_PER_SLOT 2
 #endif

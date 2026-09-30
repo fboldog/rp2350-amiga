@@ -284,7 +284,9 @@ Hold BOOTSEL and connect USB, then copy the generated combined UF2 to the
 ## CPU timing
 
 The 68000 gets `OMEGA_CPU_CYCLES_PER_SLOT` cycles per DMA slot (colour clock),
-default 2 as on an A500 (7.09 MHz CPU, 3.55 MHz colour clock); Musashi's
+default 2 as on an A500 (7.09 MHz CPU, 3.55 MHz colour clock); set it at
+configure time with `cmake -DOMEGA_CPU_CYCLES_PER_SLOT=<n>` (a cached value
+wins over the default, so reconfigure existing build directories). Musashi's
 overrun past a slice's budget is carried into the next slice so the ratio is
 exact. Omega used 16, a 68000 running ~8x fast against the beam: software
 that races the beam (RemGame refills its sprite bands behind the beam) then

@@ -20,6 +20,12 @@ option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OF
 # 320 MHz (PSRAM at 107 MHz) boots fastest; 266 MHz gives PSRAM 133 MHz; a
 # multiple of 48 MHz (e.g. 240) would let USB run from PLL_SYS.
 set(OMEGA_SYS_CLK_KHZ 320000 CACHE STRING "clk_sys in kHz for HDMI builds")
+# 68000 cycles per DMA slot (colour clock): 2 matches an A500 (7.09 MHz CPU,
+# 3.55 MHz colour clock); Omega used 16 (~8x fast against the beam).
+set(OMEGA_CPU_CYCLES_PER_SLOT 2 CACHE STRING "68000 cycles per DMA slot (A500: 2)")
+if(NOT OMEGA_CPU_CYCLES_PER_SLOT MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "OMEGA_CPU_CYCLES_PER_SLOT must be a positive integer")
+endif()
 
 # Match the small hardware_psram test project: describe the physical PSRAM to
 # the SDK and let its startup code configure QMI before main().
@@ -115,6 +121,7 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_DF0_INSERT_AT_BOOT=$<BOOL:${OMEGA_DF0_INSERT_AT_BOOT}>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
     OMEGA_SYS_CLK_KHZ=${OMEGA_SYS_CLK_KHZ}u
+    OMEGA_CPU_CYCLES_PER_SLOT=${OMEGA_CPU_CYCLES_PER_SLOT}
     # Nothing on the device mallocs; keep the SDK's minimum heap so the SRAM
     # goes to the frames and the core-1 ring.
     PICO_HEAP_SIZE=0x100
@@ -176,6 +183,7 @@ message(STATUS "SDK path:    ${PICO_SDK_PATH}")
 message(STATUS "Build type:  ${CMAKE_BUILD_TYPE}")
 message(STATUS "Video mode:  ${OMEGA_VIDEO_MODE}")
 message(STATUS "Sys clock:   ${OMEGA_SYS_CLK_KHZ} kHz (HDMI builds)")
+message(STATUS "CPU cycles:  ${OMEGA_CPU_CYCLES_PER_SLOT} per DMA slot (A500: 2)")
 message(STATUS "PSRAM:      ${PSRAM_SIZE_BYTES} bytes, CS GPIO${PSRAM_CS_PIN}")
 message(STATUS "HDMI:       ${OMEGA_ENABLE_HDMI}")
 message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD}")

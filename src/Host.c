@@ -195,6 +195,7 @@ static void hostDirectBegin(void) {
             omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
                                                chipset.diwstop);
         step = alternate_rows ? 2 : 1;
+        first_row = 0;  // LORES single-row layouts are centred below
         rotation = omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
     }
     int height = dvi_display_direct_height();
