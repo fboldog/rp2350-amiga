@@ -2344,8 +2344,7 @@ void eclock_execute(Chipset_t* chipset){
         internal.eClockCounter = 4;
         
         //CIA
-        CIAExecute(&CIAA);
-        CIAExecute(&CIAB);
+        CIAClock(1);
         
     }
     

@@ -19,6 +19,59 @@
 CIA_t CIAA;
 CIA_t CIAB;
 
+int ciaPending;
+int ciaHorizon = 1;
+
+// Ticks after which a tick of this CIA does more than count down; capped,
+// as running CIAExecute() on a plain countdown tick is harmless.
+#define CIA_HORIZON_MAX 65536
+static int ciaTicksToEvent(const CIA_t* cia){
+    if ((cia->cra & 16) || (cia->crb & 16) ||
+        ((cia->icr & 0x80) && cia->irqLatch == 0))
+        return 1;
+    int ticks = CIA_HORIZON_MAX;
+    if ((cia->cra & 33) == 1 && cia->ta >= 0 && cia->ta < ticks)
+        ticks = cia->ta + 1;
+    if ((cia->crb & 97) == 1 && cia->tb >= 0 && cia->tb < ticks)
+        ticks = cia->tb + 1;
+    return ticks;
+}
+
+static void ciaUpdateHorizon(void){
+    const int a = ciaTicksToEvent(&CIAA);
+    const int b = ciaTicksToEvent(&CIAB);
+    ciaHorizon = a < b ? a : b;
+}
+
+// Applies `ticks` plain countdown ticks (fewer than ciaTicksToEvent()).
+static inline void ciaCountDown(CIA_t* cia, int ticks){
+    if ((cia->cra & 33) == 1)
+        cia->ta -= ticks;
+    if ((cia->crb & 97) == 1)
+        cia->tb -= ticks;
+}
+
+void CIASync(void){
+    if (ciaPending == 0)
+        return;
+    ciaCountDown(&CIAA, ciaPending);
+    ciaCountDown(&CIAB, ciaPending);
+    ciaHorizon -= ciaPending;
+    ciaPending = 0;
+}
+
+void CIACatchUp(void){
+    while (ciaPending >= ciaHorizon) {
+        const int ticks = ciaHorizon - 1;
+        ciaCountDown(&CIAA, ticks);
+        ciaCountDown(&CIAB, ticks);
+        ciaPending -= ciaHorizon;
+        CIAExecute(&CIAA);
+        CIAExecute(&CIAB);
+        ciaUpdateHorizon();
+    }
+}
+
 void CIAInit(CIA_t* cia,uint16_t paulaMask){
     cia->ta  = 0;//65535;
     cia->tb  = 0;//65535;
@@ -27,6 +80,8 @@ void CIAInit(CIA_t* cia,uint16_t paulaMask){
     cia->tod = 0;
     cia->todAlarm = 0;
     cia->chipInt = paulaMask;
+    ciaPending = 0;
+    ciaHorizon = 1; // safe: the next tick runs CIAExecute()
     
     cia->icr = 0;
     
@@ -53,6 +108,7 @@ static int ciab_prb_log = 0;
 void CIAWrite(CIA_t* cia,int reg,uint8_t value){
 
     m68k_end_timeslice();
+    CIASync();
 
 #ifndef PICO_BUILD
     if (cia == &CIAB && reg == 1 && ciab_prb_log < 200) {
@@ -138,11 +194,13 @@ void CIAWrite(CIA_t* cia,int reg,uint8_t value){
         case 0xF:cia->crb = value; break;//crb
             
     }
+    ciaUpdateHorizon();
 }
 
 uint8_t CIARead(CIA_t* cia,int reg){
     
     m68k_end_timeslice();
+    CIASync();
     
     uint8_t value=0;
     
@@ -172,6 +230,8 @@ uint8_t CIARead(CIA_t* cia,int reg){
         case 0xF:value = cia->crb;break;//crb
             
     }
+    if (reg == 0xD)
+        ciaUpdateHorizon();
     
     return value;
 }
@@ -264,18 +324,24 @@ void CIATODEvent(CIA_t* cia){
     
     if(cia->todAlarm !=0){
         if(cia->todAlarm == cia->tod){
+            CIASync();
             cia->icr |= 4;
             if (cia->icrMask & 4) cia->icr |= 0x80;
+            ciaUpdateHorizon();
         }
     }
 }
 
 void CIAIndex(CIA_t* cia){
+    CIASync();
     cia->icr |= 0x10;                          // FLG (disk index pulse)
     if (cia->icrMask & 0x10) cia->icr |= 0x80;
+    ciaUpdateHorizon();
 }
 
 void keyboardInt(){
+    CIASync();
     CIAA.icr |= 0x08;                              // SP (serial port / keyboard)
     if (CIAA.icrMask & 0x08) CIAA.icr |= 0x80;
+    ciaUpdateHorizon();
 }

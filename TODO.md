@@ -392,6 +392,22 @@ appears only ~2 min 12 s later.
       drawing 1.33 → 0.67 M/s; xSysinfo drawn 21.6 → 18.9 s, Workbench boot
       51.6 → 47.5 s, RemGame 16.0 → 21.1 fps; idle −4 %. Only the 68000-side
       files in RAM: 20.3 s / 49.5 s / 18.5 fps, idle unchanged.
+- [x] **Batched core-1 messages.** Consecutive bitplane blocks of a row go
+      to core 1 as one HIRES/LORES message of up to 16 blocks (count in
+      header bits 24..27), flushed before palette, sprite and frame messages.
+      The largest message is now 49 words (ring skip point and core 1's
+      wrap copy follow it).
+- [x] **Batched CIA timers.** `CIAClock()` counts E-clock ticks and runs
+      `CIAExecute()` only at the next event tick (`ciaHorizon`: underflow,
+      forced load, IRQ to raise); `CIASync()` applies pending ticks before
+      CIA register access and external ICR events. Identical native frames
+      and logs. With the batched messages, NTSC 5 cycles/slot: xSysinfo
+      drawn 18.5 → 17.5 s, Workbench boot 47.5 → 44.3 s, idle 33.2 → 35.4
+      (xSysinfo) and 34.0 → 36.0 (Workbench), RemGame 21.1 → 21.8 fps.
+- [ ] **CIA timer B in "count timer A underflows" mode never underflows.**
+      `CIAExecute()` tests `tb == 65535` after the decrement (the normal mode
+      tests `-1`), so it never reloads or raises its interrupt. Fixing it
+      changes emulated behaviour; check the regressions then.
 - [ ] **Hot 68000 opcode handlers in SRAM** (~5-10 KB of the most used
       handlers, e.g. MOVEM, MOVE, Bcc, DBF) with per-function sections; the
       handler files are too large to move whole.

@@ -53,6 +53,22 @@ void CIAWrite(CIA_t*,int,uint8_t);//Data,byte address,data
 uint8_t CIARead(CIA_t*,int);      //Data,byteaddress
 void CIAExecute(CIA_t*);      //returns INTREQ value if interupt, or 0 for nothing.
 
+// Batched E clock. Most ticks only count the running timers down, so
+// CIAClock() just counts them in ciaPending; both CIAs are brought up to date
+// (CIASync()) only when the CPU or an external event touches them, and the
+// full CIAExecute() runs only on the tick at ciaHorizon, the first one that
+// can do more than count down (an underflow, a forced load or an interrupt
+// to raise). Timing is identical to calling CIAExecute() on every tick.
+extern int ciaPending;  // ticks not yet applied, always < ciaHorizon
+extern int ciaHorizon;  // ticks from the applied state to the next event
+void CIACatchUp(void);
+void CIASync(void);
+static inline void CIAClock(int ticks){
+    ciaPending += ticks;
+    if (ciaPending >= ciaHorizon)
+        CIACatchUp();
+}
+
 void CIATODEvent(CIA_t*);         //called every TOD event
 
 void CIAIndex(CIA_t*);      //called every floppy disk rotation

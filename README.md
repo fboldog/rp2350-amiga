@@ -190,8 +190,11 @@ works, positions run over twice the ring size), which holds a whole frame's
 messages across the wait for the display swap: on idle Workbench every
 emulated frame is shown (PAL 28.0 of 28.0 frames/s, was 21.7 of 28.2 with
 24 KB and 21.9 with 32 KB; NTSC 33.6 of 33.6, was 32.5 with 44 KB; larger
-rings change nothing). Core 1 reads each message in place and copies out
-only one that wraps. Everything core 1
+rings change nothing). Consecutive bitplane blocks of one row travel as a
+single message of up to 16 blocks, sent before any palette change, sprite
+or frame boundary, so core 0 pushes once per run and core 1 dispatches once
+per run instead of per block. Core 1 reads each message in place and copies
+out only one that may wrap. Everything core 1
 executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
 traffic once delayed the line interrupt past its deadline and stopped the
 DMA chain.
@@ -201,7 +204,8 @@ core 1 switches to the pending frame at line 0. A finished frame is never
 taken back. If it has not been shown when the next frame starts, core 1
 waits for the swap (≤ one display frame) while core 0 keeps queueing, and
 skips drawing that frame once core 0 can no longer queue the largest message
-(17 words), so the emulator barely waits for the display.
+(49 words: a run of 16 lores blocks), so the emulator barely waits for the
+display.
 `OMEGA_RING_SKIP_WORDS` sets the skip point; `RING_WORDS` never skips and
 locks emulation to the display cadence (PAL idle Workbench 25.0/25.0
 emulated/shown frames/s instead of 29.4/20.6). `dvi_frames_shown` counts the frames actually shown.
@@ -376,6 +380,18 @@ Workbench 1.3 boot 51.6 → 47.5 s, RemGame 16.0 → 21.1 fps; idle screens
 lose ~4 % (xSysinfo 34.5 → 33.2, Workbench 35.6 → 34.0 fps), as that code
 was already cached and now shares SRAM with core 1 and the HDMI DMA. The
 opcode handler files (65-88 KB each) stay in flash.
+
+The CIA timers are clocked in batches (`CIAClock()` in `omega/CIA.h`). Most
+E-clock ticks only count the running timers down, so they are just counted;
+the full `CIAExecute()` runs only on the tick where something happens (a
+timer underflow, a forced load, an interrupt to raise), and the counted
+ticks are applied before every CPU access to a CIA register and before a
+keyboard, disk-index or TOD-alarm event. Timer values and interrupt timing
+are unchanged (identical native frames and logs). Together with the
+batched bitplane messages above, on the board (NTSC, 5 cycles/slot):
+xSysinfo drawn 18.5 → 17.5 s, Workbench 1.3 boot 47.5 → 44.3 s, idle
+xSysinfo 33.2 → 35.4 and Workbench 34.0 → 36.0 frames/s, RemGame 21.1 →
+21.8 fps.
 
 ## Sprites
 

@@ -74,8 +74,8 @@ int hostDirectActive;             // mirrors direct_frame for DMA.c
 
 enum {
     MSG_BEGIN = 1,   // + 2 words: frame layout
-    MSG_HIRES,       // + 2 words: planes 1..4
-    MSG_LORES,       // + 3 words: planes 1..6; extra = 1 for HAM
+    MSG_HIRES,       // + 2 words per block: planes 1..4
+    MSG_LORES,       // + 3 words per block: planes 1..6; extra bit 0 = HAM
     MSG_PALETTE,     // + 16 words: 32 colours, 0x0RGB, two per word
     MSG_END,         // + 1 word: border colour (0x0RGB)
     MSG_SPRITE,      // + 1-2 words: sprite planes; extra = base | att | behind
@@ -84,6 +84,13 @@ enum {
 #define MSG_HEADER(type, row, x, extra) \
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
      (uint32_t)(extra) << 23)
+// HIRES and LORES messages carry a run of 1..MSG_RUN_MAX consecutive blocks
+// of one row (block i at x + i * block width): count - 1 sits in header
+// bits 24..27, above the HAM bit. One message per run instead of per block
+// saves a ring push on core 0 and a dispatch on core 1 for each block.
+#define MSG_RUN_MAX 16
+#define MSG_RUN_SHIFT 24
+#define MSG_MAX_WORDS (1 + 3 * MSG_RUN_MAX) // a run of lores blocks
 
 // Core 1 waits for a pending frame to be shown while core 0 keeps queueing;
 // when the ring is full core 0 stalls until the swap. A bigger ring lets
@@ -99,12 +106,12 @@ enum {
 #define RING_SPAN (2u * RING_WORDS)
 // Ring fill at which core 1 stops waiting for the pending frame's swap and
 // skips drawing the new frame. The default skips once core 0 can no longer
-// queue the largest message (17 words), i.e. just before it would stall;
+// queue the largest message (MSG_MAX_WORDS), i.e. just before it would stall;
 // RING_WORDS never skips, which locks emulation to the display cadence (PAL
 // idle Workbench: 25.0/25.0 emulated/shown instead of ~29.5/20.5, as a frame
 // is several times the ring and cannot absorb the wait for the swap).
 #ifndef OMEGA_RING_SKIP_WORDS
-#define OMEGA_RING_SKIP_WORDS (RING_WORDS - 17u)
+#define OMEGA_RING_SKIP_WORDS (RING_WORDS - MSG_MAX_WORDS)
 #endif
 static uint32_t ring[RING_WORDS];
 static volatile uint32_t ring_head; // produce position (core 0)
@@ -124,6 +131,12 @@ static inline uint32_t ringSlot(uint32_t pos) {
     return pos >= RING_WORDS ? pos - RING_WORDS : pos;
 }
 static uint32_t palette_generation_sent = ~0u;
+
+// The run being collected on core 0: run[0] is its header, run_words its
+// length so far (0: none), run_next_x the x its next block must have.
+static uint32_t run[MSG_MAX_WORDS];
+static uint32_t run_words;
+static int run_next_x;
 
 // ── Core 0: producer ──────────────────────────────────────────────────────
 static inline void ringPush(const uint32_t *words, uint32_t count) {
@@ -148,6 +161,35 @@ static inline void ringPush(const uint32_t *words, uint32_t count) {
     __sev(); // wake core 1 from __wfe()
 }
 
+static inline void runFlush(void) {
+    if (run_words) {
+        ringPush(run, run_words);
+        run_words = 0;
+    }
+}
+
+// Appends a block at x (`words` plane words) to the run, first sending the
+// run if the block does not continue it. header has x = 0 and count 1.
+static inline void runAppend(uint32_t header, int x, int width,
+                             const uint32_t *planes, uint32_t words) {
+    const uint32_t count_mask = (uint32_t)(MSG_RUN_MAX - 1) << MSG_RUN_SHIFT;
+    const uint32_t key_mask = ~(count_mask | MSG_HEADER(0, 0, 0x3ff, 0));
+    if (run_words && (x != run_next_x ||
+                      (run[0] & key_mask) != header ||
+                      (run[0] & count_mask) == count_mask))
+        runFlush();
+    if (run_words) {
+        run[0] += 1u << MSG_RUN_SHIFT;
+    } else {
+        run[0] = header | MSG_HEADER(0, 0, x, 0);
+        run_words = 1;
+    }
+    for (uint32_t i = 0; i < words; ++i)
+        run[run_words + i] = planes[i];
+    run_words += words;
+    run_next_x = x + width;
+}
+
 // internal.palette holds OCS2ARGB() colours: the high nibbles are the
 // original 0x0RGB register value.
 static inline uint32_t argbToOcs(uint32_t argb) {
@@ -158,6 +200,7 @@ static inline void hostDirectSyncPalette(void) {
     if (internal.paletteGeneration == palette_generation_sent)
         return;
     palette_generation_sent = internal.paletteGeneration;
+    runFlush(); // the blocks before the change use the old palette
     uint32_t msg[17];
     msg[0] = MSG_HEADER(MSG_PALETTE, 0, 0, 0);
     for (int i = 0; i < 16; ++i)
@@ -167,6 +210,7 @@ static inline void hostDirectSyncPalette(void) {
 }
 
 static void hostDirectBegin(void) {
+    runFlush();
     const bool full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
     // Narrow layouts that need hostPresentFrame()'s wrapped-fetch
     // reconstruction (pixels moved between lines) keep the ARGB path.
@@ -220,24 +264,22 @@ static void hostDirectBegin(void) {
 void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
                      uint16_t p3, uint16_t p4) {
     hostDirectSyncPalette();
-    const uint32_t msg[3] = {
-        MSG_HEADER(MSG_HIRES, row, x, 0),
+    const uint32_t planes[2] = {
         p1 | (uint32_t)p2 << 16,
         p3 | (uint32_t)p4 << 16,
     };
-    ringPush(msg, count_of(msg));
+    runAppend(MSG_HEADER(MSG_HIRES, row, 0, 0), x, 16, planes, 2);
 }
 
 void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
                      uint16_t p4, uint16_t p5, uint16_t p6, int ham) {
     hostDirectSyncPalette();
-    const uint32_t msg[4] = {
-        MSG_HEADER(MSG_LORES, row, x, ham ? 1 : 0),
+    const uint32_t planes[3] = {
         p1 | (uint32_t)p2 << 16,
         p3 | (uint32_t)p4 << 16,
         p5 | (uint32_t)p6 << 16,
     };
-    ringPush(msg, count_of(msg));
+    runAppend(MSG_HEADER(MSG_LORES, row, 0, ham ? 1 : 0), x, 32, planes, 3);
 }
 
 void hostDirectSprite(int row, int x, int colour_base, int attached,
@@ -247,6 +289,7 @@ void hostDirectSprite(int row, int x, int colour_base, int attached,
     if (field < 0 || field > 0x3ff || row < 0 || row > 0x1ff)
         return;
     hostDirectSyncPalette();
+    runFlush(); // sprites go over the blocks already sent
     const uint32_t msg[3] = {
         MSG_HEADER(MSG_SPRITE, row, field,
                    (uint32_t)colour_base | (uint32_t)(attached != 0) << 5 |
@@ -259,6 +302,7 @@ void hostDirectSprite(int row, int x, int colour_base, int attached,
 
 static void hostDirectFinish(void) {
     hostDirectSyncPalette();
+    runFlush();
     const uint32_t msg[2] = {
         MSG_HEADER(MSG_END, 0, 0, 0),
         argbToOcs(internal.palette[0]),
@@ -578,13 +622,14 @@ void C1_FUNC(hostCore1Loop)(void) {
         while ((head = __atomic_load_n(&ring_head, __ATOMIC_ACQUIRE)) == tail)
             __wfe();
         while (tail != head) {
-            // Messages are read in place; only one that wraps around the
-            // end of the ring is first copied out (17 words: the longest).
+            // Messages are read in place; only one that may wrap around
+            // the end of the ring is first copied out (MSG_MAX_WORDS: the
+            // longest).
             uint32_t slot = ringSlot(tail);
             const uint32_t *msg = &ring[slot];
-            uint32_t wrapped[17];
-            if (slot + 17u > RING_WORDS) {
-                for (uint32_t i = 0; i < 17u; ++i) {
+            uint32_t wrapped[MSG_MAX_WORDS];
+            if (slot + MSG_MAX_WORDS > RING_WORDS) {
+                for (uint32_t i = 0; i < MSG_MAX_WORDS; ++i) {
                     wrapped[i] = ring[slot];
                     if (++slot == RING_WORDS)
                         slot = 0;
@@ -597,14 +642,22 @@ void C1_FUNC(hostCore1Loop)(void) {
             const int x = (int)((header >> 13) & 0x3ffu);
             uint32_t length;
             switch (type) {
-            case MSG_HIRES:
-                c1Hires(row, x, msg[1], msg[2]);
-                length = 3;
+            case MSG_HIRES: {
+                const int count = (int)(header >> MSG_RUN_SHIFT & 0xfu) + 1;
+                for (int i = 0; i < count; ++i)
+                    c1Hires(row, x + 16 * i, msg[1 + 2 * i], msg[2 + 2 * i]);
+                length = 1 + 2 * (uint32_t)count;
                 break;
-            case MSG_LORES:
-                c1Lores(row, x, msg[1], msg[2], msg[3], (header >> 23) & 1u);
-                length = 4;
+            }
+            case MSG_LORES: {
+                const int count = (int)(header >> MSG_RUN_SHIFT & 0xfu) + 1;
+                const bool ham = (header >> 23) & 1u;
+                for (int i = 0; i < count; ++i)
+                    c1Lores(row, x + 32 * i, msg[1 + 3 * i], msg[2 + 3 * i],
+                            msg[3 + 3 * i], ham);
+                length = 1 + 3 * (uint32_t)count;
                 break;
+            }
             case MSG_PALETTE:
                 c1Palette(&msg[1]);
                 length = 17;

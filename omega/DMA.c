@@ -919,11 +919,14 @@ void dma_run(int slots){
                     internal.hPos = next;
                     slots -= k - 1;
                     chipset.vhposr = internal.vPos << 8 | (next - 1);
-                    internal.eClockCounter -= k;
-                    while (internal.eClockCounter < 0) {
-                        internal.eClockCounter += 5;
-                        CIAExecute(&CIAA);
-                        CIAExecute(&CIAB);
+                    // The E clock ticks every fifth slot.
+                    int counter = internal.eClockCounter - k;
+                    if (counter < 0) {
+                        const int ticks = (4 - counter) / 5;
+                        internal.eClockCounter = counter + 5 * ticks;
+                        CIAClock(ticks);
+                    } else {
+                        internal.eClockCounter = counter;
                     }
                     continue;
                 }
@@ -942,11 +945,10 @@ void dma_run(int slots){
             dmaFetchWindowComplete();
 
         // CIA timers: the E clock ticks every fifth slot (eclock_execute(),
-        // inlined).
+        // inlined; see CIAClock()).
         if (--internal.eClockCounter < 0) {
             internal.eClockCounter = 4;
-            CIAExecute(&CIAA);
-            CIAExecute(&CIAB);
+            CIAClock(1);
         }
 
         //end of line reached! 227 colour clocks have executed
