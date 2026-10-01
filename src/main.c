@@ -55,13 +55,17 @@
 
 // ── PAL timing ────────────────────────────────────────────────────────────
 // 313 scanlines × 227 DMA cycles/line × 2 (odd+even) ≈ 142 246 cycles/frame
-// We batch 200 DMA+CPU pairs per main-loop iteration, matching the original.
-#define DMA_CPU_BATCH 200
+// The 68000 runs in slices of OMEGA_CPU_SLICE_SLOTS DMA slots
+// (-DOMEGA_CPU_SLICE_SLOTS=<n>): longer slices cost fewer Musashi entries per
+// instruction, shorter ones let the CPU see the beam move in finer steps.
+// The CPU:DMA cycle ratio is the same either way. The main loop handles
+// about 200 slots per iteration (whole slices) between input polls.
 #ifndef OMEGA_CPU_SLICE_SLOTS
-#define OMEGA_CPU_SLICE_SLOTS 4
+#define OMEGA_CPU_SLICE_SLOTS 8
 #endif
-_Static_assert(DMA_CPU_BATCH % OMEGA_CPU_SLICE_SLOTS == 0,
-               "the DMA batch must hold whole CPU slices");
+#define DMA_CPU_BATCH \
+    (((200 + OMEGA_CPU_SLICE_SLOTS - 1) / OMEGA_CPU_SLICE_SLOTS) * \
+     OMEGA_CPU_SLICE_SLOTS)
 // 68000 cycles per DMA slot (colour clock). A real A500 runs 2 (7.09 MHz
 // CPU, 3.55 MHz colour clock); Omega used 16. Set with
 // -DOMEGA_CPU_CYCLES_PER_SLOT=<n> (CMakeLists.txt); the default here covers

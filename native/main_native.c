@@ -217,10 +217,20 @@ int main(int argc, char **argv) {
 #ifdef HAVE_SDL2
         if (sdl_display_poll()) break;
 #endif
+#ifdef OMEGA_NATIVE_SLICE
+        // Test aid: run DMA and CPU in slices of OMEGA_NATIVE_SLICE slots, as
+        // the RP2350 main loop does, to exercise multi-slot dma_run() paths
+        // (e.g. A/B against -DOMEGA_NO_SLOT_SKIP). Not used by regression.sh.
+        for (int i = 0; i < 200; i += OMEGA_NATIVE_SLICE) {
+            dma_run(OMEGA_NATIVE_SLICE);
+            m68k_execute(16 * OMEGA_NATIVE_SLICE);
+        }
+#else
         for (int i = 0; i < 200; ++i) {
             dma_execute();
             cpu_execute();
         }
+#endif
 
         // Kickstart only accepts a disk-change once the drive has finished
         // ID mode (df[0].idMode == 0).  Keep trying from insertAt onward

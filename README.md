@@ -344,7 +344,25 @@ misbehaves. At the real ratio, busy-wait loops cost 8x less host time (RemGame
 Workbench takes its real Amiga time (Workbench 1.3 boot ~98 s instead of
 ~61 s). Chip-bus wait states are not modelled. The native runner keeps its
 own 16-cycle loop. Board helper scripts are in `tooling/` (frame capture,
-speed, boot timing, DF0 slot selection).
+speed, boot timing, DF0 slot selection, profiling).
+
+The 68000 runs in slices of `OMEGA_CPU_SLICE_SLOTS` DMA slots (default 8,
+`-DOMEGA_CPU_SLICE_SLOTS=<n>`): longer slices enter Musashi less often, but
+the CPU then sees the beam move in coarser steps. 8 is the longest that keeps
+RemGame's beam racing correct; 16 and 32 break its sprite bands.
+
+`dma_run()` jumps over runs of DMA slots that would do nothing: while the
+Copper waits for a position it has not reached (or is off) and the blitter is
+idle, slots that only offer themselves to the Copper or blitter (including
+those of disabled bitplanes, sprite slots with sprite DMA off, and bitplane
+slots outside the fetch window) are skipped in one step, ticking only the
+E clock. The result is identical to stepping each slot (native frames
+match with and without it, per slot and in 8-slot batches);
+`-DOMEGA_SLOT_SKIP=OFF` disables it.
+
+Measured on the board (NTSC, 5 cycles/slot): xSysinfo boot-to-drawn 28.8 →
+21.6 s, Workbench 1.3 boot 64.3 → 51.6 s, idle xSysinfo 31.7 → 34.5 and
+Workbench 31.6 → 35.6 frames/s (skip plus 8-slot slices vs neither).
 
 ## Sprites
 

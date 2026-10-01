@@ -735,6 +735,68 @@ static int lineRowRotation;      // omegaDdfRowRotation(DDFSTRT, DDFSTOP)
 // the registers listed in DMA.h is written, so it is recomputed then instead
 // of on every slot. OR-ing unchanged plane masks again is a no-op, so the
 // accumulated masks are identical to per-slot recomputation.
+// ── Idle slot skipping ──────────────────────────────────────────────────────
+// Most slots only offer themselves to the Copper and the blitter. While the
+// Copper waits for a beam position not yet reached (or is off or frozen) and
+// the blitter is idle, those slots do nothing, so dma_run() jumps over them
+// in one step and only ticks the E clock. slotNext[h] is the first slot >= h
+// that can do anything else: bitplane slots inside the fetch window, sprite
+// slots with sprite DMA on, audio slots of enabled channels, disk slots
+// (DSKLEN is not tracked), the fetch-window end and the last slot of a line.
+#define SLOT_LAST 0xE3
+static uint8_t slotNext[SLOT_LAST + 1];
+static uint32_t slotNextKey = ~0u;
+
+static int slotIsActive(void (*f)(), int h) {
+    if (h >= SLOT_LAST || h == bitplaneLine.lastCycle)
+        return 1;
+    if (f == evenCycle || f == oddCycle || f == dramCycle)
+        return 0;
+    if (f == spriteCycle)
+        return (chipset.dmaconr & 0x220) == 0x220 &&
+               internal.vPos >= OMEGA_SPRITE_FIRST_LINE;
+    if (f == audio0Cycle) return (chipset.dmacon & 0x201) == 0x201;
+    if (f == audio1Cycle) return (chipset.dmacon & 0x202) == 0x202;
+    if (f == audio2Cycle) return (chipset.dmacon & 0x204) == 0x204;
+    if (f == audio3Cycle) return (chipset.dmacon & 0x208) == 0x208;
+    if (f == loresPlane1 || f == hiresPlane1)
+        return lineBitplaneWindow && h >= chipset.ddfstrt &&
+               h <= bitplaneLine.lastCycle;
+    // A disabled plane's slot only clears its data latch (done once per line
+    // in dmaUpdateLineState()) and offers the slot to the blitter.
+    int plane = f == plane2 ? 2 : f == plane3 ? 3 : f == plane4 ? 4 :
+                f == plane5 ? 5 : f == plane6 ? 6 : 0;
+    if (plane)
+        return lineBitplaneWindow && h >= chipset.ddfstrt &&
+               h <= bitplaneLine.lastCycle &&
+               (internal.bitplaneMask >> (plane - 1)) & 1;
+    return 1;   // anything else always runs
+}
+
+static void slotNextUpdate(void) {
+    const int hires = (chipset.bplcon0 & 0x8000) != 0;
+    const int sprites = (chipset.dmaconr & 0x220) == 0x220 &&
+                        internal.vPos >= OMEGA_SPRITE_FIRST_LINE;
+    const uint32_t key = (uint32_t)hires | (uint32_t)lineBitplaneWindow << 1 |
+                         (uint32_t)sprites << 2 |
+                         (uint32_t)(chipset.dmacon & 0xf) << 3 |
+                         (uint32_t)(chipset.ddfstrt & 0xff) << 7 |
+                         (uint32_t)(bitplaneLine.lastCycle & 0x1ff) << 15 |
+                         (uint32_t)(internal.bitplaneMask & 0x3f) << 24;
+    if (key == slotNextKey)
+        return;
+    slotNextKey = key;
+    void (**table)() = hires ? DMAHires : DMALores;
+    int next = SLOT_LAST;
+    for (int h = SLOT_LAST; h >= 0; --h) {
+        if (slotIsActive(table[h], h))
+            next = h;
+        slotNext[h] = (uint8_t)next;
+    }
+}
+
+static int dmaIdleUntil(int h);
+
 static void dmaUpdateLineState(void) {
     uint8_t enabledPlanes = enabledBitplaneMask();
     int dmaEnabled = (chipset.dmaconr & 0x300) == 0x300;
@@ -760,6 +822,17 @@ static void dmaUpdateLineState(void) {
         bitplaneLine.lastCycle =
             chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
     }
+    // Disabled planes' slots may be skipped (see slotIsActive()); clear their
+    // data latches here, as those slots would.
+    if (lineBitplaneWindow) {
+        const unsigned mask = internal.bitplaneMask;
+        if (!(mask & 0x02)) chipset.bpl2dat = 0;
+        if (!(mask & 0x04)) chipset.bpl3dat = 0;
+        if (!(mask & 0x08)) chipset.bpl4dat = 0;
+        if (!(mask & 0x10)) chipset.bpl5dat = 0;
+        if (!(mask & 0x20)) chipset.bpl6dat = 0;
+    }
+    slotNextUpdate();
     dmaLineStateDirty = 0;
 }
 
@@ -830,6 +903,33 @@ void dma_run(int slots){
         chipset.vhposr |= internal.hPos;
         if (dmaLineStateDirty)
             dmaUpdateLineState();
+
+        // Jump over slots that would do nothing (see slotNext[]).
+        // -DOMEGA_NO_SLOT_SKIP disables it (A/B comparisons).
+#ifndef OMEGA_NO_SLOT_SKIP
+        {
+            const int h = internal.hPos;
+            int next = slotNext[h];
+            if (next > h) {
+                if (next > h + slots + 1)
+                    next = h + slots + 1;
+                next = dmaIdleUntil(next);
+                const int k = next - h;
+                if (k > 0) {
+                    internal.hPos = next;
+                    slots -= k - 1;
+                    chipset.vhposr = internal.vPos << 8 | (next - 1);
+                    internal.eClockCounter -= k;
+                    while (internal.eClockCounter < 0) {
+                        internal.eClockCounter += 5;
+                        CIAExecute(&CIAA);
+                        CIAExecute(&CIAB);
+                    }
+                    continue;
+                }
+            }
+        }
+#endif
 
         // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
         if(chipset.bplcon0 & 0x8000){
@@ -908,6 +1008,33 @@ void oddCycle(void){
     
     //A Free slot for CPU... but the CPU isn't currently bound to the DMA timing
     // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
+}
+
+// Returns the first slot in [hPos, limit) where the Copper or the blitter
+// may act on this line, or limit if neither can before it. Conservative:
+// any doubt returns hPos (no skip).
+static int dmaIdleUntil(int limit) {
+    const int h = internal.hPos;
+    if (blitterState != 0 || (chipset.dmaconr & 0x4240) == 0x4240)
+        return h;
+    if ((chipset.dmaconr & 0x280) != 0x280 || internal.copperCycle == 4)
+        return limit;
+    if (internal.copperCycle != 3 || copperWaitReached())
+        return h;
+    // Waiting. With the standard horizontal compare mask the masked beam
+    // grows with hPos, so the wait completes at its horizontal position if
+    // it completes on this line at all.
+    if ((internal.IR2 & 0xfe) != 0xfe)
+        return h;
+    if (copperWaitNextBank && (internal.vPos & 0xff) == 0xff)
+        return limit;
+    const uint32_t lineEnd = ((uint32_t)(internal.vPos & 0xff) << 8) | SLOT_LAST;
+    if ((lineEnd & internal.IR2) < copperWaitPosition)
+        return limit;               // not before the next line
+    const int waitH = (int)(copperWaitPosition & 0xfe);
+    if (waitH <= h)
+        return h;
+    return waitH < limit ? waitH : limit;
 }
 
 void dramCycle(void){

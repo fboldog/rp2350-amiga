@@ -371,6 +371,18 @@ appears only ~2 min 12 s later.
       44.1 s; idle emulated vblanks/s PAL 26.9 → 29.8, NTSC 31.9 → 35.5.
       Faster emulation fills the ring sooner, so NTSC shown fell 27.1 → 24.5
       until the skip point moved to a full ring (above).
+- [x] **Per-slot overhead, part 3: idle-slot skip, 8-slot CPU slices.**
+      `dma_run()` jumps over slots that would do nothing while the Copper
+      waits and the blitter is idle (`slotNext[]`, rebuilt from
+      `dmaUpdateLineState()` when its inputs change; disabled planes' latches
+      are cleared there). Identical native frames with and without it.
+      `OMEGA_CPU_SLICE_SLOTS` default 4 → 8 (16/32 break RemGame). NTSC,
+      5 cycles/slot: xSysinfo drawn 28.8 → 21.6 s, Workbench boot 64.3 →
+      51.6 s, idle 31.7 → 34.5 (xSysinfo) and 31.6 → 35.6 (Workbench).
+      Remaining idle cost is mostly real work: hires bitplane slots, sprite
+      slots (sprite DMA on), the per-slot loop and CIA stepping.
+- [ ] **Audio DMA never runs.** `audioNCycle()` tests `chipset.dmacon`, but
+      DMACON writes update `chipset.dmaconr`; audio is not emulated yet anyway.
 - [ ] **SRAM window over low chip RAM** (vectors, stacks, hot Exec data) once
       SRAM is available; one compare per access saves a QSPI round trip.
 

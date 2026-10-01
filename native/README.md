@@ -469,3 +469,10 @@ operation entirely segment-based. All presentation paths also use one shared
 | `sdl_shim.h`      | no-op `SDL_AtomicGet/Set` so `waitFreeSlot()` links without SDL |
 | `build.sh`        | gcc build; auto-detects SDL2, compiles `display_sdl.c` without the shim |
 | `ppm2png.py`      | dependency-free P6-PPM → PNG |
+
+`main_native.c` normally steps one DMA slot and then the CPU. Building with
+`-DOMEGA_NATIVE_SLICE=<n>` runs them in `n`-slot batches like the RP2350 main
+loop, which exercises multi-slot `dma_run()` paths; compare against a build
+with `-DOMEGA_NO_SLOT_SKIP` to check that skipping idle slots changes nothing.
+The regression baselines use the default per-slot loop.
+
