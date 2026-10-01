@@ -415,6 +415,14 @@ appears only ~2 min 12 s later.
       (8- and 64-slot A/B). NTSC 5 cycles/slot: xSysinfo drawn 17.5 →
       15.4 s, Workbench boot 44.3 → 36.9 s, idle 35.4 → 43.8 (xSysinfo) and
       36.0 → 48.0 (Workbench), RemGame 21.8 → 24.8 fps.
+- [x] **Block runs written in place.** Runs are collected in the ring past
+      `ring_head` and published by advancing it (staging buffer only near
+      the ring's end). In-place writing alone gave ~1 %: the inlined
+      palette upload and staged push made `hostDirectHires()` save 9
+      registers and set up a 100-byte frame per block; those paths are now
+      out of line. NTSC 5 cycles/slot: xSysinfo drawn 15.4 → 15.2 s, idle
+      43.8 → 45.0 (xSysinfo) and 48.0 → 49.6 (Workbench), RemGame 24.8 →
+      25.1 fps.
 - [ ] **Unreproduced core-0 hard fault.** Seen once (2026-10-01, `main`
       7032b46): core 0 in `hardfault_report` 7 s after a `disk.sh 2` reset,
       following a long Workbench idle; no UART log was running. Not seen in

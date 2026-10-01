@@ -193,8 +193,10 @@ emulated frame is shown (PAL 28.0 of 28.0 frames/s, was 21.7 of 28.2 with
 rings change nothing). Consecutive bitplane blocks of one row travel as a
 single message of up to 16 blocks, sent before any palette change, sprite
 or frame boundary, so core 0 pushes once per run and core 1 dispatches once
-per run instead of per block. Core 1 reads each message in place and copies
-out only one that may wrap. Everything core 1
+per run instead of per block. Core 0 collects a run in place in the ring
+just past `ring_head` and publishes it by advancing `ring_head`; only a run
+that could reach the ring's end goes through a staging buffer. Core 1 reads
+each message in place and copies out only one that may wrap. Everything core 1
 executes must live in RAM: a flash fetch stalled behind core 0's PSRAM
 traffic once delayed the line interrupt past its deadline and stopped the
 DMA chain.
@@ -405,6 +407,12 @@ per slot and in 8- and 64-slot batches. Board, NTSC, 5 cycles/slot:
 xSysinfo drawn 17.5 → 15.4 s, Workbench 1.3 boot 44.3 → 36.9 s, idle
 xSysinfo 35.4 → 43.8 and Workbench 36.0 → 48.0 frames/s, RemGame 21.8 →
 24.8 fps.
+
+Writing block runs straight into the ring, with the producers' rare paths
+(palette upload, staged push, run start) kept out of line so each block
+costs no large stack frame or register saves, adds: xSysinfo drawn 15.4 →
+15.2 s, idle xSysinfo 43.8 → 45.0 and Workbench 48.0 → 49.6 frames/s,
+RemGame 24.8 → 25.1 fps (Workbench boot unchanged at 36.9 s).
 
 ## Sprites
 
