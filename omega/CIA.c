@@ -290,12 +290,13 @@ void CIAExecute(CIA_t* cia){
         }
     }
 
-    //Timer B - TA Underflow
-    if( (cia->crb & 97) == 65 && taUnderflow==1 ){
+    //Timer B - TA Underflow. INMODE 10 counts timer A underflows, 11 only
+    //while CNT is high; CNT is not emulated and idles high, so both count.
+    if( (cia->crb & 65) == 65 && taUnderflow==1 ){
         cia->tb -=1;
 
-        //underflow
-        if(cia->tb == 65535){
+        //underflow (tb is signed: -1, as in the modes above)
+        if(cia->tb == -1){
             cia->tb = cia->tbLatch;
 
             if( (cia->crb & 8) == 8){ //in oneshot mode clear the start bit.

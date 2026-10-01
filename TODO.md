@@ -404,10 +404,15 @@ appears only ~2 min 12 s later.
       and logs. With the batched messages, NTSC 5 cycles/slot: xSysinfo
       drawn 18.5 → 17.5 s, Workbench boot 47.5 → 44.3 s, idle 33.2 → 35.4
       (xSysinfo) and 34.0 → 36.0 (Workbench), RemGame 21.1 → 21.8 fps.
-- [ ] **CIA timer B in "count timer A underflows" mode never underflows.**
-      `CIAExecute()` tests `tb == 65535` after the decrement (the normal mode
-      tests `-1`), so it never reloads or raises its interrupt. Fixing it
-      changes emulated behaviour; check the regressions then.
+- [x] **CIA timer B in "count timer A underflows" mode never underflowed.**
+      `CIAExecute()` tested `tb == 65535` after the decrement, but `tb` is
+      signed and reaches -1, so the timer ran on below zero without reloading
+      or interrupting. Now tests -1 like the other modes, and INMODE 11 (TA
+      underflows while CNT is high) counts too, as CNT is not emulated and
+      idles high. None of the regression boots, xSysinfo or RemGame use the
+      mode (frames unchanged); checked with a CIA.c test harness (TA latch 9,
+      TB latch 2: TB interrupt on the third TA underflow, tick 30, same with
+      per-tick and batched clocking).
 - [ ] **Hot 68000 opcode handlers in SRAM** (~5-10 KB of the most used
       handlers, e.g. MOVEM, MOVE, Bcc, DBF) with per-function sections; the
       handler files are too large to move whole.
