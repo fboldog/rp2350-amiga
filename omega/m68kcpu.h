@@ -886,9 +886,17 @@ extern uint           m68ki_aerr_address;
 extern uint           m68ki_aerr_write_mode;
 extern uint           m68ki_aerr_fc;
 
+/* Places a helper the opcode handlers call in SRAM with them (see
+   m68khot.h); its copies stay in flash otherwise. */
+#if defined(PICO_BUILD) && OMEGA_HOT_OPCODES_IN_RAM
+#define M68KI_HOT(name) __attribute__((section(".time_critical." #name)))
+#else
+#define M68KI_HOT(name)
+#endif
+
 /* Read data immediately after the program counter */
-INLINE uint m68ki_read_imm_16(void);
-INLINE uint m68ki_read_imm_32(void);
+INLINE uint m68ki_read_imm_16(void) M68KI_HOT(m68ki_read_imm_16);
+INLINE uint m68ki_read_imm_32(void) M68KI_HOT(m68ki_read_imm_32);
 
 /* Read data with specific function code */
 INLINE uint m68ki_read_8_fc  (uint address, uint fc);
@@ -906,7 +914,7 @@ INLINE void m68ki_write_32_pd_fc(uint address, uint fc, uint value);
 /* Indexed and PC-relative ea fetching */
 INLINE uint m68ki_get_ea_pcdi(void);
 INLINE uint m68ki_get_ea_pcix(void);
-INLINE uint m68ki_get_ea_ix(uint An);
+INLINE uint m68ki_get_ea_ix(uint An) M68KI_HOT(m68ki_get_ea_ix);
 
 /* Operand fetching */
 INLINE uint OPER_AY_AI_8(void);

@@ -32,6 +32,8 @@ set(OMEGA_CPU_SLICE_SLOTS 8 CACHE STRING "DMA slots per 68000 execution slice")
 option(OMEGA_SLOT_SKIP "Skip runs of idle DMA slots in dma_run()" ON)
 option(OMEGA_HOT_CODE_IN_RAM
        "Run the emulator's hottest files (DMA, CIA, blitter, floppy, CPU loop, memory, host) from SRAM" ON)
+option(OMEGA_HOT_OPCODES_IN_RAM
+       "Run the hottest 68000 opcode handlers (omega/m68khot.h) and the main loop from SRAM" ON)
 if(NOT OMEGA_CPU_SLICE_SLOTS MATCHES "^[1-9][0-9]*$")
     message(FATAL_ERROR "OMEGA_CPU_SLICE_SLOTS must be a positive integer")
 endif()
@@ -133,6 +135,7 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_CPU_CYCLES_PER_SLOT=${OMEGA_CPU_CYCLES_PER_SLOT}
     OMEGA_CPU_SLICE_SLOTS=${OMEGA_CPU_SLICE_SLOTS}
     $<$<NOT:$<BOOL:${OMEGA_SLOT_SKIP}>>:OMEGA_NO_SLOT_SKIP=1>
+    OMEGA_HOT_OPCODES_IN_RAM=$<BOOL:${OMEGA_HOT_OPCODES_IN_RAM}>
     # Nothing on the device mallocs; keep the SDK's minimum heap so the SRAM
     # goes to the frames and the core-1 ring.
     PICO_HEAP_SIZE=0x100

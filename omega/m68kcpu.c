@@ -674,8 +674,23 @@ int m68k_execute(int num_cycles)
 
 			/* Read an instruction and call its handler */
 			REG_IR = m68ki_read_imm_16();
+#ifdef PICO_BUILD
+			{
+				/* Look the handler up once and take its cycles before the
+				   call: no handler changes REG_IR, but the compiler cannot
+				   know that and would repeat the lookup afterwards. */
+				const uint ir = REG_IR;
+				const uint index = m68ki_handler_index(ir);
+				uint cycles = m68ki_handler_cycles[index];
+				if(cycles & M68KI_CYCLES_IMMEDIATE_SHIFT)
+					cycles = (cycles & 0xff) + (((((ir >> 9) - 1) & 7) + 1) << 1);
+				m68ki_handler_ptrs[index]();
+				USE_CYCLES(cycles);
+			}
+#else
 			m68ki_call_instruction(REG_IR);
 			USE_CYCLES(CYC_INSTRUCTION_OF(REG_IR));
+#endif
 
 			/* Trace m68k_exception, if necessary */
 			m68ki_exception_if_trace(); /* auto-disable (see m68kcpu.h) */

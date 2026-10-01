@@ -1971,6 +1971,10 @@ void m68k_op_unpk_16_mm(void);
 /* Build the opcode handler table */
 void m68ki_build_opcode_table(void);
 
+#if defined(PICO_BUILD) && OMEGA_HOT_OPCODES_IN_RAM
+#include "m68khot.h"
+#endif
+
 #ifdef PICO_BUILD
 /* Two-level opcode -> handler index table. The 65536 opcodes fall into 1024
    blocks of 64 (the effective-address field), and only ~245 distinct

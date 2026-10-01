@@ -295,6 +295,40 @@ static void prepare_hdmi_clock(void) {
 }
 #endif
 
+// ── Main loop ─────────────────────────────────────────────────────────────
+// In SRAM with the hot opcode handlers (OMEGA_HOT_OPCODES_IN_RAM): from flash
+// it competed for the XIP cache and called dma_run()/m68k_execute() through
+// veneers.
+#if OMEGA_HOT_OPCODES_IN_RAM
+#define OMEGA_LOOP_FUNC(name) __not_in_flash_func(name)
+#else
+#define OMEGA_LOOP_FUNC(name) name
+#endif
+static void __attribute__((noreturn, noinline))
+OMEGA_LOOP_FUNC(emulation_loop)(void) {
+    for (;;) {
+        // Run the 68000 in slices of several DMA slots: entering Musashi for
+        // 16 cycles every slot spent more time in call overhead than in the
+        // 1-3 instructions it ran. The CPU:DMA cycle ratio is unchanged; the
+        // CPU just observes chipset state at slice granularity.
+        // Musashi finishes whole instructions, so it can overrun the budget;
+        // the overrun is carried into the next slice to keep the ratio exact.
+        static int cpu_cycle_balance;
+        for (int i = 0; i < DMA_CPU_BATCH; i += OMEGA_CPU_SLICE_SLOTS) {
+            dma_run(OMEGA_CPU_SLICE_SLOTS);
+            cpu_cycle_balance +=
+                OMEGA_CPU_CYCLES_PER_SLOT * OMEGA_CPU_SLICE_SLOTS;
+            if (cpu_cycle_balance > 0)
+                cpu_cycle_balance -= m68k_execute(cpu_cycle_balance);
+        }
+#if OMEGA_ENABLE_FLASH_FLOPPY
+        disk_button_poll();
+#endif
+        // hostDisplay is called exactly once per VBL by the DMA engine.  It
+        // converts the intermediate beam raster into the 640x400 output.
+    }
+}
+
 int main(void) {
     // 1. Clock and stdio. Normal builds retain the SDK's 150 MHz startup
     // clock; HDMI builds select OMEGA_SYS_CLK_KHZ, drive HSTX from PLL_USB
@@ -371,28 +405,7 @@ int main(void) {
 
     printf("Entering emulation loop\n");
 
-    // ── Main loop ─────────────────────────────────────────────────────────
-    for (;;) {
-        // Run the 68000 in slices of several DMA slots: entering Musashi for
-        // 16 cycles every slot spent more time in call overhead than in the
-        // 1-3 instructions it ran. The CPU:DMA cycle ratio is unchanged; the
-        // CPU just observes chipset state at slice granularity.
-        // Musashi finishes whole instructions, so it can overrun the budget;
-        // the overrun is carried into the next slice to keep the ratio exact.
-        static int cpu_cycle_balance;
-        for (int i = 0; i < DMA_CPU_BATCH; i += OMEGA_CPU_SLICE_SLOTS) {
-            dma_run(OMEGA_CPU_SLICE_SLOTS);
-            cpu_cycle_balance +=
-                OMEGA_CPU_CYCLES_PER_SLOT * OMEGA_CPU_SLICE_SLOTS;
-            if (cpu_cycle_balance > 0)
-                cpu_cycle_balance -= m68k_execute(cpu_cycle_balance);
-        }
-#if OMEGA_ENABLE_FLASH_FLOPPY
-        disk_button_poll();
-#endif
-        // hostDisplay is called exactly once per VBL by the DMA engine.  It
-        // converts the intermediate beam raster into the 640x400 output.
-    }
+    emulation_loop();
 
     // Unreachable
     return 0;

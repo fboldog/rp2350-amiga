@@ -11,6 +11,7 @@ non-halting SWD memory reads, so HDMI scanout keeps running.
 | `boot.py <elf> <256\|240> [limit]` | Time from reset to the Workbench 1.3 icon screen |
 | `disk.sh <slot>` | Mount DF0 slot `<slot>` (1-based) on the next boot and reset once |
 | `profile.py <elf> [samples] [core]` | Non-halting PC-sampling profile of a core: hottest functions and time per area (68000, memory, DMA slots, blitter, video) |
+| `hotops.py sample <elf> <seconds> <counts.json>` / `hotops.py header <counts.json> [count]` | Sample which 68000 opcode handlers core 0 runs (one session per workload, weighted equally) and regenerate `omega/m68khot.h` with the `count` (default 100) hottest |
 
 `<elf>` is the build running on the board (e.g.
 `build-weact-hdmi-pal/omega-amiga.elf`); `256` rows for PAL, `240` for NTSC.
