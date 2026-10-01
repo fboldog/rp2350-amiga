@@ -10,6 +10,7 @@ non-halting SWD memory reads, so HDMI scanout keeps running.
 | `rate.sh <elf>` | Emulated vblanks/s (CIA-A TOD) and shown frames/s over 10 s |
 | `boot.py <elf> <256\|240> [limit]` | Time from reset to the Workbench 1.3 icon screen |
 | `disk.sh <slot>` | Mount DF0 slot `<slot>` (1-based) on the next boot and reset once |
+| `profile.py <elf> [samples] [core]` | Non-halting PC-sampling profile of a core: hottest functions and time per area (68000, memory, DMA slots, blitter, video) |
 
 `<elf>` is the build running on the board (e.g.
 `build-weact-hdmi-pal/omega-amiga.elf`); `256` rows for PAL, `240` for NTSC.
