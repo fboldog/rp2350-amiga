@@ -381,6 +381,20 @@ appears only ~2 min 12 s later.
       51.6 s, idle 31.7 → 34.5 (xSysinfo) and 31.6 → 35.6 (Workbench).
       Remaining idle cost is mostly real work: hires bitplane slots, sprite
       slots (sprite DMA on), the per-slot loop and CIA stepping.
+- [x] **Hot emulator code in SRAM.** `chipFetchLong()` looked costly in
+      the xSysinfo draw, but 63 % of its samples were the stalled ROM load,
+      not the address decode: Kickstart code missed the 16 KB XIP cache that
+      flash, PSRAM and the emulator's own code share (1.3 M misses/s while
+      drawing, ~25 % of core 0). Flash already runs at ~107 MHz (QMI clkdiv
+      3). `OMEGA_HOT_CODE_IN_RAM` (default ON) moves DMA.c, CIA.c, Blitter.c,
+      Floppy.c, m68kcpu.c, Memory.c and Host.c to SRAM via a linker-script
+      override (~28.7 KB; SRAM free PAL ~28 KB, NTSC ~48 KB). Misses while
+      drawing 1.33 → 0.67 M/s; xSysinfo drawn 21.6 → 18.9 s, Workbench boot
+      51.6 → 47.5 s, RemGame 16.0 → 21.1 fps; idle −4 %. Only the 68000-side
+      files in RAM: 20.3 s / 49.5 s / 18.5 fps, idle unchanged.
+- [ ] **Hot 68000 opcode handlers in SRAM** (~5-10 KB of the most used
+      handlers, e.g. MOVEM, MOVE, Bcc, DBF) with per-function sections; the
+      handler files are too large to move whole.
 - [ ] **Audio DMA never runs.** `audioNCycle()` tests `chipset.dmacon`, but
       DMACON writes update `chipset.dmaconr`; audio is not emulated yet anyway.
 - [ ] **SRAM window over low chip RAM** (vectors, stacks, hot Exec data) once

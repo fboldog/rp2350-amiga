@@ -75,7 +75,7 @@ differ.
 | Region | Size | Content |
 |---|---|---|
 | Vector table | 272 B | RAM copy of the vector table |
-| `.data` | 14.2 KB | Code and tables copied to RAM: core 1's conversion loop and HSTX interrupt (anything core 1 runs must not fetch from flash), the chipset register dispatch tables, `DMALores`/`DMAHires` slot tables, other hot helpers |
+| `.data` | ~42 KB | Code and tables copied to RAM: core 1's conversion loop and HSTX interrupt (anything core 1 runs must not fetch from flash), the chipset register dispatch tables, `DMALores`/`DMAHires` slot tables, and with `OMEGA_HOT_CODE_IN_RAM` (default) all code of `DMA.c`, `CIA.c`, `Blitter.c`, `Floppy.c`, `m68kcpu.c`, `Memory.c` and `Host.c` (~28.7 KB) |
 | `sram_frames` | 320 KB / 300 KB | Two scanout frames, 640×256 (PAL) / 640×240 (NTSC), one byte per pixel (Amiga colour number or HAM code; RGB332 on the fallback path) |
 | `ring` | 64 KB | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
 | `m68ki_opcode_blocks` + `m68ki_opcode_block` | 32 KB + 1 KB | Two-level 68000 opcode → handler index: room for 256 shared blocks of 64 entries (~245 used), one byte per block of opcodes |
@@ -86,7 +86,7 @@ differ.
 | `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
 | Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
 | Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
-| **Free** | **~56 KB / ~76 KB** | Between the heap and the end of main SRAM |
+| **Free** | **~28 KB / ~48 KB** | Between the heap and the end of main SRAM (~56 KB / ~76 KB with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
 | `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and 2 KB free |
 | `SCRATCH_Y` | 4 KB | Core 0 stack |
 
@@ -364,6 +364,19 @@ Measured on the board (NTSC, 5 cycles/slot): xSysinfo boot-to-drawn 28.8 →
 21.6 s, Workbench 1.3 boot 64.3 → 51.6 s, idle xSysinfo 31.7 → 34.5 and
 Workbench 31.6 → 35.6 frames/s (skip plus 8-slot slices vs neither).
 
+The emulator's hottest code runs from SRAM (`OMEGA_HOT_CODE_IN_RAM`, default
+ON): a linker-script override (`src/ld/default_text_excludes.incl`) keeps
+`DMA.c`, `CIA.c`, `Blitter.c`, `Floppy.c`, `m68kcpu.c`, `Memory.c` and
+`Host.c` out of flash `.text`, so the SDK copies their code (~28.7 KB) to
+SRAM at boot. Flash and PSRAM share one 16 KB XIP cache, and with the
+chipset loop in flash, Kickstart ROM code (e.g. graphics.library while
+xSysinfo draws) kept missing it: misses while drawing fell from 1.33 to
+0.67 M/s. Board, NTSC, 5 cycles/slot: xSysinfo drawn 21.6 → 18.9 s,
+Workbench 1.3 boot 51.6 → 47.5 s, RemGame 16.0 → 21.1 fps; idle screens
+lose ~4 % (xSysinfo 34.5 → 33.2, Workbench 35.6 → 34.0 fps), as that code
+was already cached and now shares SRAM with core 1 and the HDMI DMA. The
+opcode handler files (65-88 KB each) stay in flash.
+
 ## Sprites
 
 `omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per
@@ -429,6 +442,7 @@ deadline.
 | `Planar.c` | Planar-to-chunky ARGB conversion (HIRES, LORES, HAM) for the fallback raster and the native build |
 | `Presentation.c` / `.h` | ARGB fallback presentation: maps the DMA raster to a 640×400 frame, rebuilds wrapped-fetch rows |
 | `sd_card.c` / `sd_card.h`, `sd_diskio.c` | SD card over SPI (FatFs disk driver) and Kickstart loading from SD (SD-card builds only) |
+| `ld/default_text_excludes.incl` | Linker-script override (`OMEGA_HOT_CODE_IN_RAM`): keeps the hottest emulator files out of flash `.text`, so the SDK places their code in SRAM |
 
 ### `omega/` — emulator core (from the Omega project, extended)
 

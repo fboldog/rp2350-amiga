@@ -1,0 +1,14 @@
+/* Overrides the Pico SDK's default_text_excludes.incl (see CMakeLists.txt,
+   OMEGA_HOT_CODE_IN_RAM). Code of the files listed here is left out of the
+   flash .text section; the SDK's .data section then picks it up and crt0
+   copies it to SRAM at boot, so the emulator's hottest code no longer
+   competes with the Kickstart ROM and chip RAM for the 16 KB XIP cache.
+   Patterns match both Makefile (.c.o) and Ninja (.c.obj) object names. */
+*(EXCLUDE_FILE(*libgcc.a: *libm.a:
+               *omega/DMA.c.o *omega/DMA.c.obj
+               *omega/CIA.c.o *omega/CIA.c.obj
+               *omega/Blitter.c.o *omega/Blitter.c.obj
+               *omega/Floppy.c.o *omega/Floppy.c.obj
+               *omega/m68kcpu.c.o *omega/m68kcpu.c.obj
+               *src/Memory.c.o *src/Memory.c.obj
+               *src/Host.c.o *src/Host.c.obj) .text*)

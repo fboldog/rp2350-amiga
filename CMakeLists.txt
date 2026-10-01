@@ -30,6 +30,8 @@ endif()
 # ones let the CPU see the beam in finer steps.
 set(OMEGA_CPU_SLICE_SLOTS 8 CACHE STRING "DMA slots per 68000 execution slice")
 option(OMEGA_SLOT_SKIP "Skip runs of idle DMA slots in dma_run()" ON)
+option(OMEGA_HOT_CODE_IN_RAM
+       "Run the emulator's hottest files (DMA, CIA, blitter, floppy, CPU loop, memory, host) from SRAM" ON)
 if(NOT OMEGA_CPU_SLICE_SLOTS MATCHES "^[1-9][0-9]*$")
     message(FATAL_ERROR "OMEGA_CPU_SLICE_SLOTS must be a positive integer")
 endif()
@@ -160,6 +162,13 @@ pico_enable_stdio_usb(omega-amiga 0)
 set(OMEGA_STDIO_DESCRIPTION "UART1 GPIO4/5")
 
 # ── Output formats ────────────────────────────────────────────────────────
+# Keep the hottest emulator files out of flash .text; the SDK then places
+# their code in SRAM (src/ld/default_text_excludes.incl).
+if(OMEGA_HOT_CODE_IN_RAM)
+    pico_add_linker_script_override_path(omega-amiga
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ld FILES default_text_excludes.incl)
+endif()
+
 pico_add_extra_outputs(omega-amiga)   # generates .uf2, .hex, .bin, .map
 
 # ── ROM embedding ─────────────────────────────────────────────────────────
