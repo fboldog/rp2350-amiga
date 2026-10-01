@@ -13,28 +13,23 @@ and where every important decision lives so you don't re-derive it.
 
 ## Project layout
 
+The file-by-file map, and what runs on which core, is in README.md ("Code
+map"). In short:
+
 ```
 rp2350-amiga/
-├── CMakeLists.txt          Pico SDK 2.x; WeAct board; feature flags
-├── pico_sdk_import.cmake   Existing-SDK lookup + pinned automatic fetch fallback
-├── src/                    RP2350-specific code (overrides omega/ platform layer)
-│   ├── board_config.h      ◀ ALL board pins / feature flags / PSRAM+Amiga map
-│   ├── main.c              Bare-metal entry: PSRAM validation, ROM, emulation loop
-│   ├── psram.h / psram.c   Simple hardware_psram availability + read/write test
-│   ├── Memory.h / Memory.c PSRAM-backed chipRead*/chipWrite* (no 16 MB array)
-│   ├── Host.h / Host.c     SDL-free host: raster presentation and frame submission
-│   └── dvi_display.*      HSTX HDMI scanout: SRAM indexed frames, core-1 DMA IRQ
-├── native/                 Head-less PC runner (see native/README.md)
-├── omega/                  Upstream Omega source (minimal diffs from original)
-│   ├── CPU.c               +#ifdef PICO_BUILD guard in cpu_pulse_reset
-│   ├── Chipset.c           +chipramW = CHIPRAM_BASE_PTR (not low16Meg)
-│   ├── DMA.c               +CHIPRAM_BASE_PTR for disk DMA; SDL_Atomic commented;
-│   │                       +#include <stdlib.h>; sprite2chunky ptr cast (GCC14)
-│   ├── Floppy.h            mfmData is a pointer; only DF0 has one
-│   ├── Floppy.c            +ADF2MFM_from_mem(); DF0 only (DF1-3 unconnected)
-│   └── [all other files]   UNCHANGED from upstream
-└── tools/
-    └── combine_uf2.py      Merges firmware.uf2 + ROM.bin + optional DF0 ADF
+├── CMakeLists.txt          Pico SDK 2.x; WeAct board; feature flags and options
+├── src/                    RP2350 platform layer (overrides omega/ host files)
+│   ├── board_config.h      ◀ ALL board pins / feature flags / PSRAM+flash map
+│   ├── main.c              Clocks, PSRAM, ROM, DF0 rotation, HDMI, main loop
+│   ├── Memory.*            68000 memory map over PSRAM/flash, register dispatch
+│   ├── Host.*              Core 0 → core 1 ring, core 1 converter, fallbacks
+│   └── dvi_display.*       HSTX HDMI scanout, frame handshake, row expansion
+├── omega/                  Emulator core from Omega, substantially extended
+│                           (DMA.c, Chipset.c, Floppy.c, m68kops.c, ...)
+├── native/                 Head-less PC runner + regression test
+├── tools/combine_uf2.py    Firmware + Kickstart + ADFs → UF2
+└── tooling/                Board scripts over SWD (capture, timing, disks)
 ```
 
 ---

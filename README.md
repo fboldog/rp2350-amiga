@@ -382,6 +382,65 @@ Wire `pressKey()`/`releaseKey()` to TinyUSB HID keyboard events.
 Joystick/mouse delta goes into `chipset.joy0dat` (see original Host.c).
 TinyUSB is included in the Pico SDK; add `tinyusb_host` to `target_link_libraries`.
 
+## Code map
+
+### What runs where
+
+| Where | What | Code |
+|---|---|---|
+| Core 0, main loop | The emulator: DMA slot by slot (bitplanes, sprites, Copper, blitter, disk, audio), the 68000 in slices between them, CIA timers, frame end | `src/main.c` → `dma_run()` in `omega/DMA.c`, `m68k_execute()` in `omega/m68kcpu.c` |
+| Core 0, per bitplane block | Queues the block (or a palette change, sprite, frame begin/end) for core 1 | `hostDirect*()` in `src/Host.c` |
+| Core 1, thread | Converts queued blocks to colour numbers in the free scanout frame, overlays sprites, logs palette changes | `hostCore1Loop()` in `src/Host.c` |
+| Core 1, DMA interrupt (once per line) | Re-arms the HSTX DMA chain, swaps frames at line 0, expands the next image row to RGB888 (palette log replay, HAM decode) | `hstx_dma_irq()` / `scan_expand_row()` in `src/dvi_display.c` |
+| DMA + HSTX hardware | TMDS-encodes and sends each line; no CPU involvement | configured in `src/dvi_display.c` |
+
+Everything core 1 runs is in RAM (`__not_in_flash_func`): a flash fetch
+stalled behind core 0's PSRAM traffic once made the line interrupt miss its
+deadline.
+
+### `src/` — RP2350 platform layer
+
+| File | Does |
+|---|---|
+| `main.c` | Startup: clocks (`clk_sys`, PLL_USB for HSTX, PSRAM timing), PSRAM check, Kickstart lookup, DF0 disk selection and rotation (state in PSRAM), HDMI start, then the emulation main loop with the CPU:DMA cycle ratio (`OMEGA_CPU_CYCLES_PER_SLOT`); hard-fault report |
+| `board_config.h` | All board pins (PSRAM, HDMI, SD, KEY button), feature defaults and the PSRAM/flash memory map (`BOARD_MAP_*`) |
+| `Memory.c` / `Memory.h` | The 68000's view of memory: chip RAM and slow RAM in PSRAM, ROM in flash (or the SD cache), CIA and custom-register dispatch, bounds checks so a runaway program cannot crash the host |
+| `psram.c` / `psram.h` | PSRAM detection check and read/write test; `psram_ptr()` and region offsets |
+| `Host.c` / `Host.h` | Host side of the video path: the core 0 → core 1 message ring and producers (`hostDirect*`), core 1's converter and sprite overlay, the ARGB raster fallback, keyboard entry points |
+| `dvi_display.c` / `dvi_display.h` | HDMI over HSTX: video modes, double-buffered SRAM frames, frame handshake, per-line DMA interrupt, row expansion to RGB888 (exact 12-bit colours, HAM), boot colour bars, ARGB/RGB332 submit for the fallback path |
+| `Planar.c` | Planar-to-chunky ARGB conversion (HIRES, LORES, HAM) for the fallback raster and the native build |
+| `Presentation.c` / `.h` | ARGB fallback presentation: maps the DMA raster to a 640×400 frame, rebuilds wrapped-fetch rows |
+| `sd_card.c` / `sd_card.h`, `sd_diskio.c` | SD card over SPI (FatFs disk driver) and Kickstart loading from SD (SD-card builds only) |
+
+### `omega/` — emulator core (from the Omega project, extended)
+
+| File | Does |
+|---|---|
+| `DMA.c` / `DMA.h` | The chipset timing loop: one call per DMA slot (colour clock) via the `DMALores`/`DMAHires` slot tables. Bitplane fetch and modulo, display window, sprite DMA and rendering, Copper, blitter/CPU slot sharing, disk and audio DMA, end of line and frame (vertical blank, frame hand-off) |
+| `Chipset.c` / `Chipset.h` | Custom-chip registers: read/write dispatch tables (16- and 32-bit), colour registers (palette, EHB, palette log for HDMI), DMACON/INTENA/INTREQ, sprite and bitplane pointers, 32-bit writes split into two 16-bit ones |
+| `Blitter.c` / `Blitter.h` | Blitter: area copy with minterms, shifts and masks, line drawing, area fill |
+| `CIA.c` / `CIA.h` | The two 8520 CIAs: timers, TOD counters, interrupts, keyboard serial port, disk control lines |
+| `Floppy.c` / `Floppy.h` | DF0 drive: motor/step/side, disk change, MFM encoding of the active track from the flash ADF (into PSRAM on the board), the data stream read by disk DMA |
+| `CPU.c` / `CPU.h` | Glue to Musashi: memory callbacks, interrupt levels from INTENA/INTREQ, reset |
+| `m68k*.c`, `m68k*.h` | Musashi 68000 core. On the RP2350 the opcode table is two-level (`m68kops.c`) and cycle counts are per handler; `m68kdasm.c` is the disassembler (debug only) |
+| `Gayle.c` / `Gayle.h` | Gayle/IDE and clock register stubs (writes ignored, reads return fixed values) |
+| `DisplayLayout.h` | Display-window and data-fetch decoding shared by DMA and host (DIWSTRT/DIWSTOP, DDFSTRT/DDFSTOP, layout constants) |
+| `VideoStandard.h` | PAL/NTSC constants: lines per frame, VPOSR ID, viewport offsets, sprite timing |
+| `debug.c` / `debug.h` | Register names for logging, old ADF/MFM helpers |
+| `endianMacros.h`, `m68kconf.h`, `Kick13.h` | Byte-order helpers, Musashi configuration, an empty legacy header |
+
+### Other directories
+
+| Path | Does |
+|---|---|
+| `native/` | Head-less PC runner of the same `omega/` core (`main_native.c`, `host_native.c`, `memory_native.c`), optional SDL window (`display_sdl.c`), KickSmash ROM-switcher simulator, and the framebuffer regression test (`regression.sh` + `regression-baselines.sha256`). See `native/README.md` |
+| `tools/combine_uf2.py` | Builds the flashable UF2: firmware + Kickstart + up to 15 DF0 ADFs |
+| `tooling/` | Board scripts over SWD: frame capture with colour replay, frame rates, boot timing, disk slot selection. See `tooling/README.md` |
+| `image_refs/` | Reference screenshots for visual comparison |
+| `sd_card/` | Kickstart ROMs and ADFs used for testing and the SD-card build |
+| `third_party/fatfs/` | FatFs, used by the SD-card build |
+| `manual-test.sh` | Runs the native build over the Kickstart/Workbench combinations |
+
 ## Architecture Notes
 
 - **Memory.c is fully replaced** by `src/Memory.c`, which uses PSRAM via
