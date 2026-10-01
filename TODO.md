@@ -449,6 +449,17 @@ appears only ~2 min 12 s later.
       call). NTSC 5 cycles/slot: xSysinfo drawn 15.2 → 13.7 s, Workbench
       boot 36.9 → 33.0 s, idle 45.0 → 46.2 (xSysinfo) and 49.6 → 51.1
       (Workbench), RemGame 25.1 → 26.1 fps.
+- [x] **Instruction fetch page table.** `chipFetchLong` was ~9 % of core 0
+      in RemGame: ~5.5 % slow-RAM fetches walking the register range checks
+      (RemGame runs from slow RAM; only ROM and chip RAM had fast paths),
+      ~2.6 % load stalls, mostly XIP hit latency (misses 0.33 M/s). Fetches
+      now use `fetch_page[]` (one pointer per 64 KB page). The same lookup
+      in front of data reads/writes cost the idle screens ~1 % (register
+      accesses) without helping, so data accesses keep their checks. An
+      SRAM chip-RAM cache is not worth it (needs invalidation on CPU,
+      blitter and disk writes for <2.6 %). RemGame 26.1 → 27.6 fps,
+      xSysinfo drawn 13.7 → 13.5 s; idle and boot within ±1 % build-layout
+      noise.
 - [ ] **Idea: dynamic hot opcode cache in SRAM.** Adapt the SRAM handler set
       to the running software instead of a build-time list:
       1. Sampling: at each line end `dma_run()` counts the handler of the

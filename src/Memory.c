@@ -67,6 +67,41 @@ static inline const uint8_t *rom_ptr(uint32_t amiga_addr) {
     return rom_base + rom_addr(amiga_addr);
 }
 
+// ── Page table for instruction fetches ───────────────────────────────────
+// One entry per 64 KB page of the 24-bit 68000 address space: the host
+// address of the page's first byte where the page is plain memory (chip
+// RAM, slow RAM, ROM with its 256 KB mirror), NULL elsewhere (registers,
+// CIAs, Gayle, unmapped). An instruction fetch then costs one lookup
+// wherever the code runs (RemGame runs from slow RAM, which the data path
+// only reaches after the register range checks). Data accesses keep their
+// range checks: a lookup in front of them slowed register accesses (idle
+// screens -1 %) without helping.
+#define PAGE_SHIFT 16
+#define PAGE_COUNT (0x1000000u >> PAGE_SHIFT)
+static const uint8_t *fetch_page[PAGE_COUNT];
+
+static void memory_map_pages(void) {
+    for (uint32_t p = 0; p < PAGE_COUNT; ++p) {
+        const uint32_t a = p << PAGE_SHIFT;
+        const uint8_t *mem = NULL;
+        if (a <= CHIPTOP)
+            mem = chip_ram + a;
+        else if (a >= 0xC00000u && a - 0xC00000u < PSRAM_SLOWRAM_SIZE)
+            mem = slow_ram + (a - 0xC00000u);
+        else if (a >= 0xF80000u && rom_base)
+            mem = rom_base + rom_addr(a);
+        fetch_page[p] = mem;
+    }
+}
+
+// Host pointer for a 68000 address in plain memory, or NULL.
+static inline const uint8_t *fetch_ptr(uint32_t address) {
+    if (address >= 0x1000000u)
+        return NULL;
+    const uint8_t *page = fetch_page[address >> PAGE_SHIFT];
+    return page ? page + (address & ((1u << PAGE_SHIFT) - 1)) : NULL;
+}
+
 // ── Slow RAM address to PSRAM pointer ────────────────────────────────────
 static inline uint8_t *slow_ptr(uint32_t amiga_addr) {
     uint32_t offset = amiga_addr - 0xC00000u;
@@ -100,6 +135,8 @@ void memory_init(void) {
                (unsigned long)entry);
     }
 
+    memory_map_pages();
+
     printf("Memory: clearing chip RAM\n");
     memory_clear_chipram();
     printf("Memory: clearing slow RAM\n");
@@ -113,6 +150,7 @@ int memory_set_rom(const uint8_t *data, uint32_t size) {
     }
     rom_base = data;
     rom_size = size;
+    memory_map_pages();
     return 1;
 }
 
@@ -325,20 +363,18 @@ void chipWriteLong(unsigned int address, unsigned int value) {
 }
 
 // ── Instruction fetch (Musashi prefetch) ─────────────────────────────────
-// Kickstart code runs from ROM, so test it before chip RAM; everything else
-// takes the general data path.
+// Code runs from ROM, chip RAM or slow RAM: one page-table lookup; anything
+// else takes the general data path.
 unsigned int chipFetchLong(unsigned int address) {
-    if (address >= 0xF80000u && rom_base)
-        return ram_read_long(rom_ptr(address));
-    if (address <= CHIPTOP)
-        return ram_read_long(&chip_ram[address]);
+    const uint8_t *p = fetch_ptr(address);
+    if (p)
+        return ram_read_long(p);
     return chipReadLong(address);
 }
 
 unsigned int chipFetchWord(unsigned int address) {
-    if (address >= 0xF80000u && rom_base)
-        return ram_read_word(rom_ptr(address));
-    if (address <= CHIPTOP)
-        return ram_read_word(&chip_ram[address]);
+    const uint8_t *p = fetch_ptr(address);
+    if (p)
+        return ram_read_word(p);
     return chipReadWord(address);
 }
