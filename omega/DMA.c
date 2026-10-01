@@ -745,6 +745,13 @@ static int lineRowRotation;      // omegaDdfRowRotation(DDFSTRT, DDFSTOP)
 // (DSKLEN is not tracked), the fetch-window end and the last slot of a line.
 #define SLOT_LAST 0xE3
 static uint8_t slotNext[SLOT_LAST + 1];
+// Inside the bitplane fetch window, slotRunEnd[h] is the first slot >= h
+// that is not a bitplane or free slot of the window (h itself elsewhere).
+// While the Copper and the blitter stay idle, such a run only fetches planes
+// and hands finished blocks to the host, so dma_run() calls the run's active
+// slot functions back to back and does the per-slot bookkeeping (E clock,
+// beam, skip checks) once for the run.
+static uint8_t slotRunEnd[SLOT_LAST + 1];
 static uint32_t slotNextKey = ~0u;
 
 static int slotIsActive(void (*f)(), int h) {
@@ -773,6 +780,17 @@ static int slotIsActive(void (*f)(), int h) {
     return 1;   // anything else always runs
 }
 
+// A slot a fetch run may include: inside the window, and a bitplane slot or
+// one that only offers itself to the Copper and the blitter.
+static int slotInFetchRun(void (*f)(), int h) {
+    if (h >= SLOT_LAST || !lineBitplaneWindow || h < chipset.ddfstrt ||
+        h > bitplaneLine.lastCycle)
+        return 0;
+    return f == hiresPlane1 || f == loresPlane1 || f == plane2 ||
+           f == plane3 || f == plane4 || f == plane5 || f == plane6 ||
+           f == evenCycle || f == oddCycle || f == dramCycle;
+}
+
 static void slotNextUpdate(void) {
     const int hires = (chipset.bplcon0 & 0x8000) != 0;
     const int sprites = (chipset.dmaconr & 0x220) == 0x220 &&
@@ -788,10 +806,15 @@ static void slotNextUpdate(void) {
     slotNextKey = key;
     void (**table)() = hires ? DMAHires : DMALores;
     int next = SLOT_LAST;
+    int runEnd = SLOT_LAST;
     for (int h = SLOT_LAST; h >= 0; --h) {
-        if (slotIsActive(table[h], h))
+        void (*f)() = table[h];
+        if (slotIsActive(f, h))
             next = h;
         slotNext[h] = (uint8_t)next;
+        if (!slotInFetchRun(f, h))
+            runEnd = h;
+        slotRunEnd[h] = (uint8_t)runEnd;
     }
 }
 
@@ -894,21 +917,61 @@ static void __attribute__((noinline)) dmaFetchWindowComplete(void) {
 
 // Runs `slots` DMA slots (one colour clock each). Batching avoids a call and
 // register save per slot from the main loop.
+// Advances the E clock by k slots: it ticks every fifth slot.
+static inline void dmaEClock(int k) {
+    const int counter = internal.eClockCounter - k;
+    if (counter < 0) {
+        const int ticks = (4 - counter) / 5;
+        internal.eClockCounter = counter + 5 * ticks;
+        CIAClock(ticks);
+    } else {
+        internal.eClockCounter = counter;
+    }
+}
+
+// VHPOSR is only read by the CPU, between calls, and by the Copper's SKIP
+// (which uses the beam directly), so it is stored once on return: the
+// position of the last slot run, as if it were written at every slot.
 void dma_run(int slots){
+    int beamV = -1, beamH = 0;  // last slot run
     while (slots-- > 0) {
         // VPOSR only changes with the line.
         if (internal.hPos == 0)
             chipset.vposr = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
-        chipset.vhposr  = internal.vPos << 8;
-        chipset.vhposr |= internal.hPos;
         if (dmaLineStateDirty)
             dmaUpdateLineState();
 
-        // Jump over slots that would do nothing (see slotNext[]).
-        // -DOMEGA_NO_SLOT_SKIP disables it (A/B comparisons).
+        // Jump over slots that would do nothing (see slotNext[]) and run
+        // fetch runs back to back (see slotRunEnd[]).
+        // -DOMEGA_NO_SLOT_SKIP disables both (A/B comparisons).
 #ifndef OMEGA_NO_SLOT_SKIP
         {
             const int h = internal.hPos;
+            int end = slotRunEnd[h];
+            if (end > h + 1) {
+                if (end > h + slots + 1)
+                    end = h + slots + 1;
+                end = dmaIdleUntil(end);
+                const int k = end - h;
+                if (k > 1) {
+                    void (**table)() =
+                        (chipset.bplcon0 & 0x8000) ? DMAHires : DMALores;
+                    // Inactive slots do nothing while the Copper and the
+                    // blitter are idle; run only the others.
+                    for (int x = slotNext[h]; x < end; x = slotNext[x + 1]) {
+                        internal.hPos = x;
+                        table[x]();
+                    }
+                    if (end - 1 == bitplaneLine.lastCycle)
+                        dmaFetchWindowComplete();
+                    internal.hPos = end;
+                    slots -= k - 1;
+                    beamV = internal.vPos;
+                    beamH = end - 1;
+                    dmaEClock(k);
+                    continue;
+                }
+            }
             int next = slotNext[h];
             if (next > h) {
                 if (next > h + slots + 1)
@@ -918,16 +981,9 @@ void dma_run(int slots){
                 if (k > 0) {
                     internal.hPos = next;
                     slots -= k - 1;
-                    chipset.vhposr = internal.vPos << 8 | (next - 1);
-                    // The E clock ticks every fifth slot.
-                    int counter = internal.eClockCounter - k;
-                    if (counter < 0) {
-                        const int ticks = (4 - counter) / 5;
-                        internal.eClockCounter = counter + 5 * ticks;
-                        CIAClock(ticks);
-                    } else {
-                        internal.eClockCounter = counter;
-                    }
+                    beamV = internal.vPos;
+                    beamH = next - 1;
+                    dmaEClock(k);
                     continue;
                 }
             }
@@ -951,10 +1007,14 @@ void dma_run(int slots){
             CIAClock(1);
         }
 
+        beamV = internal.vPos;
+        beamH = internal.hPos;
         //end of line reached! 227 colour clocks have executed
         if (++internal.hPos > 0xE3)
             dmaEndOfLine();
     }
+    if (beamV >= 0)
+        chipset.vhposr = (uint16_t)(beamV << 8 | beamH);
 }
 
 void dma_execute(){
@@ -1718,7 +1778,7 @@ int copperExecute(){
             //Skip
             if( (internal.IR2 & 1) == 1){
                 
-                if( chipset.vhposr >= internal.IR1){
+                if( (uint16_t)(internal.vPos << 8 | internal.hPos) >= internal.IR1){
                     internal.copperPC +=2;
                 }
                 internal.copperCycle = 0;

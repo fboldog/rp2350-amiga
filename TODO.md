@@ -404,6 +404,22 @@ appears only ~2 min 12 s later.
       and logs. With the batched messages, NTSC 5 cycles/slot: xSysinfo
       drawn 18.5 → 17.5 s, Workbench boot 47.5 → 44.3 s, idle 33.2 → 35.4
       (xSysinfo) and 34.0 → 36.0 (Workbench), RemGame 21.1 → 21.8 fps.
+- [x] **Fewer per-slot costs in `dma_run()`.** Profiling `main` showed the
+      loop itself at 35-56 % of core 0 (Workbench idle 56 %, xSysinfo draw
+      and RemGame ~35 %), the 68000 only 5-24 %. VHPOSR is now stored once
+      per call (the Copper's SKIP reads the beam directly), and fetch-window
+      stretches with an idle Copper and blitter run their active slots back
+      to back (`slotRunEnd[]`). Calling every slot of a stretch was slower
+      (disabled-plane slots went through the Copper/blitter checks); walking
+      `slotNext[]` inside it is the gain. Identical native frames and logs
+      (8- and 64-slot A/B). NTSC 5 cycles/slot: xSysinfo drawn 17.5 →
+      15.4 s, Workbench boot 44.3 → 36.9 s, idle 35.4 → 43.8 (xSysinfo) and
+      36.0 → 48.0 (Workbench), RemGame 21.8 → 24.8 fps.
+- [ ] **Unreproduced core-0 hard fault.** Seen once (2026-10-01, `main`
+      7032b46): core 0 in `hardfault_report` 7 s after a `disk.sh 2` reset,
+      following a long Workbench idle; no UART log was running. Not seen in
+      6 more xSysinfo boots, a 7-minute Workbench soak or the later runs.
+      Keep a UART log (`stty -F /dev/ttyACM0 115200 raw`) when testing.
 - [x] **CIA timer B in "count timer A underflows" mode never underflowed.**
       `CIAExecute()` tested `tb == 65535` after the decrement, but `tb` is
       signed and reaches -1, so the timer ran on below zero without reloading

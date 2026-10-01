@@ -393,6 +393,19 @@ xSysinfo drawn 18.5 → 17.5 s, Workbench 1.3 boot 47.5 → 44.3 s, idle
 xSysinfo 33.2 → 35.4 and Workbench 34.0 → 36.0 frames/s, RemGame 21.1 →
 21.8 fps.
 
+Inside the bitplane fetch window the same condition (Copper and blitter
+idle up to a slot) lets `dma_run()` run a whole stretch of bitplane and free
+slots back to back (`slotRunEnd[]`): it calls only the stretch's active slot
+functions (`slotNext[]`) and does the per-slot bookkeeping (E clock, beam
+position, skip checks) once for the stretch; `-DOMEGA_SLOT_SKIP=OFF` turns
+this off too. VHPOSR is likewise stored once per `dma_run()` call, from the
+last slot run: only the CPU reads it between calls, and the Copper's SKIP
+compares against the beam directly. Native frames and logs are unchanged
+per slot and in 8- and 64-slot batches. Board, NTSC, 5 cycles/slot:
+xSysinfo drawn 17.5 → 15.4 s, Workbench 1.3 boot 44.3 → 36.9 s, idle
+xSysinfo 35.4 → 43.8 and Workbench 36.0 → 48.0 frames/s, RemGame 21.8 →
+24.8 fps.
+
 ## Sprites
 
 `omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per
