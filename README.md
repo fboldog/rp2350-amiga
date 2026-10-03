@@ -467,6 +467,13 @@ Workbench 52.4 → 60.0 frames/s (full NTSC speed: emulation now waits for
 the display), RemGame 27.9 → 30.0 fps. What remains in a run is mostly the
 chip RAM loads of the bitplane words (PSRAM through the XIP cache).
 
+The prefetch picks the instruction word with `(pc & 2) ? low : high`
+instead of shift arithmetic, about 6 machine instructions fewer per 68000
+instruction: xSysinfo drawn 12.3 → 12.1 s, Workbench 1.3 boot 30.1 →
+29.5 s. RemGame (30 fps) spends almost all of its 68000 time in a
+wait-for-raster-line loop (`move.w $dff004/$dff006` polling), which exact
+emulation has to interpret.
+
 ## Sprites
 
 `omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per

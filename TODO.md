@@ -492,6 +492,25 @@ appears only ~2 min 12 s later.
       stalls (~11 %), the per-slot `slotNext`/`switch` step (~10 %, would
       need whole fetch groups across slice cuts), `dmaIdleUntil()` per
       8-slot slice (~11 %).
+- [x] **Prefetch word select (2026-10-03).** `m68ki_read_imm_16()` takes
+      the word as `(pc & 2) ? low : high` (identical results, ~6 machine
+      instructions fewer per 68000 instruction). xSysinfo drawn 12.3 → 12.1
+      s, Workbench boot 30.1 → 29.5 s; RemGame unchanged (30.0 fps).
+      Finding: 99 % of RemGame's 68000 instructions are its wait-for-line
+      loop at 0x1F64C (VPOSR/VHPOSR polling, 12 instructions).
+- [ ] **Remaining exact chipset items** (each small, RemGame estimates):
+      cache the Copper idle horizon instead of `dmaIdleUntil()` per run
+      (~3-4 %, needs invalidation on every Copper/DMACON/blitter change);
+      whole fetch groups without the per-slot `switch` (~2-4 %);
+      single-colour palette messages instead of 32 colours per Copper
+      colour write (~1 %); skip sprite slots of idle/finished sprites
+      (~1 %).
+- [ ] **Idea: beam-wait fast-forward (speed hack, not exact).** Recognise a
+      loop that only polls VPOSR/VHPOSR against a target line and run the
+      chipset to that line instead of interpreting it (RemGame ~30 → ~40
+      fps). Exits up to one loop iteration (~150 CPU cycles) off the exact
+      point; RemGame's beam racing may break. Only as an off-by-default
+      option with visual checks.
 - [ ] **Idea: dynamic hot opcode cache in SRAM.** Adapt the SRAM handler set
       to the running software instead of a build-time list:
       1. Sampling: at each line end `dma_run()` counts the handler of the
