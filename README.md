@@ -454,6 +454,19 @@ costs no large stack frame or register saves, adds: xSysinfo drawn 15.4 →
 15.2 s, idle xSysinfo 43.8 → 45.0 and Workbench 48.0 → 49.6 frames/s,
 RemGame 24.8 → 25.1 fps (Workbench boot unchanged at 36.9 s).
 
+Inside a fetch run the window test of the bitplane slot functions always
+holds, so `dma_run()` fetches enabled planes 2-6 inline (`slotPlane[]`,
+built with `slotRunEnd[]`) and calls `hiresPlane1Fetch()` /
+`loresPlane1Fetch()` (the slot bodies without the test) for plane 1. A block
+that continues the current core-1 run with the palette unchanged is
+appended inline (`hostRunContinue()` in `src/HostRing.h`); anything else
+takes `hostDirectHires/Lores()`, so the ring contents are unchanged. Native
+frames and logs match per slot and in 8- and 64-slot batches. Board, NTSC,
+5 cycles/slot: xSysinfo drawn 12.8 → 12.3 s, idle xSysinfo 47.1 → 54.0 and
+Workbench 52.4 → 60.0 frames/s (full NTSC speed: emulation now waits for
+the display), RemGame 27.9 → 30.0 fps. What remains in a run is mostly the
+chip RAM loads of the bitplane words (PSRAM through the XIP cache).
+
 ## Sprites
 
 `omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per
@@ -515,6 +528,7 @@ deadline.
 | `Memory.c` / `Memory.h` | The 68000's view of memory: 2 MB chip RAM in PSRAM, the custom register mirror at `0xC00000`–`0xD7FFFF`, ROM in flash (or the SD cache), CIA and custom-register dispatch, bounds checks so a runaway program cannot crash the host |
 | `psram.c` / `psram.h` | PSRAM detection check and read/write test; `psram_ptr()` and region offsets |
 | `Host.c` / `Host.h` | Host side of the video path: the core 0 → core 1 message ring and producers (`hostDirect*`), core 1's converter and sprite overlay, the ARGB raster fallback, keyboard entry points |
+| `HostRing.h` | Core 0 → core 1 message format and the inline fast path for appending a bitplane block to the current run (used by `DMA.c`) |
 | `dvi_display.c` / `dvi_display.h` | HDMI over HSTX: video modes, double-buffered SRAM frames, frame handshake, per-line DMA interrupt, row expansion to RGB888 (exact 12-bit colours, HAM), boot colour bars, ARGB/RGB332 submit for the fallback path |
 | `Planar.c` | Planar-to-chunky ARGB conversion (HIRES, LORES, HAM) for the fallback raster and the native build |
 | `Presentation.c` / `.h` | ARGB fallback presentation: maps the DMA raster to a 640×400 frame, rebuilds wrapped-fetch rows |

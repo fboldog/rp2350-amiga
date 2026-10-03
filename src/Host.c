@@ -6,6 +6,7 @@
 // Serial:  printf → UART via pico_stdio_uart (configured in CMakeLists.txt).
 
 #include "Host.h"
+#include "HostRing.h"
 #include "Presentation.h"
 #include "psram.h"
 #include "../omega/DisplayLayout.h"
@@ -72,25 +73,8 @@ static void hostBorderUnwrittenPixels(uint32_t border) {
 static bool direct_frame;         // this frame renders straight to the frame
 int hostDirectActive;             // mirrors direct_frame for DMA.c
 
-enum {
-    MSG_BEGIN = 1,   // + 2 words: frame layout
-    MSG_HIRES,       // + 2 words per block: planes 1..4
-    MSG_LORES,       // + 3 words per block: planes 1..6; extra bit 0 = HAM
-    MSG_PALETTE,     // + 16 words: 32 colours, 0x0RGB, two per word
-    MSG_END,         // + 1 word: border colour (0x0RGB)
-    MSG_SPRITE,      // + 1-2 words: sprite planes; extra = base | att | behind
-};
 #define SPRITE_X_BIAS 64   // raster x + bias fits the 10-bit field
-#define MSG_HEADER(type, row, x, extra) \
-    ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
-     (uint32_t)(extra) << 23)
-// HIRES and LORES messages carry a run of 1..MSG_RUN_MAX consecutive blocks
-// of one row (block i at x + i * block width): count - 1 sits in header
-// bits 24..27, above the HAM bit. One message per run instead of per block
-// saves a ring push on core 0 and a dispatch on core 1 for each block.
-#define MSG_RUN_MAX 16
-#define MSG_RUN_SHIFT 24
-#define MSG_MAX_WORDS (1 + 3 * MSG_RUN_MAX) // a run of lores blocks
+// Message format: HostRing.h.
 
 // Core 1 waits for a pending frame to be shown while core 0 keeps queueing;
 // when the ring is full core 0 stalls until the swap. A bigger ring lets
@@ -130,18 +114,14 @@ static inline uint32_t ringFill(uint32_t head, uint32_t tail) {
 static inline uint32_t ringSlot(uint32_t pos) {
     return pos >= RING_WORDS ? pos - RING_WORDS : pos;
 }
-static uint32_t palette_generation_sent = ~0u;
 
-// The run being collected on core 0. It is written straight into the ring
-// past ring_head and published by advancing ring_head (runFlush()), so core
-// 1 never sees it early; only a run that could reach the end of the ring is
-// collected in run_stage and copied in (core 1 copies such a message out).
-// run_msg[0] is its header, run_words its length so far (0: none),
-// run_next_x the x its next block must have.
+// The run being collected on core 0 (host_run, see HostRing.h). It is
+// written straight into the ring past ring_head and published by advancing
+// ring_head (runFlush()), so core 1 never sees it early; only a run that
+// could reach the end of the ring is collected in run_stage and copied in
+// (core 1 copies such a message out).
 static uint32_t run_stage[MSG_MAX_WORDS];
-static uint32_t *run_msg = run_stage;
-static uint32_t run_words;
-static int run_next_x;
+HostRun host_run = { run_stage, 0, 0, ~0u };
 
 // ── Core 0: producer ──────────────────────────────────────────────────────
 static inline void ringPush(const uint32_t *words, uint32_t count) {
@@ -167,20 +147,20 @@ static inline void ringPush(const uint32_t *words, uint32_t count) {
 }
 
 static void __attribute__((noinline)) runPushStaged(void) {
-    ringPush(run_stage, run_words);
+    ringPush(run_stage, host_run.words);
 }
 
 static inline void runFlush(void) {
-    if (!run_words)
+    if (!host_run.words)
         return;
-    if (run_msg == run_stage) {
+    if (host_run.msg == run_stage) {
         runPushStaged();
     } else {
-        __atomic_store_n(&ring_head, ringAdvance(ring_head, run_words),
+        __atomic_store_n(&ring_head, ringAdvance(ring_head, host_run.words),
                          __ATOMIC_RELEASE);
         __sev(); // wake core 1 from __wfe()
     }
-    run_words = 0;
+    host_run.words = 0;
 }
 
 // Starts a run with this header where it will be published.
@@ -191,9 +171,9 @@ static void __attribute__((noinline)) runStart(uint32_t header) {
            MSG_MAX_WORDS > RING_WORDS)
         tight_loop_contents();
     const uint32_t slot = ringSlot(head);
-    run_msg = slot + MSG_MAX_WORDS <= RING_WORDS ? &ring[slot] : run_stage;
-    run_msg[0] = header;
-    run_words = 1;
+    host_run.msg = slot + MSG_MAX_WORDS <= RING_WORDS ? &ring[slot] : run_stage;
+    host_run.msg[0] = header;
+    host_run.words = 1;
 }
 
 // Appends a block at x of `words` plane words to the run, first sending the
@@ -201,19 +181,17 @@ static void __attribute__((noinline)) runStart(uint32_t header) {
 // plane words. header has x = 0 and count 1.
 static inline uint32_t *runAppend(uint32_t header, int x, int width,
                                   uint32_t words) {
-    const uint32_t count_mask = (uint32_t)(MSG_RUN_MAX - 1) << MSG_RUN_SHIFT;
-    const uint32_t key_mask = ~(count_mask | MSG_HEADER(0, 0, 0x3ff, 0));
-    if (run_words && (x != run_next_x ||
-                      (run_msg[0] & key_mask) != header ||
-                      (run_msg[0] & count_mask) == count_mask))
+    if (host_run.words && (x != host_run.next_x ||
+                      (host_run.msg[0] & MSG_RUN_KEY_MASK) != header ||
+                      (host_run.msg[0] & MSG_RUN_COUNT_MASK) == MSG_RUN_COUNT_MASK))
         runFlush();
-    if (run_words)
-        run_msg[0] += 1u << MSG_RUN_SHIFT;
+    if (host_run.words)
+        host_run.msg[0] += 1u << MSG_RUN_SHIFT;
     else
         runStart(header | MSG_HEADER(0, 0, x, 0));
-    uint32_t *planes = &run_msg[run_words];
-    run_words += words;
-    run_next_x = x + width;
+    uint32_t *planes = &host_run.msg[host_run.words];
+    host_run.words += words;
+    host_run.next_x = x + width;
     return planes;
 }
 
@@ -226,7 +204,7 @@ static inline uint32_t argbToOcs(uint32_t argb) {
 // Out of line, like the other rare paths, so the per-block producers stay
 // small (no large stack frame or register saves on every block).
 static void __attribute__((noinline)) hostDirectSendPalette(void) {
-    palette_generation_sent = internal.paletteGeneration;
+    host_run.palette_sent = internal.paletteGeneration;
     runFlush(); // the blocks before the change use the old palette
     uint32_t msg[17];
     msg[0] = MSG_HEADER(MSG_PALETTE, 0, 0, 0);
@@ -237,7 +215,7 @@ static void __attribute__((noinline)) hostDirectSendPalette(void) {
 }
 
 static inline void hostDirectSyncPalette(void) {
-    if (internal.paletteGeneration != palette_generation_sent)
+    if (internal.paletteGeneration != host_run.palette_sent)
         hostDirectSendPalette();
 }
 

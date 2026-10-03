@@ -479,6 +479,19 @@ appears only ~2 min 12 s later.
       NTSC 5 cycles/slot: xSysinfo drawn 13.0 → 12.8 s, Workbench boot 31.9
       → 31.0 s, idle 45.5 → 47.1 (xSysinfo) and 50.6 → 52.4 (Workbench),
       RemGame 27.7 → 27.9 fps.
+- [x] **Fetch runs without per-slot calls (2026-10-03).** The profile of
+      `main` (32cbdd1) showed each bitplane word going through an indirect
+      slot call, `bitplaneActive()`, `markBitplaneFetched()`, and for plane 1
+      the block setup plus a call into `Host.c`. Fetch runs now fetch enabled
+      planes 2-6 inline (`slotPlane[]`), call `hiresPlane1Fetch()` /
+      `loresPlane1Fetch()` without the window test, and append blocks that
+      continue the current run inline (`src/HostRing.h`). Identical native
+      frames and logs (8/64-slot A/B). NTSC 5 cycles/slot: xSysinfo drawn
+      12.8 → 12.3 s, idle 47.1 → 54.0 (xSysinfo) and 52.4 → 60.0 (Workbench,
+      full speed), RemGame 27.9 → 30.0 fps. Left in a run: chip RAM load
+      stalls (~11 %), the per-slot `slotNext`/`switch` step (~10 %, would
+      need whole fetch groups across slice cuts), `dmaIdleUntil()` per
+      8-slot slice (~11 %).
 - [ ] **Idea: dynamic hot opcode cache in SRAM.** Adapt the SRAM handler set
       to the running software instead of a build-time list:
       1. Sampling: at each line end `dma_run()` counts the handler of the

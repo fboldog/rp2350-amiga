@@ -17,6 +17,12 @@
 #include "Chipset.h"
 #include "CIA.h"
 #include "Host.h"
+#if defined(PICO_BUILD) && OMEGA_ENABLE_HDMI
+#include "HostRing.h"
+#else
+#define hostDirectHiresFast hostDirectHires
+#define hostDirectLoresFast hostDirectLores
+#endif
 #include "Blitter.h"
 
 #include "CPU.h"
@@ -752,6 +758,10 @@ static uint8_t slotNext[SLOT_LAST + 1];
 // slot functions back to back and does the per-slot bookkeeping (E clock,
 // beam, skip checks) once for the run.
 static uint8_t slotRunEnd[SLOT_LAST + 1];
+// In a fetch run: 1 for a plane-1 slot (it also hands the block to the
+// host), 2..6 for the slot of an enabled plane, which dma_run() fetches
+// inline; 0 for anything else (called through the slot table).
+static uint8_t slotPlane[SLOT_LAST + 1];
 static uint32_t slotNextKey = ~0u;
 
 static int slotIsActive(void (*f)(), int h) {
@@ -815,6 +825,15 @@ static void slotNextUpdate(void) {
         if (!slotInFetchRun(f, h))
             runEnd = h;
         slotRunEnd[h] = (uint8_t)runEnd;
+        int plane = 0;
+        if (slotInFetchRun(f, h)) {
+            plane = f == hiresPlane1 || f == loresPlane1 ? 1 :
+                    f == plane2 ? 2 : f == plane3 ? 3 : f == plane4 ? 4 :
+                    f == plane5 ? 5 : f == plane6 ? 6 : 0;
+            if (plane > 1 && !((internal.bitplaneMask >> (plane - 1)) & 1))
+                plane = 0;  // disabled: its slot is inactive anyway
+        }
+        slotPlane[h] = (uint8_t)plane;
     }
 }
 
@@ -917,6 +936,15 @@ static void __attribute__((noinline)) dmaFetchWindowComplete(void) {
 
 // Runs `slots` DMA slots (one colour clock each). Batching avoids a call and
 // register save per slot from the main loop.
+static inline void hiresPlane1Fetch(void);
+static inline void loresPlane1Fetch(void);
+// planeN() for an enabled plane inside the fetch window.
+#define FETCH_PLANE(n) do { \
+        bitplaneLine.fetchedMask |= 1u << ((n) - 1); \
+        chipset.bpl##n##dat = internal.chipramW[chipset.bpl##n##pt]; \
+        chipset.bpl##n##pt += 1; \
+    } while (0)
+
 // Advances the E clock by k slots: it ticks every fifth slot.
 static inline void dmaEClock(int k) {
     const int counter = internal.eClockCounter - k;
@@ -957,10 +985,31 @@ void dma_run(int slots){
                     void (**table)() =
                         (chipset.bplcon0 & 0x8000) ? DMAHires : DMALores;
                     // Inactive slots do nothing while the Copper and the
-                    // blitter are idle; run only the others.
+                    // blitter are idle; run only the others. Inside the
+                    // window bitplaneActive() holds, so plane 2-6 slots are
+                    // fetched inline and plane-1 slots skip that test (the
+                    // Copper/blitter tails of the slot functions are no-ops
+                    // here).
+                    const int hires = (chipset.bplcon0 & 0x8000) != 0;
                     for (int x = slotNext[h]; x < end; x = slotNext[x + 1]) {
-                        internal.hPos = x;
-                        table[x]();
+                        switch (slotPlane[x]) {
+                        case 1:
+                            internal.hPos = x;
+                            if (hires)
+                                hiresPlane1Fetch();
+                            else
+                                loresPlane1Fetch();
+                            break;
+                        case 2: FETCH_PLANE(2); break;
+                        case 3: FETCH_PLANE(3); break;
+                        case 4: FETCH_PLANE(4); break;
+                        case 5: FETCH_PLANE(5); break;
+                        case 6: FETCH_PLANE(6); break;
+                        default:
+                            internal.hPos = x;
+                            table[x]();
+                            break;
+                        }
                     }
                     if (end - 1 == bitplaneLine.lastCycle)
                         dmaFetchWindowComplete();
@@ -1505,13 +1554,18 @@ void plane5(void){
 // per line).
 static int loresRowsFromDiw;
 
+static inline void loresPlane1Fetch(void);
+
 void loresPlane1(void){
-    
-    
     if(bitplaneActive()==0){
         return;
     }
-    
+    loresPlane1Fetch();
+}
+
+// loresPlane1() inside the fetch window (also called by dma_run()'s fetch
+// runs, where the window is known).
+static inline void loresPlane1Fetch(void){
     if(host.pixels == NULL){
         return;
     }
@@ -1557,7 +1611,7 @@ void loresPlane1(void){
     
     spriteLineRow = host.rasterRow;
     if (hostDirectActive) {
-        hostDirectLores(host.rasterRow, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat, chipset.bpl5dat, chipset.bpl6dat, chipset.bplcon0 & 0x800);
+        hostDirectLoresFast(host.rasterRow, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat, chipset.bpl5dat, chipset.bpl6dat, chipset.bplcon0 & 0x800);
     } else {
         uint32_t *pixels = hostRasterPixels(host.rasterRow, host.rasterX);
         if(chipset.bplcon0 & 0x800){
@@ -1633,6 +1687,8 @@ void plane3(){
     
 }
 
+static inline void hiresPlane1Fetch(void);
+
 void hiresPlane1(){
 
     if(bitplaneActive()==0){
@@ -1640,7 +1696,12 @@ void hiresPlane1(){
         evenCycle(); // let the copper run
         return;
     }
+    hiresPlane1Fetch();
+}
 
+// hiresPlane1() inside the fetch window (also called by dma_run()'s fetch
+// runs, where the window is known).
+static inline void hiresPlane1Fetch(void){
     if(host.pixels == NULL){
         return;
     }
@@ -1691,7 +1752,7 @@ void hiresPlane1(){
     }
 
     if (hostDirectActive) {
-        hostDirectHires(raster_row, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
+        hostDirectHiresFast(raster_row, host.rasterX, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
     } else {
         uint32_t *line = hostRasterPixels(raster_row, host.rasterX);
         hiresPlanar2Chunky(line, chipset.bpl1dat, chipset.bpl2dat, chipset.bpl3dat, chipset.bpl4dat);
