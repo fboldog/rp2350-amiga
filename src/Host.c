@@ -756,6 +756,24 @@ void releaseKey(uint16_t keyCode) {
     if (keyCode == 231) keyMask &= 0x3;
 }
 
+int hostResetRequested;
+
+// Sends one Amiga raw keycode (0x00-0x67) to the keyboard serial port, as
+// the Amiga keyboard does: the byte is rotated left with the up/down flag
+// in bit 0 and inverted. Ctrl + both Amiga keys resets the 68000.
+void hostAmigaKey(uint8_t code, int released) {
+    CIAWrite(&CIAA, 0xC, (uint8_t)~((code << 1) | (released ? 1 : 0)));
+    keyboardInt();
+    static uint8_t resetKeys;  // bit 0 Ctrl, 1 left Amiga, 2 right Amiga
+    const uint8_t bit = code == 0x63 ? 1 : code == 0x66 ? 2 : code == 0x67 ? 4 : 0;
+    if (released)
+        resetKeys &= (uint8_t)~bit;
+    else
+        resetKeys |= bit;
+    if (resetKeys == 7)
+        hostResetRequested = 1;  // done between slices (main loop)
+}
+
 void toggleLEDs(void) {
     LEDActive = 1 - LEDActive;
 }

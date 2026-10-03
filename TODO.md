@@ -95,9 +95,16 @@ alternative future backends.
       MHz) gives the USB clock from `PLL_SYS`. Board power must go to the
       VBUS pin so the USB-C VBUS carries 5 V. Mouse (JOY0DAT, both buttons)
       and keyboard (arrow keys in RemGame) verified through a powered hub.
-- [ ] Keyboard: report-protocol keyboards that ignore boot protocol, and
-      repeat/typematic is left to the Amiga; check special keys (Help, Del,
-      the Amiga keys) against `keyMapping[]`.
+- [x] **USB keymap and keyboard reset (2026-10-03).** `keyMapping[]` (Host.c)
+      is indexed by SDL key codes, not HID usages, so typing was wrong; USB
+      keys now map by position to Amiga raw keycodes (`hid_to_amiga[]`) via
+      `hostAmigaKey()`. Ctrl + both Amiga keys used the RESET-instruction
+      handler from inside `dma_run()`, leaving the 68000 stopped (white
+      screen); it now does a real 68000 + chip reset between slices. A CIA
+      interrupt pending at the reset left `irqLatch` set (CIA-A never
+      interrupted again, boot hung): `CIAInit()` clears latch, mask and
+      control registers. Verified on all three disks.
+- [ ] Keyboard: report-protocol keyboards that ignore boot protocol.
 - [ ] Joysticks / gamepads (port 2: JOY1DAT, CIA-A /FIR1).
 - [ ] Optional: PS/2 keyboard via GPIO PIO (simpler than USB, no hub support)
 

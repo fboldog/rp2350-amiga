@@ -340,6 +340,10 @@ OMEGA_LOOP_FUNC(emulation_loop)(void) {
 #if OMEGA_ENABLE_USB_HOST
         usb_input_poll();
 #endif
+        if (hostResetRequested) {
+            hostResetRequested = 0;
+            cpu_keyboard_reset();
+        }
         // hostDisplay is called exactly once per VBL by the DMA engine.  It
         // converts the intermediate beam raster into the 640x400 output.
     }

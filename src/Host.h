@@ -117,8 +117,13 @@ void loresHAM2Chunky(uint32_t *pixBuff,
                      uint16_t p1, uint16_t p2, uint16_t p3, uint16_t p4,
                      uint16_t p5, uint16_t p6);
 // ── Keyboard / mouse ──────────────────────────────────────────────────────
+// Keys by SDL key code (original Omega table; the native SDL build).
 void pressKey(uint16_t keyCode);
 void releaseKey(uint16_t keyCode);
+// One Amiga raw keycode (0x00-0x67) pressed or released (USB keyboards).
+void hostAmigaKey(uint8_t code, int released);
+// Set by Ctrl + both Amiga keys; the main loop calls cpu_keyboard_reset().
+extern int hostResetRequested;
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 void hostInit(void);

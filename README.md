@@ -516,9 +516,17 @@ keyboards are used through their boot protocol (`src/usb_input.c`):
 - Mouse movement updates the port-1 mouse counters (JOY0DAT) once per
   frame; left button is CIA-A PRA bit 6 (`/FIR0`), right and middle are
   POTINP DATLY/DATLX.
-- Keyboard reports become key presses and releases through `pressKey()` /
-  `releaseKey()`, one per frame so the Amiga's keyboard handshake never
-  loses a code. Other HID interfaces (media keys, vendor) are ignored.
+- Keyboard usages map to Amiga raw keycodes by key position
+  (`hid_to_amiga[]`), sent one per frame through `hostAmigaKey()` so the
+  Amiga's keyboard handshake never loses a code; the Amiga keymap picks the
+  characters (Workbench 1.3: US). Keys a PC keyboard lacks: Help on F11 and
+  Insert, the Amiga keys on the GUI keys (Menu as right Amiga), keypad ( )
+  on Num Lock / Scroll Lock. Caps Lock latches as on the Amiga. Other HID
+  interfaces (media keys, vendor) are ignored.
+- Ctrl + both Amiga keys resets the Amiga (`cpu_keyboard_reset()`, between
+  emulation slices): 68000 reset, CIAs and custom chips re-initialised,
+  Paula interrupts cleared, chip RAM kept (warm reset); the inserted disk
+  boots again.
 - TinyUSB runs on core 0: the emulation loop checks every 32nd pass whether
   the USB interrupt queued work (`tuh_task_event_ready()`), which costs
   nothing measurable. Core 1 must not run flash code (see the display

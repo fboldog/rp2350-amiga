@@ -1,8 +1,8 @@
 // USB HID input: TinyUSB host on the native USB port (the board's USB-C,
 // through a powered hub). Mice move the port-1 mouse counters (JOY0DAT) and
 // drive its buttons (left: CIA-A PRA bit 6, /FIR0; right/middle: POTINP
-// DATLY/DATLX); keyboards are sent to the Amiga keyboard through
-// pressKey()/releaseKey(), whose table is indexed by USB HID usage codes.
+// DATLY/DATLX); keyboard usages are mapped to Amiga raw keycodes by key
+// position and sent through hostAmigaKey().
 //
 // Everything runs on core 0: TinyUSB is polled from the emulation loop and
 // its callbacks only collect input; usb_input_frame() applies it once per
@@ -22,20 +22,70 @@ static int mouse_dx, mouse_dy;   // movement since the last frame
 static uint8_t mouse_buttons;    // HID buttons: bit 0 left, 1 right, 2 middle
 
 // ── Keyboard ──────────────────────────────────────────────────────────────
-// Key events wait here and go to the Amiga one per frame, so the keyboard
-// handshake (CIA-A serial register + interrupt) never overwrites a code the
-// Amiga has not read. Bit 15 marks a release.
+// USB HID usage (page 7) -> Amiga raw keycode, by key position (the Amiga
+// keymap then picks the characters, as on a real keyboard); 0xFF: no key.
+// Keys a PC keyboard lacks: Help on F11 and Insert, the Amiga keys on the
+// GUI keys (Menu as right Amiga), keypad ( ) on Num Lock / Scroll Lock.
+#define NO_KEY 0xFF
+static const uint8_t hid_to_amiga[0x68] = {
+    [0x04] = 0x20, [0x05] = 0x35, [0x06] = 0x33, [0x07] = 0x22, // a b c d
+    [0x08] = 0x12, [0x09] = 0x23, [0x0A] = 0x24, [0x0B] = 0x25, // e f g h
+    [0x0C] = 0x17, [0x0D] = 0x26, [0x0E] = 0x27, [0x0F] = 0x28, // i j k l
+    [0x10] = 0x37, [0x11] = 0x36, [0x12] = 0x18, [0x13] = 0x19, // m n o p
+    [0x14] = 0x10, [0x15] = 0x13, [0x16] = 0x21, [0x17] = 0x14, // q r s t
+    [0x18] = 0x16, [0x19] = 0x34, [0x1A] = 0x11, [0x1B] = 0x32, // u v w x
+    [0x1C] = 0x15, [0x1D] = 0x31,                               // y z
+    [0x1E] = 0x01, [0x1F] = 0x02, [0x20] = 0x03, [0x21] = 0x04, // 1 2 3 4
+    [0x22] = 0x05, [0x23] = 0x06, [0x24] = 0x07, [0x25] = 0x08, // 5 6 7 8
+    [0x26] = 0x09, [0x27] = 0x0A,                               // 9 0
+    [0x28] = 0x44, [0x29] = 0x45, [0x2A] = 0x41, [0x2B] = 0x42, // Return Esc BS Tab
+    [0x2C] = 0x40, [0x2D] = 0x0B, [0x2E] = 0x0C, [0x2F] = 0x1A, // Space - = [
+    [0x30] = 0x1B, [0x31] = 0x0D, [0x32] = 0x2B, [0x33] = 0x29, // ] \ #(intl) ;
+    [0x34] = 0x2A, [0x35] = 0x00, [0x36] = 0x38, [0x37] = 0x39, // ' ` , .
+    [0x38] = 0x3A, [0x39] = 0x62,                               // / Caps Lock
+    [0x3A] = 0x50, [0x3B] = 0x51, [0x3C] = 0x52, [0x3D] = 0x53, // F1-F4
+    [0x3E] = 0x54, [0x3F] = 0x55, [0x40] = 0x56, [0x41] = 0x57, // F5-F8
+    [0x42] = 0x58, [0x43] = 0x59, [0x44] = 0x5F,                // F9 F10 F11=Help
+    [0x47] = 0x5B, [0x49] = 0x5F,                               // ScrLk=KP) Ins=Help
+    [0x4C] = 0x46,                                              // Delete
+    [0x4F] = 0x4E, [0x50] = 0x4F, [0x51] = 0x4D, [0x52] = 0x4C, // right left down up
+    [0x53] = 0x5A, [0x54] = 0x5C, [0x55] = 0x5D, [0x56] = 0x4A, // NumLk=KP( / * -
+    [0x57] = 0x5E, [0x58] = 0x43,                               // KP+ KP Enter
+    [0x59] = 0x1D, [0x5A] = 0x1E, [0x5B] = 0x1F, [0x5C] = 0x2D, // KP1-4
+    [0x5D] = 0x2E, [0x5E] = 0x2F, [0x5F] = 0x3D, [0x60] = 0x3E, // KP5-8
+    [0x61] = 0x3F, [0x62] = 0x0F, [0x63] = 0x3C,                // KP9 KP0 KP.
+    [0x64] = 0x30, [0x65] = 0x67,                               // <>(intl) Menu=RAmiga
+};
+// Modifiers (usages 0xE0-0xE7): LCtrl LShift LAlt LGUI RCtrl RShift RAlt RGUI.
+static const uint8_t modifier_to_amiga[8] = {
+    0x63, 0x60, 0x64, 0x66, 0x63, 0x61, 0x65, 0x67,
+};
+
+static uint8_t amiga_key(uint8_t usage) {
+    if (usage >= sizeof(hid_to_amiga))
+        return NO_KEY;
+    const uint8_t code = hid_to_amiga[usage];
+    // Unlisted entries are 0, which is also the ` key (usage 0x35).
+    return code || usage == 0x35 ? code : NO_KEY;
+}
+
+// Amiga key events wait here and go to the Amiga one per frame, so the
+// keyboard handshake (CIA-A serial register + interrupt) never overwrites a
+// code the Amiga has not read. Bit 7 marks a release.
 #define KEY_QUEUE 64
-static uint16_t key_queue[KEY_QUEUE];
+static uint8_t key_queue[KEY_QUEUE];
 static unsigned key_head, key_tail;
 static uint8_t prev_modifiers;
 static uint8_t prev_keys[6];
+static int caps_locked;
 
-static void queue_key(uint8_t usage, int release) {
+static void queue_key(uint8_t code, int release) {
+    if (code == NO_KEY)
+        return;
     const unsigned next = (key_head + 1) % KEY_QUEUE;
     if (next == key_tail)
         return;  // full: drop rather than block
-    key_queue[key_head] = usage | (release ? 0x8000u : 0);
+    key_queue[key_head] = (uint8_t)(code | (release ? 0x80u : 0));
     key_head = next;
 }
 
@@ -46,19 +96,31 @@ static int key_in(uint8_t key, const uint8_t *keys) {
     return 0;
 }
 
+static void key_change(uint8_t usage, int release) {
+    if (usage == 0x39) {
+        // Caps Lock latches on the Amiga: "down" while locked, "up" when
+        // unlocked. USB sends press and release on every stroke.
+        if (!release) {
+            caps_locked = !caps_locked;
+            queue_key(0x62, !caps_locked);
+        }
+        return;
+    }
+    queue_key(amiga_key(usage), release);
+}
+
 static void keyboard_report(const hid_keyboard_report_t *r) {
-    // Modifiers are usages 224..231 (left Ctrl .. right GUI).
     const uint8_t changed = r->modifier ^ prev_modifiers;
     for (int bit = 0; bit < 8; ++bit)
         if (changed & (1u << bit))
-            queue_key((uint8_t)(224 + bit), !(r->modifier & (1u << bit)));
+            queue_key(modifier_to_amiga[bit], !(r->modifier & (1u << bit)));
     prev_modifiers = r->modifier;
     for (int i = 0; i < 6; ++i)
-        if (prev_keys[i] > 1 && !key_in(prev_keys[i], r->keycode))
-            queue_key(prev_keys[i], 1);
+        if (prev_keys[i] > 3 && !key_in(prev_keys[i], r->keycode))
+            key_change(prev_keys[i], 1);
     for (int i = 0; i < 6; ++i)
-        if (r->keycode[i] > 1 && !key_in(r->keycode[i], prev_keys))
-            queue_key(r->keycode[i], 0);
+        if (r->keycode[i] > 3 && !key_in(r->keycode[i], prev_keys))
+            key_change(r->keycode[i], 0);
     memcpy(prev_keys, r->keycode, sizeof(prev_keys));
 }
 
@@ -153,11 +215,8 @@ void usb_input_frame(void) {
         chipset.potinp |= 0x0100;
 
     if (key_tail != key_head) {
-        const uint16_t e = key_queue[key_tail];
+        const uint8_t e = key_queue[key_tail];
         key_tail = (key_tail + 1) % KEY_QUEUE;
-        if (e & 0x8000u)
-            releaseKey(e & 0xFF);
-        else
-            pressKey(e & 0xFF);
+        hostAmigaKey(e & 0x7F, e & 0x80);
     }
 }

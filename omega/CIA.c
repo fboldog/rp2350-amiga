@@ -84,6 +84,14 @@ void CIAInit(CIA_t* cia,uint16_t paulaMask){
     ciaHorizon = 1; // safe: the next tick runs CIAExecute()
     
     cia->icr = 0;
+    // As the reset line does: interrupt mask, control registers and the
+    // raised-interrupt latch cleared (all already zero at power-on; a
+    // keyboard reset with a CIA interrupt pending left the latch set, so the
+    // CIA could never interrupt again).
+    cia->icrMask = 0;
+    cia->irqLatch = 0;
+    cia->cra = 0;
+    cia->crb = 0;
     
     //cia->cra = 1;   //may as well have them running at boot....
     //cia->crb = 1;

@@ -54,6 +54,30 @@ void cpu_pulse_reset(void){
 }
 
 
+/* Keyboard reset (Ctrl + both Amiga keys): what the keyboard's reset line
+   does to a real Amiga. Unlike the RESET instruction (cpu_pulse_reset()),
+   the 68000 itself is reset: STOP cleared, supervisor mode, interrupts
+   masked. Then both CIAs, the custom chips and Paula's interrupt
+   registers are re-initialised and the
+   CPU starts at the Kickstart entry, as at power-on (no ROM overlay is
+   emulated, so the reset vectors are not read from address 0). Chip RAM is
+   kept: a warm reset. Call it between emulation slices, never from inside
+   dma_run(). */
+void cpu_keyboard_reset(void){
+    printf("Keyboard reset\n");
+    m68k_pulse_reset();
+    CIAInit(&CIAA, 32776);
+    CIAInit(&CIAB, 40960);
+    ChipsetInit();
+    // Paula's interrupt enables and requests clear with the reset line, and
+    // the 68000's interrupt input drops.
+    chipset.intenar = 0;
+    chipset.intreqr = 0;
+    m68k_set_irq(0);
+    m68k_set_reg(M68K_REG_SR, 0x2700);
+    m68k_set_reg(M68K_REG_PC, 0xF80002); //start executing at the ROM + 2
+}
+
 void cpu_init(){
 
     //set CIA IDs
