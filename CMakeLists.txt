@@ -96,6 +96,7 @@ endif()
 set(OMEGA_SOURCES
     omega/Blitter.c
     omega/Chipset.c
+    omega/Audio.c
     omega/CIA.c
     omega/CPU.c
     omega/debug.c

@@ -32,6 +32,24 @@ void pressKey(uint16_t keyCode)   { (void)keyCode; }
 void releaseKey(uint16_t keyCode) { (void)keyCode; }
 void toggleLEDs(void)             { }
 
+// ── Audio: OMEGA_PCM=<file> writes 48 kHz signed 16-bit stereo PCM ───────
+// (play or convert with e.g. ffmpeg -f s16le -ar 48000 -ac 2 -i <file> ...)
+#include "Audio.h"
+void hostAudioOut(const int16_t *samples, int frames) {
+    static FILE *pcm;
+    static int opened;
+    if (!opened) {
+        opened = 1;
+        const char *path = getenv("OMEGA_PCM");
+        if (path)
+            pcm = fopen(path, "wb");
+    }
+    if (!pcm)
+        return;
+    static const int16_t silence[2 * 8];
+    fwrite(samples ? samples : silence, 2 * sizeof(int16_t), (size_t)frames, pcm);
+}
+
 // ── Lifecycle ────────────────────────────────────────────────────────────
 void hostInit(void) {
     fb = calloc(SCREEN_W * SCREEN_H, sizeof(uint32_t));

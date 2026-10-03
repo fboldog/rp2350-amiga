@@ -62,6 +62,7 @@ fi
 # omega/ core, minus the Musashi disassembler (not needed head-less, and it
 # trips -Werror-ish format warnings under GCC 14).
 OMEGA_SRC=(
+  omega/Audio.c
   omega/Blitter.c
   omega/Chipset.c
   omega/CIA.c

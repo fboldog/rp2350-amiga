@@ -14,6 +14,7 @@
 
 #include "Chipset.h"
 #include "CIA.h"
+#include "Audio.h"
 #include "CPU.h"
 #include "m68k.h"
 #include "DMA.h"
@@ -60,6 +61,7 @@ void ChipsetInit(){
     internal.vPos = 0;
     internal.bitplaneMask = 0;
     dmaLineStateDirty = 1;
+    audioReset();
     
     //For OS 1.x
     chipset.dsksync=0x4489;
@@ -511,11 +513,13 @@ void ddfstop(uint16_t value){
 
 void  dmacon(uint16_t value){
     dmaLineStateDirty = 1;
+    const uint16_t old = chipset.dmaconr;
     if( (value & 32768) ==0){
         chipset.dmaconr = chipset.dmaconr ^ (chipset.dmaconr & value);
     }else{
         chipset.dmaconr = chipset.dmaconr | (value  & 2047); //top 5 bits not writable
     }
+    audioDmaconChanged(old);
 }
 
 void clxcon(uint16_t value){
@@ -574,6 +578,7 @@ void aud0vol(uint16_t value){
 
 void aud0dat(uint16_t value){
     chipset.aud0dat = value;
+    audioDatWritten(0);
 }
 
 void aud1lch(uint16_t value){
@@ -593,11 +598,12 @@ void aud1per(uint16_t value){
 }
 
 void aud1vol(uint16_t value){
-    chipset.aud0vol = value;
+    chipset.aud1vol = value;
 }
 
 void aud1dat(uint16_t value){
     chipset.aud1dat = value;
+    audioDatWritten(1);
 }
 
 void aud2lch(uint16_t value){
@@ -622,6 +628,7 @@ void aud2vol(uint16_t value){
 
 void aud2dat(uint16_t value){
     chipset.aud2dat = value;
+    audioDatWritten(2);
 }
 
 void aud3lch(uint16_t value){
@@ -646,6 +653,7 @@ void aud3vol(uint16_t value){
 
 void aud3dat(uint16_t value){
     chipset.aud3dat = value;
+    audioDatWritten(3);
 }
 
 

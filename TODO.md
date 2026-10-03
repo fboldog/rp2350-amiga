@@ -133,12 +133,16 @@ Splitting onto two cores removes the manual interleaving and makes both faster.
 Omega has audio register stubs but no PCM output. Plan (2026-10-03): HDMI
 audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
 
-- [ ] **Paula emulation** (needed for any output). Fix the audio DMA enable
-      test first (see "Audio DMA never runs" in P2), then emulate the four
-      channels in `audio0Cycle`–`audio3Cycle`: AUDxLC/LEN/PER/VOL/DAT, the
-      DMA state machine and the AUDx interrupts (games wait for them).
-- [ ] **Mixer**: channels 0+3 left, 1+2 right, resampled to 48 kHz stereo
-      into a buffer core 1 reads. Emulation is not always real time
+- [x] **Paula emulation (2026-10-03)** in `omega/Audio.c`: DMA channels with
+      block reload and audio interrupts, CPU-written AUDxDAT, periods,
+      volume, advanced once per raster line. Fixed: audio DMA tested
+      `chipset.dmacon` (never written), AUD1VOL wrote channel 0. RemGame's
+      music verified in the native build (`OMEGA_PCM`). Cost ~3 % (RemGame
+      31.0 → 30.0 fps), ~4 % idle xSysinfo; ~1 % is the audio work, the rest
+      could not be pinned down (not flash placement, not loop alignment).
+- [ ] Attach modes (ADKCON USE*V*/USE*P*): volume/period modulation.
+- [ ] **Mixer**: channels 0+3 left, 1+2 right at 48 kHz (done, in
+      `audioLine()`), into a buffer core 1 reads. Emulation is not always real time
       (RemGame runs at half speed), so the buffer needs a policy for
       under/overrun (resample, or drop/repeat samples).
 - [ ] **HDMI audio over HSTX** (the SDK only does DVI):
@@ -566,8 +570,8 @@ appears only ~2 min 12 s later.
       share the 16 KB XIP cache and the QMI bus at the same clock, and a
       PSRAM miss is no cheaper (flash can use continuous-read mode; PSRAM
       needs a command per access and also carries chip RAM traffic).
-- [ ] **Audio DMA never runs.** `audioNCycle()` tests `chipset.dmacon`, but
-      DMACON writes update `chipset.dmaconr`; audio is not emulated yet anyway.
+- [x] **Audio DMA never ran** (`chipset.dmacon` vs `dmaconr`): fixed with
+      Paula (Phase 5).
 - [ ] **SRAM window over low chip RAM** (vectors, stacks, hot Exec data) once
       SRAM is available; one compare per access saves a QSPI round trip.
 

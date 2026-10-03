@@ -18,6 +18,7 @@
 #endif
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
+#include "../omega/Audio.h"
 #include "../omega/CPU.h"
 #include "../omega/VideoStandard.h"
 #include "pico/stdlib.h"
@@ -757,6 +758,13 @@ void releaseKey(uint16_t keyCode) {
 }
 
 int hostResetRequested;
+
+// Paula's 48 kHz stereo output (omega/Audio.c). Not played yet: HDMI audio
+// is the next step (TODO.md, Phase 5).
+void hostAudioOut(const int16_t *samples, int frames) {
+    (void)samples;
+    (void)frames;
+}
 
 // Sends one Amiga raw keycode (0x00-0x67) to the keyboard serial port, as
 // the Amiga keyboard does: the byte is rotated left with the up/down flag

@@ -16,6 +16,7 @@
 #include "Memory.h"
 #include "Chipset.h"
 #include "CIA.h"
+#include "Audio.h"
 #include "Host.h"
 #if defined(PICO_BUILD) && OMEGA_ENABLE_HDMI
 #include "HostRing.h"
@@ -767,15 +768,16 @@ static uint32_t slotNextKey = ~0u;
 static int slotIsActive(void (*f)(), int h) {
     if (h >= SLOT_LAST || h == bitplaneLine.lastCycle)
         return 1;
-    if (f == evenCycle || f == oddCycle || f == dramCycle)
+    // Audio slots do nothing per slot (Audio.c advances once per line); with
+    // audio DMA on they keep the slot from the blitter, which never runs
+    // while slots are skipped.
+    if (f == evenCycle || f == oddCycle || f == dramCycle ||
+        f == audio0Cycle || f == audio1Cycle || f == audio2Cycle ||
+        f == audio3Cycle)
         return 0;
     if (f == spriteCycle)
         return (chipset.dmaconr & 0x220) == 0x220 &&
                internal.vPos >= OMEGA_SPRITE_FIRST_LINE;
-    if (f == audio0Cycle) return (chipset.dmacon & 0x201) == 0x201;
-    if (f == audio1Cycle) return (chipset.dmacon & 0x202) == 0x202;
-    if (f == audio2Cycle) return (chipset.dmacon & 0x204) == 0x204;
-    if (f == audio3Cycle) return (chipset.dmacon & 0x208) == 0x208;
     if (f == loresPlane1 || f == hiresPlane1)
         return lineBitplaneWindow && h >= chipset.ddfstrt &&
                h <= bitplaneLine.lastCycle;
@@ -807,7 +809,6 @@ static void slotNextUpdate(void) {
                         internal.vPos >= OMEGA_SPRITE_FIRST_LINE;
     const uint32_t key = (uint32_t)hires | (uint32_t)lineBitplaneWindow << 1 |
                          (uint32_t)sprites << 2 |
-                         (uint32_t)(chipset.dmacon & 0xf) << 3 |
                          (uint32_t)(chipset.ddfstrt & 0xff) << 7 |
                          (uint32_t)(bitplaneLine.lastCycle & 0x1ff) << 15 |
                          (uint32_t)(internal.bitplaneMask & 0x3f) << 24;
@@ -891,6 +892,7 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
     // at it for display only; do not advance any bitplane pointer.
     hiresDisplayPrefetch();
 
+    audioLine();
     internal.hPos = 0;
     internal.vPos +=1;
     CIATODEvent(&CIAB);
@@ -1217,98 +1219,18 @@ void diskCycle(void){
 }
 
 
-void audio0Cycle(void){
-    
-    if((chipset.dmacon & 0x201) == 0x201){
-        
-        internal.audio0Countdown -=1;
-        
-        if(internal.audio0Countdown<0){
-            internal.audio0Countdown = chipset.aud0per;
-
-        
-            chipset.aud0len -=1;
-        
-            if(chipset.aud0len ==0){
-                internal.audio0Countdown = 0;
-                putChipReg16[INTREQ](0x8080);
-            }
-        }
-        return;
+// Audio DMA slots: with the channel's DMA on the slot is Paula's (the data
+// itself is fetched by Audio.c once per line); otherwise the blitter may
+// use it.
+#define AUDIO_SLOT(c) \
+    void audio##c##Cycle(void){ \
+        if ((chipset.dmaconr & (0x200u | (1u << (c)))) != (0x200u | (1u << (c)))) \
+            oddCycle(); \
     }
-    
-    oddCycle();
-}
-
-
-void audio1Cycle(void){
-    
-    if((chipset.dmacon & 0x202) == 0x202){
-        
-        internal.audio1Countdown -=1;
-        
-        if(internal.audio1Countdown<0){
-            internal.audio1Countdown = chipset.aud1per;
-            
-            
-            chipset.aud1len -=1;
-            
-            if(chipset.aud1len ==0){
-                internal.audio1Countdown = 0;
-                putChipReg16[INTREQ](0x8100);
-            }
-        }
-        return;
-    }
-    
-    oddCycle();
-}
-
-void audio2Cycle(void){
-    
-    if((chipset.dmacon & 0x204) == 0x204){
-        
-        internal.audio2Countdown -=1;
-        
-        if(internal.audio2Countdown<0){
-            internal.audio2Countdown = chipset.aud2per;
-            
-            
-            chipset.aud2len -=1;
-            
-            if(chipset.aud2len ==0){
-                internal.audio2Countdown = 0;
-                putChipReg16[INTREQ](0x8200);
-            }
-        }
-        return;
-    }
-    
-    oddCycle();
-}
-
-void audio3Cycle(void){
-    
-    if((chipset.dmacon & 0x208) == 0x208){
-        
-        internal.audio3Countdown -=1;
-        
-        if(internal.audio3Countdown<0){
-            internal.audio3Countdown = chipset.aud3per;
-            
-            
-            chipset.aud3len -=1;
-            
-            if(chipset.aud3len ==0){
-                internal.audio3Countdown = 0;
-                putChipReg16[INTREQ](0x8400);
-            }
-        }
-        return;
-    }
-    
-    oddCycle();
-}
+AUDIO_SLOT(0)
+AUDIO_SLOT(1)
+AUDIO_SLOT(2)
+AUDIO_SLOT(3)
 
 
 // ── Sprites ───────────────────────────────────────────────────────────────

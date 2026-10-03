@@ -23,6 +23,7 @@ Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | Custom chipset + CIA + DMA | ✅ |
 | Floppy (DF0 raw flash ADF + PSRAM track buffer) | ✅ verified; build-disabled by default |
 | HDMI output (HSTX) | ✅ verified NTSC and PAL; build-disabled by default |
+| Paula audio | ✅ emulated, 48 kHz stereo (native: `OMEGA_PCM=<file>`); HDMI output not yet |
 | USB HID keyboard/mouse | ✅ verified (mouse + keyboard receivers through a powered hub); HDMI builds |
 
 ## Hardware
@@ -94,7 +95,7 @@ differ.
 | `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
 | Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
 | Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
-| **Free** | **~4 KB / ~24 KB** | Between the heap and the end of main SRAM; USB host takes ~6 KB of it (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
+| **Free** | **~2 KB / ~22 KB** | Between the heap and the end of main SRAM; USB host takes ~6 KB of it (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
 | `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and 2 KB free |
 | `SCRATCH_Y` | 4 KB | Core 0 stack |
 
@@ -507,6 +508,25 @@ SRAM frames; wrapped-fetch modes use the raster and the
 Logical Amiga scanlines and LORES overscan positioning match the native test
 runner.
 
+## Audio
+
+Paula's four channels are emulated in `omega/Audio.c`: audio DMA with block
+reload and the audio interrupts (raised when a block starts, so software can
+queue the next), CPU-written `AUDxDAT` playback (each word plays once, the
+interrupt asks for the next), periods (0 counts as 65536; DMA periods below
+124 are clamped) and volume. Channels run in emulated colour clocks and are
+advanced once per raster line from `dmaEndOfLine()`; the line's 48 kHz
+stereo samples (channels 0+3 left, 1+2 right) go to `hostAudioOut()` in one
+call, or as a sample count when every channel is off. Attach modes (ADKCON)
+are not emulated.
+
+The native runner writes the output with `OMEGA_PCM=<file>` (48 kHz signed
+16-bit stereo; e.g. `ffmpeg -f s16le -ar 48000 -ac 2 -i <file> out.wav`).
+RemGame's music plays this way. On the board the samples are not output yet:
+HDMI audio is the next step (TODO.md, Phase 5). Paula costs ~3 % in RemGame
+(31.0 → 30.0 frames/s) and ~4 % on idle xSysinfo, most of it not the
+per-line work itself (~1 %).
+
 ## USB keyboard and mouse
 
 HDMI builds run a TinyUSB host on the RP2350's native USB port, the board's
@@ -583,6 +603,7 @@ deadline.
 | `Chipset.c` / `Chipset.h` | Custom-chip registers: read/write dispatch tables (16- and 32-bit), colour registers (palette, EHB, palette log for HDMI), DMACON/INTENA/INTREQ, sprite and bitplane pointers, 32-bit writes split into two 16-bit ones |
 | `Blitter.c` / `Blitter.h` | Blitter: area copy with minterms, shifts and masks, line drawing, area fill |
 | `CIA.c` / `CIA.h` | The two 8520 CIAs: timers, TOD counters, interrupts, keyboard serial port, disk control lines |
+| `Audio.c` / `Audio.h` | Paula audio: four DMA channels (block reload, audio interrupts, CPU-written AUDxDAT), periods and volume, mixed to 48 kHz stereo once per raster line (`hostAudioOut()`) |
 | `Floppy.c` / `Floppy.h` | DF0 drive: motor/step/side, disk change, MFM encoding of the active track from the flash ADF (into PSRAM on the board), the data stream read by disk DMA |
 | `CPU.c` / `CPU.h` | Glue to Musashi: memory callbacks, interrupt levels from INTENA/INTREQ, reset |
 | `m68k*.c`, `m68k*.h` | Musashi 68000 core. On the RP2350 the opcode table is two-level (`m68kops.c`) and cycle counts are per handler; `m68kdasm.c` is the disassembler (debug only) |
