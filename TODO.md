@@ -119,13 +119,33 @@ Splitting onto two cores removes the manual interleaving and makes both faster.
 
 ## Phase 5 – Audio
 
-Omega has audio register stubs but no PCM output.
+Omega has audio register stubs but no PCM output. Plan (2026-10-03): HDMI
+audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
 
-- [ ] Implement `audio0Cycle`–`audio3Cycle` in `omega/DMA.c` to generate 8-bit samples
-- [ ] Set up I2S or PWM audio output on RP2350
-      - PWM: `hardware_pwm` at 44.1 kHz, mix 4 channels → mono/stereo
-      - I2S: use PIO + `hardware_pio`; needs I2S DAC (PCM5102 etc.)
-- [ ] Ring-buffer between DMA audio cycles and audio output ISR
+- [ ] **Paula emulation** (needed for any output). Fix the audio DMA enable
+      test first (see "Audio DMA never runs" in P2), then emulate the four
+      channels in `audio0Cycle`–`audio3Cycle`: AUDxLC/LEN/PER/VOL/DAT, the
+      DMA state machine and the AUDx interrupts (games wait for them).
+- [ ] **Mixer**: channels 0+3 left, 1+2 right, resampled to 48 kHz stereo
+      into a buffer core 1 reads. Emulation is not always real time
+      (RemGame runs at half speed), so the buffer needs a policy for
+      under/overrun (resample, or drop/repeat samples).
+- [ ] **HDMI audio over HSTX** (the SDK only does DVI):
+      - Data islands in horizontal blanking: preamble, guard bands, TERC4
+        symbols with BCH ECC, sent as raw 10-bit HSTX symbols in each line's
+        command list (the driver already sends raw control symbols there).
+        640×480p60 has 160 and 720×576p50 144 blanking pixels; a data
+        island with one or two packets takes roughly 50-90 pixel times.
+      - Packets: audio samples (up to 4 stereo samples each; ~1.5 per line
+        at 48 kHz on the NTSC line rate), Audio Clock Regeneration (N/CTS
+        for the 25.2 MHz / 27 MHz pixel clocks), and once per frame the AVI
+        and Audio InfoFrames (also switch the sink from DVI to HDMI mode).
+      - Encoding on core 1 (30-50 % idle; the PicoDVI community encodes
+        HDMI audio in software on the RP2040).
+      - Start with a test tone and record it with the HDMI capture card,
+        then connect the mixer. DVI-only monitors ignore the audio.
+- [ ] Fallbacks: PWM on a spare GPIO (RC filter), or an I2S DAC (PCM5102)
+      via PIO.
 
 ---
 
