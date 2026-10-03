@@ -59,9 +59,27 @@ void memory_clear_chipram(void);
 unsigned int chipReadByte(unsigned int address);
 unsigned int chipReadWord(unsigned int address);
 unsigned int chipReadLong(unsigned int address);
-// Instruction fetch for Musashi's prefetch (RP2350): ROM first, then chip RAM.
+// Instruction fetch for Musashi's prefetch (RP2350): a page-table lookup
+// (chip RAM, ROM), anything else through chipReadWord/Long.
 unsigned int chipFetchWord(unsigned int address);
 unsigned int chipFetchLong(unsigned int address);
+
+#ifdef PICO_BUILD
+// Host address of each 64 KB page of plain memory, NULL elsewhere (see
+// Memory.c). chipFetchLongInline() reads code through it without a call;
+// Musashi's prefetch uses it (m68kconf.h).
+extern const uint8_t *chip_fetch_page[0x100];
+static inline unsigned int chipFetchLongInline(unsigned int address) {
+    const uint8_t *page =
+        address < 0x1000000u ? chip_fetch_page[address >> 16] : (const uint8_t *)0;
+    if (page) {
+        uint32_t v;
+        __builtin_memcpy(&v, page + (address & 0xFFFFu), sizeof(v));
+        return __builtin_bswap32(v);
+    }
+    return chipFetchLong(address);
+}
+#endif
 
 void chipWriteByte(unsigned int address, unsigned int value);
 void chipWriteWord(unsigned int address, unsigned int value);

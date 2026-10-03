@@ -469,6 +469,16 @@ appears only ~2 min 12 s later.
       1,946,800 bytes free). Board: Workbench 1.3, xSysinfo (1.99 MB chip,
       fast RAM 0) and RemGame (27.7 fps, now from chip RAM) run as before.
       PSRAM `0x200000`-`0x27FFFF` is free.
+- [x] **Stopped CPU and inline instruction fetch (2026-10-03).** A fresh
+      profile of `main` (bd6513e) showed idle screens calling `m68k_execute()`
+      every slice with the 68000 in STOP (entry/exit ~4 %), and the prefetch
+      calling `chipFetchLong()` per 32-bit code word. `m68k_execute()` now
+      tests STOP before saving registers (loop in `m68k_execute_running()`),
+      and the prefetch reads `chip_fetch_page[]` inline
+      (`chipFetchLongInline()`, ~2 KB more SRAM code; PAL free ~10 KB).
+      NTSC 5 cycles/slot: xSysinfo drawn 13.0 → 12.8 s, Workbench boot 31.9
+      → 31.0 s, idle 45.5 → 47.1 (xSysinfo) and 50.6 → 52.4 (Workbench),
+      RemGame 27.7 → 27.9 fps.
 - [ ] **Idea: dynamic hot opcode cache in SRAM.** Adapt the SRAM handler set
       to the running software instead of a build-time list:
       1. Sampling: at each line end `dma_run()` counts the handler of the

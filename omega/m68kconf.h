@@ -185,7 +185,7 @@
 
 #ifdef PICO_BUILD
 #define m68k_read_immediate_16(A) chipFetchWord(A)
-#define m68k_read_immediate_32(A) chipFetchLong(A)
+#define m68k_read_immediate_32(A) chipFetchLongInline(A)
 #define m68k_read_pcrelative_8(A) cpu_read_byte(A)
 #define m68k_read_pcrelative_16(A) cpu_read_word(A)
 #define m68k_read_pcrelative_32(A) cpu_read_long(A)

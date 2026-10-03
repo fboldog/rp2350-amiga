@@ -641,10 +641,25 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 
 /* Execute some instructions until we use up num_cycles clock cycles */
 /* ASG: removed per-instruction interrupt checks */
+static int m68k_execute_running(int num_cycles);
+
+/* The main loop calls this every few DMA slots. Idle screens leave the CPU
+   in STOP, so that case returns before any register is saved; the
+   instruction loop lives in m68k_execute_running(). */
 int m68k_execute(int num_cycles)
 {
-	/* Make sure we're not stopped */
-	if(!CPU_STOPPED)
+	if(CPU_STOPPED)
+	{
+		/* Stopped or halted: no instructions, all cycles used */
+		SET_CYCLES(0);
+		CPU_INT_CYCLES = 0;
+		return num_cycles;
+	}
+	return m68k_execute_running(num_cycles);
+}
+
+static int __attribute__((noinline)) m68k_execute_running(int num_cycles)
+{
 	{
 		/* Set our pool of clock cycles available */
 		SET_CYCLES(num_cycles);
@@ -706,12 +721,6 @@ int m68k_execute(int num_cycles)
 		/* return how many clocks we used */
 		return m68ki_initial_cycles - GET_CYCLES();
 	}
-
-	/* We get here if the CPU is stopped or halted */
-	SET_CYCLES(0);
-	CPU_INT_CYCLES = 0;
-
-	return num_cycles;
 }
 
 

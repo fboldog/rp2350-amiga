@@ -76,7 +76,7 @@ static inline const uint8_t *rom_ptr(uint32_t amiga_addr) {
 // slowed register accesses (idle screens -1 %) without helping.
 #define PAGE_SHIFT 16
 #define PAGE_COUNT (0x1000000u >> PAGE_SHIFT)
-static const uint8_t *fetch_page[PAGE_COUNT];
+const uint8_t *chip_fetch_page[PAGE_COUNT];
 
 static void memory_map_pages(void) {
     for (uint32_t p = 0; p < PAGE_COUNT; ++p) {
@@ -86,7 +86,7 @@ static void memory_map_pages(void) {
             mem = chip_ram + a;
         else if (a >= 0xF80000u && rom_base)
             mem = rom_base + rom_addr(a);
-        fetch_page[p] = mem;
+        chip_fetch_page[p] = mem;
     }
 }
 
@@ -94,7 +94,7 @@ static void memory_map_pages(void) {
 static inline const uint8_t *fetch_ptr(uint32_t address) {
     if (address >= 0x1000000u)
         return NULL;
-    const uint8_t *page = fetch_page[address >> PAGE_SHIFT];
+    const uint8_t *page = chip_fetch_page[address >> PAGE_SHIFT];
     return page ? page + (address & ((1u << PAGE_SHIFT) - 1)) : NULL;
 }
 

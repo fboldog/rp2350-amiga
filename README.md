@@ -90,7 +90,7 @@ differ.
 | `image_lines` | 5.1 KB | Two RGB888 row buffers with HSTX commands, expanded by the scanout interrupt |
 | `c2p_spread` | 2 KB | Planar-to-chunky lookup table (core 1) |
 | `rgb332_rgb888` | 1 KB | RGB332 → RGB888 table (boot pattern, fallback frames) |
-| `fetch_page` | 1 KB | 68000 instruction-fetch page table: host pointer per 64 KB page |
+| `chip_fetch_page` | 1 KB | 68000 instruction-fetch page table: host pointer per 64 KB page |
 | `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
 | Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
 | Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
@@ -407,7 +407,7 @@ Workbench 1.3 boot 36.9 → 33.0 s, idle xSysinfo 45.0 → 46.2 and Workbench
 in PSRAM instead of flash would not help: both sit behind the same XIP
 cache and QMI bus, and a PSRAM miss is no cheaper.
 
-Instruction fetches look up a 256-entry page table (`fetch_page[]` in
+Instruction fetches look up a 256-entry page table (`chip_fetch_page[]` in
 `src/Memory.c`, one host pointer per 64 KB page: chip RAM, ROM with its
 mirror; NULL elsewhere). Before, only ROM and chip RAM had a fast path,
 and RemGame, which then ran from slow RAM, walked the register range
@@ -415,6 +415,13 @@ checks on every fetch. Data accesses keep their range checks; a lookup in
 front of them slowed register accesses. RemGame 26.1 → 27.6 fps, xSysinfo
 drawn 13.7 → 13.5 s; an SRAM cache for chip RAM would not pay off (load
 stalls ~2.6 % of core 0 in RemGame, XIP misses 0.33 M/s).
+Musashi's prefetch reads through that table inline
+(`chipFetchLongInline()` in `src/Memory.h`), without a call, and
+`m68k_execute()` checks for STOP before saving any register (idle screens
+leave the 68000 stopped while the main loop still calls it every slice):
+xSysinfo drawn 13.0 → 12.8 s, Workbench 1.3 boot 31.9 → 31.0 s, idle
+xSysinfo 45.5 → 47.1 and Workbench 50.6 → 52.4 frames/s, RemGame 27.7 →
+27.9 fps.
 
 The CIA timers are clocked in batches (`CIAClock()` in `omega/CIA.h`). Most
 E-clock ticks only count the running timers down, so they are just counted;
