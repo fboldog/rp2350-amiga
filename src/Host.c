@@ -2,11 +2,14 @@
 //
 // Video:   renders planar→chunky into a PSRAM framebuffer and, when enabled,
 //          submits completed frames to the PicoDVI scanout running on core 1.
-// Input:   USB HID via TinyUSB (stubs until USB stack is wired up).
+// Input:   USB HID via TinyUSB (src/usb_input.c, USB host builds).
 // Serial:  printf → UART via pico_stdio_uart (configured in CMakeLists.txt).
 
 #include "Host.h"
 #include "HostRing.h"
+#if OMEGA_ENABLE_USB_HOST
+#include "usb_input.h"
+#endif
 #include "Presentation.h"
 #include "psram.h"
 #include "../omega/DisplayLayout.h"
@@ -792,8 +795,9 @@ void hostInit(void) {
 }
 
 void hostDisplay(void) {
-    // Mouse / joystick: stub – wire up USB HID here.
-    // For now, leave joy0dat alone so Workbench won't crash on NULL ptr.
+#if OMEGA_ENABLE_USB_HOST
+    usb_input_frame();  // mouse counters, buttons, one queued key
+#endif
 #if OMEGA_ENABLE_HDMI
     if (direct_frame) {
         hostDirectFinish();

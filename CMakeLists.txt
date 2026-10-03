@@ -17,9 +17,12 @@ option(OMEGA_ENABLE_FLASH_FLOPPY "Load ADF images embedded in flash" OFF)
 option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OFF)
 # HDMI builds only: HSTX runs from PLL_USB, so clk_sys is independent of the
 # video mode. PSRAM runs at clk_sys / ceil(clk_sys / 133 MHz).
-# 320 MHz (PSRAM at 107 MHz) boots fastest; 266 MHz gives PSRAM 133 MHz; a
-# multiple of 48 MHz (e.g. 240) would let USB run from PLL_SYS.
-set(OMEGA_SYS_CLK_KHZ 320000 CACHE STRING "clk_sys in kHz for HDMI builds")
+# USB host needs 48 MHz from PLL_SYS (PLL_USB drives HSTX), so clk_sys must
+# be a multiple of 48 MHz: 336 MHz (PSRAM and flash at 112 MHz); 320 MHz
+# (without USB host) was the previous default.
+set(OMEGA_SYS_CLK_KHZ 336000 CACHE STRING "clk_sys in kHz for HDMI builds")
+option(OMEGA_ENABLE_USB_HOST
+       "USB host on the native port for HID mice and keyboards (HDMI builds)" ON)
 # 68000 cycles per DMA slot (colour clock): 2 matches an A500 (7.09 MHz CPU,
 # 3.55 MHz colour clock); Omega used 16 (~8x fast against the beam).
 set(OMEGA_CPU_CYCLES_PER_SLOT 2 CACHE STRING "68000 cycles per DMA slot (A500: 2)")
@@ -121,6 +124,16 @@ target_include_directories(omega-amiga PRIVATE
 )
 
 # ── Compile definitions ────────────────────────────────────────────────────
+# USB host is only built with HDMI (which sets up the clocks for it).
+set(OMEGA_USB_HOST_ACTIVE OFF)
+if(OMEGA_ENABLE_HDMI AND OMEGA_ENABLE_USB_HOST)
+    set(OMEGA_USB_HOST_ACTIVE ON)
+    math(EXPR _omega_usb_rem "${OMEGA_SYS_CLK_KHZ} % 48000")
+    if(NOT _omega_usb_rem EQUAL 0)
+        message(FATAL_ERROR "OMEGA_ENABLE_USB_HOST needs OMEGA_SYS_CLK_KHZ to be a multiple of 48000 (e.g. 336000); it is ${OMEGA_SYS_CLK_KHZ}")
+    endif()
+endif()
+
 target_compile_definitions(omega-amiga PRIVATE
     PICO_BUILD=1
     PICO_PSRAM_CS_PIN=${PSRAM_CS_PIN}
@@ -135,6 +148,7 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_CPU_CYCLES_PER_SLOT=${OMEGA_CPU_CYCLES_PER_SLOT}
     OMEGA_CPU_SLICE_SLOTS=${OMEGA_CPU_SLICE_SLOTS}
     $<$<NOT:$<BOOL:${OMEGA_SLOT_SKIP}>>:OMEGA_NO_SLOT_SKIP=1>
+    OMEGA_ENABLE_USB_HOST=$<BOOL:${OMEGA_USB_HOST_ACTIVE}>
     OMEGA_HOT_OPCODES_IN_RAM=$<BOOL:${OMEGA_HOT_OPCODES_IN_RAM}>
     # Nothing on the device mallocs; keep the SDK's minimum heap so the SRAM
     # goes to the frames and the core-1 ring.
@@ -157,6 +171,12 @@ endif()
 
 if(OMEGA_ENABLE_SDCARD)
     target_link_libraries(omega-amiga hardware_spi)
+endif()
+
+if(OMEGA_USB_HOST_ACTIVE)
+    target_sources(omega-amiga PRIVATE src/usb_input.c)
+    target_include_directories(omega-amiga PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(omega-amiga tinyusb_host)
 endif()
 
 # ── Board-specific stdio ──────────────────────────────────────────────────

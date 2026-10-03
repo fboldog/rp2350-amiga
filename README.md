@@ -8,7 +8,7 @@ not connected to the HSTX pins. This is forces the DVI/HDMI output do the work f
 emulation performance isn't the best direction.
 
 Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
-`OMEGA_SYS_CLK_KHZ` (default 320 MHz) and retime PSRAM through the Pico SDK.
+`OMEGA_SYS_CLK_KHZ` (default 336 MHz) and retime PSRAM through the Pico SDK.
 
 ## Status
 
@@ -23,7 +23,7 @@ Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | Custom chipset + CIA + DMA | ✅ |
 | Floppy (DF0 raw flash ADF + PSRAM track buffer) | ✅ verified; build-disabled by default |
 | HDMI output (HSTX) | ✅ verified NTSC and PAL; build-disabled by default |
-| USB HID keyboard/mouse | ⬜ Phase 2 |
+| USB HID keyboard/mouse | ✅ verified (mouse + keyboard receivers through a powered hub); HDMI builds |
 
 ## Hardware
 
@@ -94,7 +94,7 @@ differ.
 | `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
 | Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
 | Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
-| **Free** | **~12 KB / ~32 KB** | Between the heap and the end of main SRAM (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
+| **Free** | **~4 KB / ~24 KB** | Between the heap and the end of main SRAM; USB host takes ~6 KB of it (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
 | `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and 2 KB free |
 | `SCRATCH_Y` | 4 KB | Core 0 stack |
 
@@ -177,12 +177,15 @@ could at worst tear a row, never lose sync; swaps happen at line 0.
 HSTX has its own clock: `PLL_USB` is retuned to the TMDS bit rate (252 MHz
 NTSC, 270 MHz PAL) and `clk_hstx` is `PLL_USB / 2`, since HSTX outputs two
 bits per cycle. `clk_sys` is therefore independent of the video mode and set
-at build time with `-DOMEGA_SYS_CLK_KHZ=<kHz>` (default 320000; PSRAM runs at
-`clk_sys / ceil(clk_sys / 133 MHz)`, 107 MHz at 320 MHz). `clk_peri` (UART,
-SPI) moves to `PLL_SYS` divided to ≤150 MHz, and the USB/ADC clocks are
-stopped: USB will need an external 48 MHz clock on GPIN0 (GPIO20) or a
-`clk_sys` that is a multiple of 48 MHz. Firmware panics at startup if
-`PLL_USB` does not match the mode.
+at build time with `-DOMEGA_SYS_CLK_KHZ=<kHz>` (default 336000; PSRAM and
+flash run at `clk_sys / ceil(clk_sys / 133 MHz)`, 112 MHz at 336 MHz).
+`clk_peri` (UART, SPI) moves to `PLL_SYS` divided to ≤150 MHz and the ADC
+clock stops. USB host builds take the 48 MHz USB clock from `PLL_SYS`, so
+`clk_sys` must be a multiple of 48 MHz (CMake refuses otherwise): 336 MHz is
+7 × 48 MHz, ~6 % faster than the previous 320 MHz default where emulation is
+not paced by the display (idle xSysinfo 53.9 → 57.2 frames/s). Without USB
+host (`-DOMEGA_ENABLE_USB_HOST=OFF`) the USB clock stops. Firmware panics at
+startup if `PLL_USB` does not match the mode.
 
 PAL boot benchmark (first AmigaDOS/Workbench frame, Kickstart 1.3 +
 Workbench 1.3): 240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s, 320 MHz
@@ -504,11 +507,30 @@ SRAM frames; wrapped-fetch modes use the raster and the
 Logical Amiga scanlines and LORES overscan positioning match the native test
 runner.
 
-## Phase 2: USB HID
+## USB keyboard and mouse
 
-Wire `pressKey()`/`releaseKey()` to TinyUSB HID keyboard events.
-Joystick/mouse delta goes into `chipset.joy0dat` (see original Host.c).
-TinyUSB is included in the Pico SDK; add `tinyusb_host` to `target_link_libraries`.
+HDMI builds run a TinyUSB host on the RP2350's native USB port, the board's
+USB-C (`OMEGA_ENABLE_USB_HOST`, default ON), with hub support. Mice and
+keyboards are used through their boot protocol (`src/usb_input.c`):
+
+- Mouse movement updates the port-1 mouse counters (JOY0DAT) once per
+  frame; left button is CIA-A PRA bit 6 (`/FIR0`), right and middle are
+  POTINP DATLY/DATLX.
+- Keyboard reports become key presses and releases through `pressKey()` /
+  `releaseKey()`, one per frame so the Amiga's keyboard handshake never
+  loses a code. Other HID interfaces (media keys, vendor) are ignored.
+- TinyUSB runs on core 0: the emulation loop checks every 32nd pass whether
+  the USB interrupt queued work (`tuh_task_event_ready()`), which costs
+  nothing measurable. Core 1 must not run flash code (see the display
+  pipeline above).
+
+Wiring: the board's USB-C is wired as a device, with VBUS feeding the board
+through a diode. For host use, power the board with 5 V on its **VBUS** pin
+(not the 5 V pin): that puts 5 V on the USB-C VBUS for the attached device or
+hub. A device on a USB-C to USB-A OTG adapter works either way round; hubs
+(even self-powered ones) only connect once they see VBUS. Tested: an HP
+wireless mouse receiver and a wireless keyboard receiver through a powered
+hub; Workbench pointer, both buttons and the arrow keys in RemGame work.
 
 ## Code map
 
@@ -535,6 +557,7 @@ deadline.
 | `Memory.c` / `Memory.h` | The 68000's view of memory: 2 MB chip RAM in PSRAM, the custom register mirror at `0xC00000`–`0xD7FFFF`, ROM in flash (or the SD cache), CIA and custom-register dispatch, bounds checks so a runaway program cannot crash the host |
 | `psram.c` / `psram.h` | PSRAM detection check and read/write test; `psram_ptr()` and region offsets |
 | `Host.c` / `Host.h` | Host side of the video path: the core 0 → core 1 message ring and producers (`hostDirect*`), core 1's converter and sprite overlay, the ARGB raster fallback, keyboard entry points |
+| `usb_input.c` / `.h`, `tusb_config.h` | USB host (TinyUSB, hub) for HID mice and keyboards: mouse counters and buttons, queued key events |
 | `HostRing.h` | Core 0 → core 1 message format and the inline fast path for appending a bitplane block to the current run (used by `DMA.c`) |
 | `dvi_display.c` / `dvi_display.h` | HDMI over HSTX: video modes, double-buffered SRAM frames, frame handshake, per-line DMA interrupt, row expansion to RGB888 (exact 12-bit colours, HAM), boot colour bars, ARGB/RGB332 submit for the fallback path |
 | `Planar.c` | Planar-to-chunky ARGB conversion (HIRES, LORES, HAM) for the fallback raster and the native build |

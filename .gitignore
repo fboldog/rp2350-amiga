@@ -12,3 +12,6 @@
 /native/omega-native
 *.ppm
 *.png
+
+# local scratch: build dirs, profiles, captures (survives reboots, unlike /tmp)
+/scratch/

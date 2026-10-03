@@ -90,14 +90,15 @@ alternative future backends.
 
 ## Phase 3 – Input
 
-- [ ] Enable TinyUSB host mode (`pico_stdlib` already pulls it in if board has USB)
-- [ ] Implement USB HID keyboard callback → call `pressKey()` / `releaseKey()`
-      - HID key codes map to SDL keycodes; the keyMapping[] table in Host.c handles the rest
-- [ ] Implement USB HID mouse callback → update `chipset.joy0dat` and `CIAA.pra`
-      - Mouse X/Y delta: `joy0dat = (dy << 8) | (dx & 0xFF)`
-      - Left button: `CIAA.pra &= ~(1<<6)` (pressed) / `|= (1<<6)` (released)
-      - Right button: `chipset.potinp &= ~(1<<10)` (pressed)
-- [ ] Add `tinyusb_host`, `tinyusb_board` to target_link_libraries in CMakeLists.txt
+- [x] **USB host (2026-10-03):** TinyUSB host with hub on the native USB-C
+      port, HID boot protocol (`src/usb_input.c`). `clk_sys` 336 MHz (7 × 48
+      MHz) gives the USB clock from `PLL_SYS`. Board power must go to the
+      VBUS pin so the USB-C VBUS carries 5 V. Mouse (JOY0DAT, both buttons)
+      and keyboard (arrow keys in RemGame) verified through a powered hub.
+- [ ] Keyboard: report-protocol keyboards that ignore boot protocol, and
+      repeat/typematic is left to the Amiga; check special keys (Help, Del,
+      the Amiga keys) against `keyMapping[]`.
+- [ ] Joysticks / gamepads (port 2: JOY1DAT, CIA-A /FIR1).
 - [ ] Optional: PS/2 keyboard via GPIO PIO (simpler than USB, no hub support)
 
 ---

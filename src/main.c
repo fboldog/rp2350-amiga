@@ -36,6 +36,9 @@
 #include "psram.h"
 #include "Memory.h"
 #include "Host.h"
+#if OMEGA_ENABLE_USB_HOST
+#include "usb_input.h"
+#endif
 #if OMEGA_ENABLE_SDCARD
 #include "sd_card.h"
 #endif
@@ -268,7 +271,8 @@ static void prepare_hdmi_clock(void) {
     // HSTX gets its clock from PLL_USB, retuned to the TMDS bit rate, so
     // clk_sys can be chosen for the emulator (OMEGA_SYS_CLK_KHZ) and PSRAM
     // runs close to its 133 MHz limit. PLL_USB no longer provides 48 MHz:
-    // clk_peri moves to PLL_SYS and the unused USB and ADC clocks stop.
+    // clk_peri moves to PLL_SYS, the USB clock is derived from PLL_SYS
+    // (USB host builds) or stopped, and the unused ADC clock stops.
     vreg_set_voltage(VREG_VOLTAGE_1_20);
     sleep_ms(10);
     if (!set_sys_clock_khz(OMEGA_SYS_CLK_KHZ, true))
@@ -280,7 +284,16 @@ static void prepare_hdmi_clock(void) {
                          CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
                          sys_hz, sys_hz / peri_div))
         panic("Unable to move clk_peri to PLL_SYS");
+#if OMEGA_ENABLE_USB_HOST
+    // USB host: 48 MHz from PLL_SYS (clk_sys is a multiple of 48 MHz).
+    if (sys_hz % 48000000u != 0 ||
+        !clock_configure(clk_usb, 0,
+                         CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+                         sys_hz, 48000000u))
+        panic("Unable to derive the 48 MHz USB clock from PLL_SYS");
+#else
     clock_stop(clk_usb);
+#endif
     clock_stop(clk_adc);
     uint vco_hz, post_div1, post_div2;
     if (!check_sys_clock_hz(dvi_display_bit_clock_khz() * 1000u,
@@ -323,6 +336,9 @@ OMEGA_LOOP_FUNC(emulation_loop)(void) {
         }
 #if OMEGA_ENABLE_FLASH_FLOPPY
         disk_button_poll();
+#endif
+#if OMEGA_ENABLE_USB_HOST
+        usb_input_poll();
 #endif
         // hostDisplay is called exactly once per VBL by the DMA engine.  It
         // converts the intermediate beam raster into the 640x400 output.
@@ -403,6 +419,9 @@ int main(void) {
     printf("DF0: flash ADF loading disabled\n");
 #endif
 
+#if OMEGA_ENABLE_USB_HOST
+    usb_input_init();
+#endif
     printf("Entering emulation loop\n");
 
     emulation_loop();
