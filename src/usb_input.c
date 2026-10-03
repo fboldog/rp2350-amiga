@@ -2,7 +2,8 @@
 // through a powered hub). Mice move the port-1 mouse counters (JOY0DAT) and
 // drive its buttons (left: CIA-A PRA bit 6, /FIR0; right/middle: POTINP
 // DATLY/DATLX); keyboard usages are mapped to Amiga raw keycodes by key
-// position and sent through hostAmigaKey().
+// position and sent through hostAmigaKey(). Ctrl + Alt + Delete reboots the
+// board (next ADF in the rotation); Ctrl + both Amiga keys only the Amiga.
 //
 // Everything runs on core 0: TinyUSB is polled from the emulation loop and
 // its callbacks only collect input; usb_input_frame() applies it once per
@@ -13,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "tusb.h"
+#include "hardware/watchdog.h"
 #include "Host.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
@@ -109,7 +111,24 @@ static void key_change(uint8_t usage, int release) {
     queue_key(amiga_key(usage), release);
 }
 
+// Ctrl + Alt + Delete reboots the board (not just the Amiga): a watchdog
+// reset, as tooling/disk.sh does, so the next ADF in the flash rotation is
+// mounted. The Amiga has no meaning for this combination.
+static void board_reset_check(const hid_keyboard_report_t *r) {
+    const int ctrl = (r->modifier & (KEYBOARD_MODIFIER_LEFTCTRL |
+                                     KEYBOARD_MODIFIER_RIGHTCTRL)) != 0;
+    const int alt = (r->modifier & (KEYBOARD_MODIFIER_LEFTALT |
+                                    KEYBOARD_MODIFIER_RIGHTALT)) != 0;
+    if (ctrl && alt && key_in(0x4C, r->keycode)) {  // 0x4C: Delete
+        printf("Ctrl+Alt+Del: board reset\n");
+        watchdog_reboot(0, 0, 10);  // 10 ms: let the UART drain
+        for (;;)
+            tight_loop_contents();
+    }
+}
+
 static void keyboard_report(const hid_keyboard_report_t *r) {
+    board_reset_check(r);
     const uint8_t changed = r->modifier ^ prev_modifiers;
     for (int bit = 0; bit < 8; ++bit)
         if (changed & (1u << bit))

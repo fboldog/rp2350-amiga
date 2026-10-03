@@ -104,6 +104,9 @@ alternative future backends.
       interrupt pending at the reset left `irqLatch` set (CIA-A never
       interrupted again, boot hung): `CIAInit()` clears latch, mask and
       control registers. Verified on all three disks.
+- [x] **Board reset from the keyboard:** Ctrl + Alt + Delete reboots the
+      RP2350 through the watchdog (next ADF in the rotation); Ctrl + both
+      Amiga keys stays an Amiga-only reset. Verified both.
 - [ ] Keyboard: report-protocol keyboards that ignore boot protocol.
 - [ ] Joysticks / gamepads (port 2: JOY1DAT, CIA-A /FIR1).
 - [ ] Optional: PS/2 keyboard via GPIO PIO (simpler than USB, no hub support)

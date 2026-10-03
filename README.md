@@ -527,6 +527,8 @@ keyboards are used through their boot protocol (`src/usb_input.c`):
   emulation slices): 68000 reset, CIAs and custom chips re-initialised,
   Paula interrupts cleared, chip RAM kept (warm reset); the inserted disk
   boots again.
+- Ctrl + Alt + Delete reboots the board (watchdog reset, like
+  `tooling/disk.sh`): the next ADF in the flash rotation is mounted.
 - TinyUSB runs on core 0: the emulation loop checks every 32nd pass whether
   the USB interrupt queued work (`tuh_task_event_ready()`), which costs
   nothing measurable. Core 1 must not run flash code (see the display
