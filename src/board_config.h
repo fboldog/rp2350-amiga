@@ -81,7 +81,8 @@
 //  Amiga memory map inside PSRAM   (emulator layout, not board wiring)
 // ---------------------------------------------------------------------------
 //  0x000000..0x1FFFFF  Chip RAM        (2 MB)      Amiga 0x000000..0x1FFFFF
-//  0x200000..0x27FFFF  Slow/Ranger RAM (512 KB)    Amiga 0xC00000..0xC7FFFF
+//  0x200000..0x27FFFF  Free (was slow RAM; the emulated Amiga has 2 MB chip
+//                       RAM only)
 //  0x280000..0x47FFFF  DF0 MFM buffer  (2 MB; empty-drive image when no ADF
 //                                       is in flash, else the active track,
 //                                       read uncached; the ADF streams)
@@ -93,7 +94,6 @@
 //  0x7A8000..0x7FEFFF  Reserved
 //  0x7FF000..0x7FF00B  DF0 disk rotation state (survives resets only)
 #define BOARD_MAP_CHIPRAM_OFFSET   0x000000u
-#define BOARD_MAP_SLOWRAM_OFFSET   0x200000u
 #define BOARD_MAP_DF0_OFFSET       0x280000u
 #define BOARD_MAP_FRAMEBUF_OFFSET  0x680000u
 #define BOARD_MAP_DVI_RECORDS_OFFSET 0x780000u
@@ -104,7 +104,6 @@
 #define BOARD_MAP_SD_ROM_OFFSET    0x480000u
 
 #define BOARD_MAP_CHIPRAM_SIZE     0x200000u   // 2 MB
-#define BOARD_MAP_SLOWRAM_SIZE     0x080000u   // 512 KB
 #define BOARD_MAP_FLOPPY_SIZE      0x200000u   // 2 MB (DF0)
 #define BOARD_MAP_SD_ROM_SIZE      0x080000u   // 512 KB maximum
 

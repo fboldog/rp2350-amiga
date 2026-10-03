@@ -3,7 +3,8 @@
 //
 // Address translation:
 //   Amiga 0x000000–0x1FFFFF → PSRAM[0x000000] (chip RAM, 2 MB)
-//   Amiga 0xC00000–0xDFEFFF → PSRAM[0x200000] (slow RAM, ≤512 KB)
+//   0xC00000–0xD7FFFF       → custom register mirror (no slow RAM, as an
+//                             A500 without trapdoor RAM)
 //   Amiga 0xF80000–0xFFFFFF → Flash ROM at ROM_FLASH_BASE (read-only)
 //   0xBFD000–0xBFFFFF       → CIA (handled via CIARead/CIAWrite)
 //   0xDFF000–0xDFF1FF       → Custom chipset registers
@@ -22,7 +23,6 @@
 
 // ── PSRAM region base pointers ────────────────────────────────────────────
 static uint8_t *chip_ram;   // PSRAM + PSRAM_CHIPRAM_OFFSET
-static uint8_t *slow_ram;   // PSRAM + PSRAM_SLOWRAM_OFFSET
 
 // ── ROM (read-only, live in flash via XIP) ────────────────────────────────
 static const uint8_t *rom_base;
@@ -70,12 +70,10 @@ static inline const uint8_t *rom_ptr(uint32_t amiga_addr) {
 // ── Page table for instruction fetches ───────────────────────────────────
 // One entry per 64 KB page of the 24-bit 68000 address space: the host
 // address of the page's first byte where the page is plain memory (chip
-// RAM, slow RAM, ROM with its 256 KB mirror), NULL elsewhere (registers,
-// CIAs, Gayle, unmapped). An instruction fetch then costs one lookup
-// wherever the code runs (RemGame runs from slow RAM, which the data path
-// only reaches after the register range checks). Data accesses keep their
-// range checks: a lookup in front of them slowed register accesses (idle
-// screens -1 %) without helping.
+// RAM, ROM with its 256 KB mirror), NULL elsewhere (registers, CIAs, Gayle,
+// unmapped). An instruction fetch then costs one lookup wherever the code
+// runs. Data accesses keep their range checks: a lookup in front of them
+// slowed register accesses (idle screens -1 %) without helping.
 #define PAGE_SHIFT 16
 #define PAGE_COUNT (0x1000000u >> PAGE_SHIFT)
 static const uint8_t *fetch_page[PAGE_COUNT];
@@ -86,8 +84,6 @@ static void memory_map_pages(void) {
         const uint8_t *mem = NULL;
         if (a <= CHIPTOP)
             mem = chip_ram + a;
-        else if (a >= 0xC00000u && a - 0xC00000u < PSRAM_SLOWRAM_SIZE)
-            mem = slow_ram + (a - 0xC00000u);
         else if (a >= 0xF80000u && rom_base)
             mem = rom_base + rom_addr(a);
         fetch_page[p] = mem;
@@ -102,18 +98,24 @@ static inline const uint8_t *fetch_ptr(uint32_t address) {
     return page ? page + (address & ((1u << PAGE_SHIFT) - 1)) : NULL;
 }
 
-// ── Slow RAM address to PSRAM pointer ────────────────────────────────────
-static inline uint8_t *slow_ptr(uint32_t amiga_addr) {
-    uint32_t offset = amiga_addr - 0xC00000u;
-    if (offset >= PSRAM_SLOWRAM_SIZE) return NULL;
-    return slow_ram + offset;
+// ── 0xC00000–0xD7FFFF: custom register mirror ───────────────────────────
+// There is no slow (trapdoor/Ranger) RAM: 2 MB chip RAM is enough. As on an
+// A500 without it, the custom chips answer in this range with their
+// registers repeated every 512 bytes; Kickstart's memory sizing tells the
+// mirror from RAM by writing INTENA through it and reading INTENAR.
+#define MIRROR_START 0xC00000u
+#define MIRROR_END   0xD80000u
+static inline int in_custom_mirror(uint32_t address) {
+    return address >= MIRROR_START && address < MIRROR_END;
+}
+static inline uint32_t custom_mirror(uint32_t address) {
+    return 0xDFF000u | (address & 0x1FFu);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
 
 void memory_init(void) {
     chip_ram  = psram_ptr(PSRAM_CHIPRAM_OFFSET);
-    slow_ram  = psram_ptr(PSRAM_SLOWRAM_OFFSET);
 
     // ROM lives in flash; the user must place the Kickstart binary at
     // flash offset 0x200000 (i.e. absolute address ROM_FLASH_BASE).
@@ -139,8 +141,6 @@ void memory_init(void) {
 
     printf("Memory: clearing chip RAM\n");
     memory_clear_chipram();
-    printf("Memory: clearing slow RAM\n");
-    psram_clear_words(slow_ram, PSRAM_SLOWRAM_SIZE);
     printf("Memory: PSRAM clear complete\n");
 }
 
@@ -179,11 +179,9 @@ unsigned int chipReadByte(unsigned int address) {
     }
     // Gayle/IDE
     if (address > 0xD9FFFFu) return readGayleB(address);
-    // Slow RAM
-    if (address > 0xBFFFFFu) {
-        uint8_t *p = slow_ptr(address);
-        return p ? *p : 0;
-    }
+    // Custom register mirror (no slow RAM)
+    if (address > 0xBFFFFFu)
+        return in_custom_mirror(address) ? chipReadByte(custom_mirror(address)) : 0;
     // CIA A
     if (address >= 0xBFE001u) return CIARead(&CIAA, (address - 0xBFE001u) >> 8);
     // CIA B
@@ -217,11 +215,9 @@ unsigned int chipReadWord(unsigned int address) {
     }
     // Gayle/IDE
     if (address > 0xD9FFFFu) return readGayle(address);
-    // Slow RAM
-    if (address > 0xBFFFFFu) {
-        uint8_t *p = slow_ptr(address);
-        return p ? ram_read_word(p) : 0;
-    }
+    // Custom register mirror (no slow RAM)
+    if (address > 0xBFFFFFu)
+        return in_custom_mirror(address) ? chipReadWord(custom_mirror(address)) : 0;
     // CIA A/B
     if (address >= 0xBFE001u) return CIARead(&CIAA, (address - 0xBFE001u) >> 8);
     if (address >= 0xBFD000u) return CIARead(&CIAB, (address - 0xBFD000u) >> 8);
@@ -251,11 +247,9 @@ unsigned int chipReadLong(unsigned int address) {
     }
     // Gayle/IDE
     if (address > 0xD9FFFFu) return readGayleL(address);
-    // Slow RAM
-    if (address > 0xBFFFFFu) {
-        uint8_t *p = slow_ptr(address);
-        return p ? ram_read_long(p) : 0;
-    }
+    // Custom register mirror (no slow RAM)
+    if (address > 0xBFFFFFu)
+        return in_custom_mirror(address) ? chipReadLong(custom_mirror(address)) : 0;
     // CIA A/B
     if (address >= 0xBFE001u) return CIARead(&CIAA, (address - 0xBFE001u) >> 8);
     if (address >= 0xBFD000u) return CIARead(&CIAB, (address - 0xBFD000u) >> 8);
@@ -274,10 +268,10 @@ void chipWriteByte(unsigned int address, unsigned int value) {
     if (address > 0xDFEFFFu) return;
     // Gayle/IDE
     if (address > 0xD9FFFFu) { writeGayleB(address, value); return; }
-    // Slow RAM
+    // Custom register mirror (no slow RAM)
     if (address > 0xBFFFFFu) {
-        uint8_t *p = slow_ptr(address);
-        if (p) *p = (uint8_t)value;
+        if (in_custom_mirror(address))
+            chipWriteByte(custom_mirror(address), value);
         return;
     }
     // CIA A
@@ -313,10 +307,10 @@ void chipWriteWord(unsigned int address, unsigned int value) {
     }
     // Gayle/IDE
     if (address > 0xD9FFFFu) { writeGayle(address, value); return; }
-    // Slow RAM
+    // Custom register mirror (no slow RAM)
     if (address > 0xBFFFFFu) {
-        uint8_t *p = slow_ptr(address);
-        if (p) ram_write_word(p, (uint16_t)value);
+        if (in_custom_mirror(address))
+            chipWriteWord(custom_mirror(address), value);
         return;
     }
     // CIA: word writes to CIA space are no-ops (byte-wide chips)
@@ -344,26 +338,23 @@ void chipWriteLong(unsigned int address, unsigned int value) {
     }
     // Gayle/IDE
     if (address > 0xD9FFFFu) { writeGayleL(address, value); return; }
-    // Slow RAM
+    // Custom register mirror (no slow RAM)
     if (address > 0xBFFFFFu) {
-        uint8_t *p = slow_ptr(address);
-        if (p) ram_write_long(p, value);
+        if (in_custom_mirror(address))
+            chipWriteLong(custom_mirror(address), value);
         return;
     }
     // CIA: no long writes
     if (address >= 0xBFD000u) return;
-    // 24-bit fast RAM area
-    if (address > 0x1FFFFFu) {
-        // Write through to PSRAM slow region as fast RAM (optional)
-        return;
-    }
+    // 24-bit fast RAM area (not present)
+    if (address > 0x1FFFFFu) return;
     // Chip RAM
     address &= CHIPTOP;
     ram_write_long(&chip_ram[address], value);
 }
 
 // ── Instruction fetch (Musashi prefetch) ─────────────────────────────────
-// Code runs from ROM, chip RAM or slow RAM: one page-table lookup; anything
+// Code runs from ROM or chip RAM: one page-table lookup; anything
 // else takes the general data path.
 unsigned int chipFetchLong(unsigned int address) {
     const uint8_t *p = fetch_ptr(address);

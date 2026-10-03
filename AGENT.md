@@ -57,7 +57,7 @@ The RP2350 port uses 8 MB PSRAM (memory-mapped at 0x11000000) with this layout
 | PSRAM offset      | Content              | Amiga address     |
 |-------------------|----------------------|-------------------|
 | 0x000000–0x1FFFFF | Chip RAM (2 MB)      | 0x000000–0x1FFFFF |
-| 0x200000–0x27FFFF | Slow/Ranger RAM      | 0xC00000–0xC7FFFF |
+| 0x200000–0x27FFFF | Free (no slow RAM)   | 0xC00000–0xD7FFFF mirrors the custom registers |
 | 0x280000–0x47FFFF | DF0 MFM buffer (2MB) | empty-drive image, or the active track of the flash ADF (uncached) |
 | 0x480000–0x4FFFFF | SD ROM cache (512KB) | (optional)        |
 | 0x540000–0x63FFFF | Raw video raster     | (host rendering)  |

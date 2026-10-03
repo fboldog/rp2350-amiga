@@ -37,6 +37,20 @@ void loadROM(){
 }
 
 
+// There is no slow (trapdoor/Ranger) RAM, as on the RP2350 build: 2 MB chip
+// RAM. As on an A500 without it, the custom chips answer at
+// 0xC00000-0xD7FFFF with their registers repeated every 512 bytes;
+// Kickstart's memory sizing tells the mirror from RAM by writing INTENA
+// through it and reading INTENAR. 0xD80000-0xD9FFFF reads 0.
+#define MIRROR_START 0xC00000u
+#define MIRROR_END   0xD80000u
+static inline int inCustomMirror(unsigned int address){
+    return address >= MIRROR_START && address < MIRROR_END;
+}
+static inline unsigned int customMirror(unsigned int address){
+    return 0xDFF000u | (address & 0x1FFu);
+}
+
 unsigned int chipReadByte(unsigned int address){
     if (address > 0xFFFFFFu)
         return 0xFF;
@@ -72,9 +86,9 @@ unsigned int chipReadByte(unsigned int address){
         
     }
     
-    //Slow RAM
+    //No slow RAM: custom register mirror (see MIRROR_START)
     if(address>0xBFFFFF){
-        return low16Meg[address];
+        return inCustomMirror(address) ? chipReadByte(customMirror(address)) : 0;
     }
     
     //CIA A
@@ -160,30 +174,9 @@ unsigned int chipReadWord(unsigned int address){
         
     }
     
-    //Slow RAM
+    //No slow RAM: custom register mirror (see MIRROR_START)
     if(address>0xBFFFFF){
-        // Incomplete address decoding: the 16 readable chipset word-registers
-        // (offsets 0x000-0x01E from 0xDFF000) are mirrored throughout this
-        // region via the low 12 bits.  KS 3.x uses this shadow to verify
-        // INTENA/INTREQ writes without going through the chipset address range.
-        {
-            uint32_t regOff = address & 0xFFFu;
-            if (regOff < 0x20u)
-                return getChipReg16[regOff >> 1]();
-        }
-
-#ifdef NOSLOWRAM
-        // Fallback full shadow (all chipset offsets) — kept for reference but
-        // unsafe without bounds checking; the selective path above covers
-        // the common cases.
-        address &=0xFFF;
-        return getChipReg16[address >> 1]();
-#endif
-
-        //return READ_WORD(chipset.chipram,address);
-        uint16_t value = *(uint16_t*)&low16Meg[address];
-        value = (value << 8) | (value >> 8);
-        return value;
+        return inCustomMirror(address) ? chipReadWord(customMirror(address)) : 0;
     }
     
     //CIA A
@@ -257,12 +250,9 @@ unsigned int chipReadLong(unsigned int address){
         
     }
     
-    //Slow RAM
+    //No slow RAM: custom register mirror (see MIRROR_START)
     if(address>0xBFFFFF){
-        //return READ_LONG(chipset.chipram,address);
-        uint32_t value = *(uint32_t*)&low16Meg[address];
-        value = ((value << 8) & 0xFF00FF00 ) | ((value >> 8) & 0xFF00FF );
-        return value << 16 | value >> 16;
+        return inCustomMirror(address) ? chipReadLong(customMirror(address)) : 0;
     }
     
     //CIA A
@@ -340,9 +330,10 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
         
     }
     
-    //Slow RAM
+    //No slow RAM: custom register mirror (see MIRROR_START)
     if(address>0xBFFFFF){
-        low16Meg[address] = value; return;
+        if (inCustomMirror(address)) chipWriteByte(customMirror(address), value);
+        return;
     }
     
     //CIA A
@@ -459,28 +450,10 @@ void chipWriteWord(unsigned int address,unsigned int value){
         return;
     }
     
-    //SLow RAM
+    //No slow RAM: custom register mirror (see MIRROR_START)
     if(address>0xBFFFFF){
-        
-        //printf("Write %d Chipset Shadow @ %06x\n",value,address);
-        
-        /*
-         if(address==0xDBF09){
-         return ChipsetWrite(&chipset, (address &0xFFF) >> 1,value);
-         }
-         */
-        
-#ifdef NOSLOWRAM
-        //Chipset shadow - incomplete address decoding
-        address &=0xFFF;
-        //ChipsetWrite(&chipset, address >> 1,value); return;
-        putChipReg16[address >> 1](value);
-#endif
-        
-        //WRITE_WORD(chipset.chipram,address,value);return;
-        uint16_t* dest = (uint16_t*)&low16Meg[address];
-        value = (value << 8) | (value >> 8);
-        *dest = value;return;
+        if (inCustomMirror(address)) chipWriteWord(customMirror(address), value);
+        return;
     }
     
     //CIA A
@@ -615,13 +588,10 @@ void chipWriteLong(unsigned int address,unsigned int value){
         
     }
     
-    //Slow RAM
+    //No slow RAM: custom register mirror (see MIRROR_START)
     if(address>0xBFFFFF){
-        //WRITE_LONG(chipset.chipram,address,value);
-        uint32_t* dest = (uint32_t*)&low16Meg[address];
-        value = ((value << 8) & 0xFF00FF00 ) | ((value >> 8) & 0xFF00FF );
-        value = value << 16 | value >> 16;
-        *dest = value; return;
+        if (inCustomMirror(address)) chipWriteLong(customMirror(address), value);
+        return;
     }
     
     //CIA A

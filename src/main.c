@@ -4,7 +4,7 @@
 //   1. Pico SDK CRT0 runs, initialises clocks / UART (via stdio)
 //      and hardware_psram configures QMI PSRAM
 //   2. psram_init()     – validate SDK detection and a read/write pattern
-//   3. memory_init()    – set up chip/slow RAM in PSRAM, find ROM in flash
+//   3. memory_init()    – set up chip RAM in PSRAM, find ROM in flash
 //   4. hostInit()       – point framebuffer into PSRAM
 //   5. cpu_init()       – reset Musashi 68K, CIA chips
 //   6. ChipsetInit()    – reset custom chip register state
@@ -366,7 +366,7 @@ int main(void) {
     }
     printf("PSRAM initialised at 0x%08x (%u MB)\n", PSRAM_BASE, PSRAM_SIZE >> 20);
 
-    // 3. Memory (chip RAM, slow RAM, flash ROM fallback, optional SD override)
+    // 3. Memory (chip RAM, flash ROM fallback, optional SD override)
     memory_init();
     load_kickstart_from_sd();
 

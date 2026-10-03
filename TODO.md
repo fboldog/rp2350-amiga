@@ -460,6 +460,15 @@ appears only ~2 min 12 s later.
       blitter and disk writes for <2.6 %). RemGame 26.1 → 27.6 fps,
       xSysinfo drawn 13.7 → 13.5 s; idle and boot within ±1 % build-layout
       noise.
+- [x] **No slow RAM (2026-10-03).** 2 MB chip RAM is enough for this
+      project and most Amigas had no trapdoor/Ranger RAM. `0xC00000`-
+      `0xD7FFFF` now mirrors the custom registers every 512 bytes (reads and
+      writes), as on an A500 without it; `0xD80000`-`0xD9FFFF` reads 0. The
+      native build (which treated all of `0xC00000`-`0xD9FFFF` as RAM) does
+      the same; only the `wb13` baselines changed (title bar: 3,519,632 →
+      1,946,800 bytes free). Board: Workbench 1.3, xSysinfo (1.99 MB chip,
+      fast RAM 0) and RemGame (27.7 fps, now from chip RAM) run as before.
+      PSRAM `0x200000`-`0x27FFFF` is free.
 - [ ] **Idea: dynamic hot opcode cache in SRAM.** Adapt the SRAM handler set
       to the running software instead of a build-time list:
       1. Sampling: at each line end `dma_run()` counts the handler of the
@@ -603,8 +612,9 @@ forward steps when measuring.
       slow-RAM reads untouched.  The unsafe original `#ifdef NOSLOWRAM` path
       (which had no bounds check and would OOB-index into `getChipReg16`) is
       superseded by this targeted fix.
-      `src/Memory.c` still needs the equivalent fix if KS 3.x is ever run on
-      the RP2350 target.
+      Superseded (2026-10-03): slow RAM is gone and `0xC00000`-`0xD7FFFF`
+      mirrors all custom registers in both `src/Memory.c` and the native
+      build (see "No slow RAM").
 - [ ] **Stack size**: Musashi uses recursion for instruction dispatch. Default Pico
       stack (2 KB) may be too small. Add `pico_set_binary_type(omega-amiga copy_to_ram)`
       or increase stack in linker script if crashes occur.

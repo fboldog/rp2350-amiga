@@ -5,7 +5,8 @@
 //
 // Amiga address-to-PSRAM mapping
 //   0x000000–0x1FFFFF  → PSRAM chip RAM   (2 MB)
-//   0xC00000–0xDFEFFF  → PSRAM slow RAM   (512 KB in PSRAM[0x200000–0x27FFFF])
+//   0xC00000–0xD7FFFF  → custom register mirror (no slow RAM, as an A500
+//                        without trapdoor RAM)
 //   0xF80000–0xFFFFFF  → Flash ROM        (read-only, XIP at ROM_FLASH_BASE)
 //
 // Everything else returns 0 / is silently discarded on writes.
@@ -46,7 +47,7 @@ extern unsigned char low16Meg[16777216];
 #endif
 
 // ── public API ───────────────────────────────────────────────────────────
-// Called once at startup; clears chip/slow RAM and mirrors ROM if needed.
+// Called once at startup; clears chip RAM and mirrors ROM if needed.
 void memory_init(void);
 // Select a 256 KB or 512 KB Kickstart image already resident in memory.
 // Returns 1 when accepted; a 256 KB image is mirrored by address decoding.

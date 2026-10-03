@@ -17,7 +17,7 @@ Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | Build system (Pico SDK 2.x) | ✅ |
 | PSRAM initialization | ✅ Pico SDK `hardware_psram` startup path |
 | PSRAM validation | ✅ 8 MB detected and deterministic read/write test passed |
-| Chip RAM / Slow RAM in PSRAM | ✅ implemented |
+| 2 MB chip RAM in PSRAM (no slow RAM) | ✅ implemented |
 | ROM from microSD, with flash fallback | ⏸ implemented, build-disabled by default (needs an external SD module) |
 | Musashi 68K CPU core | ✅ |
 | Custom chipset + CIA + DMA | ✅ |
@@ -51,7 +51,7 @@ the same memory). Offsets are defined in `src/board_config.h`
 | Address | Size | Content | Access |
 |---|---|---|---|
 | `0x11000000` | 2 MB | Chip RAM, Amiga `0x000000`–`0x1FFFFF` | cached |
-| `0x11200000` | 512 KB | Slow ("Ranger") RAM, Amiga `0xC00000`–`0xC7FFFF` | cached |
+| `0x11200000` | 512 KB | free (was slow RAM) | |
 | `0x11280000` | 2 MB | DF0 MFM buffer: the active track of the flash ADF, or the empty-drive image when no ADF is in flash | uncached |
 | `0x11480000` | 512 KB | SD Kickstart cache (SD-card builds only) | cached |
 | `0x11500000` | 256 KB | free | |
@@ -64,6 +64,13 @@ the same memory). Offsets are defined in `src/board_config.h`
 | `0x117FF000` | 12 bytes | DF0 disk rotation state (kept through resets, lost on power-off) | uncached |
 
 The HDMI scanout frames themselves are in internal SRAM, not PSRAM.
+
+The emulated Amiga has 2 MB of chip RAM and no slow ("trapdoor"/Ranger) RAM,
+like most machines. As on an A500 without it, `0xC00000`–`0xD7FFFF`
+mirrors the custom registers every 512 bytes (Kickstart's memory sizing
+tells the mirror from RAM by writing INTENA through it; Kickstart 3.1 also
+reads INTENAR there during early boot). Workbench 1.3 shows 1,946,800 bytes
+free; xSysinfo reports 1.99 MB chip and no fast RAM.
 
 ## SRAM Layout
 
@@ -401,9 +408,9 @@ in PSRAM instead of flash would not help: both sit behind the same XIP
 cache and QMI bus, and a PSRAM miss is no cheaper.
 
 Instruction fetches look up a 256-entry page table (`fetch_page[]` in
-`src/Memory.c`, one host pointer per 64 KB page: chip RAM, slow RAM, ROM
-with its mirror; NULL elsewhere). Before, only ROM and chip RAM had a fast
-path, and RemGame, which runs from slow RAM, walked the register range
+`src/Memory.c`, one host pointer per 64 KB page: chip RAM, ROM with its
+mirror; NULL elsewhere). Before, only ROM and chip RAM had a fast path,
+and RemGame, which then ran from slow RAM, walked the register range
 checks on every fetch. Data accesses keep their range checks; a lookup in
 front of them slowed register accesses. RemGame 26.1 → 27.6 fps, xSysinfo
 drawn 13.7 → 13.5 s; an SRAM cache for chip RAM would not pay off (load
@@ -498,7 +505,7 @@ deadline.
 |---|---|
 | `main.c` | Startup: clocks (`clk_sys`, PLL_USB for HSTX, PSRAM timing), PSRAM check, Kickstart lookup, DF0 disk selection and rotation (state in PSRAM), HDMI start, then the emulation main loop with the CPU:DMA cycle ratio (`OMEGA_CPU_CYCLES_PER_SLOT`); hard-fault report |
 | `board_config.h` | All board pins (PSRAM, HDMI, SD, KEY button), feature defaults and the PSRAM/flash memory map (`BOARD_MAP_*`) |
-| `Memory.c` / `Memory.h` | The 68000's view of memory: chip RAM and slow RAM in PSRAM, ROM in flash (or the SD cache), CIA and custom-register dispatch, bounds checks so a runaway program cannot crash the host |
+| `Memory.c` / `Memory.h` | The 68000's view of memory: 2 MB chip RAM in PSRAM, the custom register mirror at `0xC00000`–`0xD7FFFF`, ROM in flash (or the SD cache), CIA and custom-register dispatch, bounds checks so a runaway program cannot crash the host |
 | `psram.c` / `psram.h` | PSRAM detection check and read/write test; `psram_ptr()` and region offsets |
 | `Host.c` / `Host.h` | Host side of the video path: the core 0 → core 1 message ring and producers (`hostDirect*`), core 1's converter and sprite overlay, the ARGB raster fallback, keyboard entry points |
 | `dvi_display.c` / `dvi_display.h` | HDMI over HSTX: video modes, double-buffered SRAM frames, frame handshake, per-line DMA interrupt, row expansion to RGB888 (exact 12-bit colours, HAM), boot colour bars, ARGB/RGB332 submit for the fallback path |
