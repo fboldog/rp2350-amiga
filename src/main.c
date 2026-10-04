@@ -93,7 +93,43 @@
 // magic and a complement against random power-on contents.
 #define ADF_ROTATION_MAGIC 0xadf0b007u
 
+// Last hard fault, kept in PSRAM next to the disk rotation state (uncached,
+// survives a watchdog or RUN-pin reset): the UART report alone was lost
+// more than once. Printed and cleared at the next boot; readable over SWD
+// at PSRAM offset BOARD_MAP_BOOT_STATE_OFFSET + 0x10.
+#define FAULT_MAGIC 0xfa017bad
+enum { FAULT_MAGIC_W, FAULT_PC, FAULT_LR, FAULT_CFSR, FAULT_HFSR,
+       FAULT_MMFAR, FAULT_BFAR, FAULT_SP, FAULT_PSR, FAULT_WORDS };
+static volatile uint32_t *fault_record(void) {
+    return (volatile uint32_t *)(PSRAM_BASE - XIP_BASE +
+                                 XIP_NOCACHE_NOALLOC_BASE +
+                                 BOARD_MAP_BOOT_STATE_OFFSET + 0x10u);
+}
+
+static void report_previous_fault(void) {
+    volatile uint32_t *f = fault_record();
+    if (f[FAULT_MAGIC_W] != FAULT_MAGIC)
+        return;
+    printf("Previous HARDFAULT: pc=%08lx lr=%08lx cfsr=%08lx hfsr=%08lx "
+           "mmfar=%08lx bfar=%08lx sp=%08lx psr=%08lx\n",
+           (unsigned long)f[FAULT_PC], (unsigned long)f[FAULT_LR],
+           (unsigned long)f[FAULT_CFSR], (unsigned long)f[FAULT_HFSR],
+           (unsigned long)f[FAULT_MMFAR], (unsigned long)f[FAULT_BFAR],
+           (unsigned long)f[FAULT_SP], (unsigned long)f[FAULT_PSR]);
+    f[FAULT_MAGIC_W] = 0;
+}
+
 void __attribute__((noreturn, used)) hardfault_report(uint32_t *frame) {
+    volatile uint32_t *f = fault_record();
+    f[FAULT_PC] = frame[6];
+    f[FAULT_LR] = frame[5];
+    f[FAULT_CFSR] = scb_hw->cfsr;
+    f[FAULT_HFSR] = scb_hw->hfsr;
+    f[FAULT_MMFAR] = scb_hw->mmfar;
+    f[FAULT_BFAR] = scb_hw->bfar;
+    f[FAULT_SP] = (uint32_t)(uintptr_t)frame;
+    f[FAULT_PSR] = frame[7];
+    f[FAULT_MAGIC_W] = FAULT_MAGIC;
     printf("HARDFAULT: pc=%08lx lr=%08lx cfsr=%08lx hfsr=%08lx "
            "mmfar=%08lx bfar=%08lx\n",
            (unsigned long)frame[6], (unsigned long)frame[5],
@@ -359,6 +395,7 @@ int main(void) {
     stdio_uart_init_full(BOARD_UART_ID, BOARD_UART_BAUD,
                          BOARD_UART_TX_PIN, BOARD_UART_RX_PIN);
     printf("\n\nOmega/RP2350 – Amiga emulator\n");
+    report_previous_fault();
     printf("Sys clock: %lu kHz\n", (unsigned long)(clock_get_hz(clk_sys) / 1000));
 #if OMEGA_ENABLE_HDMI
     printf("PSRAM clock: %lu kHz (QMI divisor %lu)\n",

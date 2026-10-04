@@ -454,11 +454,13 @@ appears only ~2 min 12 s later.
       out of line. NTSC 5 cycles/slot: xSysinfo drawn 15.4 → 15.2 s, idle
       43.8 → 45.0 (xSysinfo) and 48.0 → 49.6 (Workbench), RemGame 24.8 →
       25.1 fps.
-- [ ] **Unreproduced core-0 hard fault.** Seen once (2026-10-01, `main`
-      7032b46): core 0 in `hardfault_report` 7 s after a `disk.sh 2` reset,
-      following a long Workbench idle; no UART log was running. Not seen in
-      6 more xSysinfo boots, a 7-minute Workbench soak or the later runs.
-      Keep a UART log (`stty -F /dev/ttyACM0 115200 raw`) when testing.
+- [ ] **Unreproduced core-0 hard fault.** Seen three times (2026-10-01,
+      2026-10-04 twice), each after a `disk.sh` reset with SWD sampling
+      around; the UART report never arrived, and seven targeted attempts did
+      not reproduce it. `hardfault_report()` now stores pc, lr, CFSR, HFSR,
+      MMFAR, BFAR, sp and xPSR in PSRAM (boot state + 0x10, magic
+      0xfa017bad) before printing; the next boot prints "Previous
+      HARDFAULT", and the record is readable over SWD.
 - [x] **CIA timer B in "count timer A underflows" mode never underflowed.**
       `CIAExecute()` tested `tb == 65535` after the decrement, but `tb` is
       signed and reaches -1, so the timer ran on below zero without reloading
