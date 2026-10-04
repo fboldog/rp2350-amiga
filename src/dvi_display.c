@@ -128,10 +128,18 @@ static uint64_t boot_pattern_until_us;
 // Boot pattern end as a raw 32-bit timer value, for the flash-free check.
 static volatile uint32_t boot_pattern_until_lo;
 static volatile bool boot_pattern_armed;
+// Latched once the pattern time is over: the 32-bit comparison alone wraps
+// 2^31 us (35.8 minutes) later and would hide the emulator for as long.
+static volatile bool boot_pattern_done;
 
 static inline bool __not_in_flash_func(boot_pattern_showing)(void) {
-    return !boot_pattern_armed ||
-           (int32_t)(timer_hw->timerawl - boot_pattern_until_lo) < 0;
+    if (boot_pattern_done)
+        return false;
+    if (!boot_pattern_armed ||
+        (int32_t)(timer_hw->timerawl - boot_pattern_until_lo) < 0)
+        return true;
+    boot_pattern_done = true;
+    return false;
 }
 // Border colour (COLOR00, RGB888) of each frame, for the lines above and
 // below the image. Like a real Amiga, the areas around the image show the
@@ -914,6 +922,7 @@ void dvi_display_start(void) {
     dvi_fill_boot_pattern(source_frames[1]);
     boot_pattern_until_us = time_us_64() + 1500000u;
     boot_pattern_until_lo = (uint32_t)boot_pattern_until_us;
+    boot_pattern_done = false;
     boot_pattern_armed = true;
 
     // Frame presentation performs large PSRAM writes on core 0. Give scanout
