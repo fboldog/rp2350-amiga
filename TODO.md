@@ -158,8 +158,32 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       in flash) now share one `setColour()` in RAM (0.4 KB): RemGame 28.7 →
       29.0 fps. `Audio.c` in RAM as well gave only +0.5 % for 2.6 KB of SRAM
       (NTSC would keep 0.7 KB), so it stays in flash.
-- [ ] **HDMI audio on PAL**: ~17 KB of SRAM short (the 64 KB core-1 ring, the
-      hot opcode list or PAL's 320 KB frames would have to give).
+- [x] **HDMI audio on PAL (2026-10-04)**: default ON; the PAL core-1 ring
+      shrinks to ~45 KB and the stretcher's output ring moved to SCRATCH_X.
+      Along the way: 4-sample packets every 2-3 lines with blanking buffers
+      reused (only packet 1 rewritten), WSOLA matched on a decimated mono
+      copy (worst step 170k -> 71k cycles), pre-encoded silent packets after
+      a second of silence (stretcher stopped), and no bus priority for
+      core 1 (it slowed core 0 ~2 %: PAL xSysinfo 50/36 -> 50/49; NTSC
+      RemGame 30.0 -> 31.4, PAL no audio 25.4 -> 26.9). A queue of
+      thread-encoded packets (0.67 ms) underran in RemGame (audible gaps)
+      and was dropped.
+- [ ] **Amiga Test Kit display** (`image_refs/atk-pal.png`, `atk-ntsc.png`):
+      map beam lines to fixed image rows per standard instead of the
+      per-layout anchors (ATK's full-width hires window at line 0x46 loses
+      its top 14 lines and sits at row 0), and record COLOR00 per line in
+      the borders (ATK's white lines and blue/red bands are Copper colour
+      changes outside the window; the pointer is missing too). Recheck
+      Workbench, the Kickstart screens, RemGame and D-Mob against their
+      references.
+- [ ] **PAL lines are 228 colour clocks, should be 227** (`SLOT_LAST`
+      0xE3, Audio.c `SLOTS_PER_LINE`): ATK times CIA E-clock ticks over 5
+      frames (71,364 here, threshold 71,264, real PAL 71,051) and reports
+      OCS/NTSC; PAL frame rate and Paula pitch are 0.4 % off. NTSC should
+      alternate 227/228 (LOL).
+- [ ] Unexplained, seen once each during PAL audio benchmarks: a stall
+      booting Workbench (not reproduced), and a core-1 fault record (IRQ 51,
+      a user IRQ, jumped to 0; possibly from a wedged chip / rescue cycle).
 - [ ] Fallbacks: PWM on a spare GPIO (RC filter), or an I2S DAC (PCM5102)
       via PIO.
 

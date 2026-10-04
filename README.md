@@ -23,7 +23,7 @@ Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | Custom chipset + CIA + DMA | ✅ |
 | Floppy (DF0 raw flash ADF + PSRAM track buffer) | ✅ verified; build-disabled by default |
 | HDMI output (HSTX) | ✅ verified NTSC and PAL; build-disabled by default |
-| Paula audio | ✅ emulated, 48 kHz stereo; over HDMI on NTSC builds (`OMEGA_HDMI_AUDIO`), native: `OMEGA_PCM=<file>` |
+| Paula audio | ✅ emulated, 48 kHz stereo; over HDMI (`OMEGA_HDMI_AUDIO`, NTSC and PAL), native: `OMEGA_PCM=<file>` |
 | USB HID keyboard/mouse | ✅ verified (mouse + keyboard receivers through a powered hub); HDMI builds |
 
 ## Hardware
@@ -85,7 +85,7 @@ differ.
 | Vector table | 272 B | RAM copy of the vector table |
 | `.data` | ~58 KB | Code and tables copied to RAM: core 1's conversion loop and HSTX interrupt (anything core 1 runs must not fetch from flash), the chipset register dispatch tables, `DMALores`/`DMAHires` slot tables, with `OMEGA_HOT_CODE_IN_RAM` (default) all code of `DMA.c`, `CIA.c`, `Blitter.c`, `Floppy.c`, `m68kcpu.c`, `Memory.c` and `Host.c` (~28.7 KB), and with `OMEGA_HOT_OPCODES_IN_RAM` (default) the 100 hottest opcode handlers, their fetch helpers and the main loop (~15 KB) |
 | `sram_frames` | 320 KB / 300 KB | Two scanout frames, 640×256 (PAL) / 640×240 (NTSC), one byte per pixel (Amiga colour number or HAM code; RGB332 on the fallback path) |
-| `ring` | 64 KB | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
+| `ring` | 64 KB (PAL with HDMI audio: ~45 KB) | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
 | `m68ki_opcode_blocks` + `m68ki_opcode_block` | 32 KB + 1 KB | Two-level 68000 opcode → handler index: room for 256 shared blocks of 64 entries (~245 used), one byte per block of opcodes |
 | `m68ki_handler_ptrs` + `m68ki_handler_cycles` | 7.7 KB + 3.8 KB | Handler function pointers and 68000 cycle counts, one per handler |
 | `image_lines` | 5.1 KB | Two RGB888 row buffers with HSTX commands, expanded by the scanout interrupt |
@@ -95,8 +95,8 @@ differ.
 | `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
 | Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
 | Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
-| **Free** | **~3 KB / ~4 KB** (NTSC ~23 KB without HDMI audio) | Between the heap and the end of main SRAM; HDMI audio takes ~20 KB (rings 10 KB, encoder tables and code), USB host ~6 KB (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
-| `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and 2 KB free |
+| **Free** | **~1.4 KB / ~2.3 KB** | Between the heap and the end of main SRAM; HDMI audio takes ~20 KB (input ring 8 KB, encoder tables and code; PAL gives up ~19 KB of the core-1 ring for it), USB host ~6 KB (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
+| `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and, with HDMI audio, the stretcher's 2 KB output ring |
 | `SCRATCH_Y` | 4 KB | Core 0 stack |
 
 The core 0 stack grows down from the top of `SCRATCH_Y`; an overrun would run
@@ -205,7 +205,8 @@ The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
 each fetched bitplane block, palette changes and frame begin/end into a
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`). The ring is 64 KB in both modes (`RING_WORDS`; any size
+`src/Host.c`). The ring is 64 KB (`RING_WORDS`, set by CMake: ~45 KB on PAL
+with HDMI audio, where it still shows every idle Workbench frame; any size
 works, positions run over twice the ring size), which holds a whole frame's
 messages across the wait for the display swap: on idle Workbench every
 emulated frame is shown (PAL 28.0 of 28.0 frames/s, was 21.7 of 28.2 with
@@ -566,32 +567,46 @@ and the "LED" filter, a second-order Butterworth at ~3.3 kHz, while CIA-A's
 
 ### HDMI audio
 
-`OMEGA_HDMI_AUDIO` (default ON for NTSC, OFF for PAL) sends the audio in
-HDMI data islands; no extra hardware is needed. OFF gives plain DVI, and
-Paula is then emulated (its interrupts) but not mixed. PAL builds cannot
-enable it yet: PAL's larger scanout frames leave ~17 KB too little SRAM, and
-CMake refuses the combination.
+`OMEGA_HDMI_AUDIO` (default ON, NTSC and PAL) sends the audio in HDMI data
+islands; no extra hardware is needed. OFF gives plain DVI, and Paula is then
+emulated (its interrupts) but not mixed. On PAL the core-1 ring shrinks to
+~45 KB to make room.
 
-- Every line's horizontal blanking carries a data island from pixel 4: an
-  audio sample packet with that line's samples (48 kHz at the 31.5 / 31.25
-  kHz line rate: one or two per line) and either an Audio Clock Regeneration
-  packet (N = 6144, CTS = pixel clock / 1000) or, on lines 0 and 1, the AVI
-  and Audio InfoFrames. Active lines end their blanking with the HDMI video
-  preamble and guard band. Packet layouts, TERC4, BCH ECC and guard bands
-  follow HDMI 1.4 and match hdl-util's `hdmi` core (`src/hdmi_island.c`).
-- Encoding runs in the DMA interrupt (~3 µs per line, table driven); the
-  ACR and InfoFrame packets are encoded once at start-up.
+- Every line's horizontal blanking carries a data island from pixel 4:
+  packet 1 and either an Audio Clock Regeneration packet (N = 6144, CTS =
+  pixel clock / 1000) or, on lines 0 and 1, the AVI and Audio InfoFrames.
+  Active lines end their blanking with the HDMI video preamble and guard
+  band. Packet layouts, TERC4, BCH ECC and guard bands follow HDMI 1.4 and
+  match hdl-util's `hdmi` core (`src/hdmi_island.c`).
+- Packet 1 is an audio sample packet with four samples once four are due
+  (48 kHz at the 31.5 / 31.25 kHz line rate: every 2-3 lines; VSYNC lines
+  send none and catch up after), else a null packet. Each blanking buffer
+  is built once and reused; the line interrupt rewrites only packet 1, and
+  encodes only the lines that carry samples (~4.5 µs each). The ACR,
+  InfoFrame, null and silent packets are encoded at start-up.
 - Paula produces samples per second of *emulated* time. `src/hdmi_audio.c`
   time-stretches them to real time on core 1's thread loop with WSOLA
   (16 ms windows, 50 % overlap, Hann cross-fades, the next window placed
   within ±4 ms where its waveform best matches the previous one's
-  continuation), so slow emulation (RemGame at ~half speed) keeps its pitch
-  and plays smoothly, stretched. Within 2 % of real time (left again beyond
-  3 %) the input is copied straight through, bit-exact, with no search.
-  Below a quarter of real time it fades to silence. The line interrupt only
-  takes the stretched samples from a 512-frame output ring.
-- Cost: RemGame 30.0 → 28.8 frames/s; core 1 keeps idle time (row
-  expansion ~26 %, island encoding ~11 %, stretching ~12 % in RemGame).
+  continuation, matched on a 4× decimated mono copy), so slow emulation
+  (RemGame at ~half speed) keeps its pitch and plays smoothly, stretched.
+  Within 2 % of real time (left again beyond 3 %) the input is copied
+  straight through, bit-exact, with no search. Below a quarter of real time
+  it fades to silence. The line interrupt takes the stretched samples from
+  a 512-frame (~10 ms) output ring.
+- Silence: when Paula is idle core 0 queues silence without samples; after
+  a second of it the stretcher stops and the interrupt sends pre-encoded
+  silent packets (three variants: IEC 60958 block start, the channel status
+  bit, other), so an idle machine costs core 1 almost nothing. Sound starts
+  it again with a short fade-in. Stopping after every short pause was
+  audible in RemGame.
+- Core 1 has no bus priority over core 0 (the scanout DMA keeps it): with
+  it, the audio path's SRAM traffic slowed core 0 by ~2 %, which dropped
+  PAL xSysinfo from 50 to 36 shown frames/s.
+- Cost (frames/s, emulated/shown): NTSC xSysinfo 60/60, RemGame 31.4; PAL
+  xSysinfo 50/49, idle Workbench 50/50, RemGame 25.7/25.0 (no audio:
+  26.9/26.9). `dvi_audio_underruns` counts lines that owed samples but had
+  none ready (none in RemGame).
 - The capture card used for testing records the HDMI audio as silence
   while a monitor plays it; check audio by ear or with the native PCM.
 

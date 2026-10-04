@@ -572,6 +572,16 @@ static inline uint32_t sync_word(uint vsync, uint hsync) {
 static uint32_t acr_words[2][32];
 static uint32_t avi_words[32];
 static uint32_t aif_words[32];
+// The rest of the island that does not change, per VSYNC level: preamble
+// and leading guard band, trailing guard band, and a null packet 1 for the
+// lines that carry no samples.
+static uint32_t head_words[2][10];
+static uint32_t tail_words[2][2];
+static uint32_t null_words[2][32];
+// Four silent samples (VSYNC high), for IEC 60958 frames 0-3 (block
+// start), 24-27 (the channel status bit set, 48 kHz) and any other group:
+// sent while the stretcher holds no sound, instead of encoding zeros.
+static uint32_t silent_words[3][32];
 static unsigned audio_frame;     // IEC 60958 frame counter
 static uint32_t audio_due;       // samples owed, in 1/line_rate units
 #define LINE_RATE (MODE_BIT_CLK_KHZ * 100u / MODE_H_TOTAL)  // lines per second
@@ -583,8 +593,19 @@ static void hdmi_audio_prepare(void) {
         // N = 6144 at 48 kHz; CTS = pixel clock * N / (128 * 48000).
         hdmi_acr_packet(&p, 6144u, MODE_BIT_CLK_KHZ / 10u);
         hdmi_encode_packet(acr_words[v], &p, PACKET2_X, false, &sync);
+        hdmi_island_head(head_words[v], ISLAND_X, &sync);
+        hdmi_island_tail(tail_words[v], PACKET2_X + 32u, &sync);
+        hdmi_null_packet(&p);
+        hdmi_encode_packet(null_words[v], &p, ISLAND_X + 10u, true, &sync);
     }
     const hdmi_sync_t sync = { MODE_HSYNC_START, MODE_HSYNC_END, 1u };
+    static const int16_t zeros[2 * 4];
+    const unsigned first_frame[3] = { 0u, 24u, 4u };
+    for (uint k = 0; k < 3u; ++k) {
+        unsigned f = first_frame[k];
+        hdmi_audio_packet(&p, zeros, 4, &f);
+        hdmi_encode_packet(silent_words[k], &p, ISLAND_X + 10u, true, &sync);
+    }
     hdmi_avi_infoframe(&p, MODE_VIC);
     hdmi_encode_packet(avi_words, &p, PACKET2_X, false, &sync);
     hdmi_audio_infoframe(&p);
@@ -592,38 +613,43 @@ static void hdmi_audio_prepare(void) {
 }
 #endif
 
+#if OMEGA_HDMI_AUDIO
+// Word offset of packet 1 in an hblank buffer (after the island's leading
+// commands, preamble and guard band).
+#define HBLANK_PACKET1 13u
+// What each hblank buffer holds, so a line only rewrites what differs from
+// the buffer's previous line (usually just packet 1): rebuilding the whole
+// blanking in every line interrupt cost core 1 enough to drop frames
+// (PAL xSysinfo 50 -> 37 shown frames/s).
+static uint hblank_key[2] = { ~0u, ~0u };
+static uint hblank_len[2];
+static bool hblank_p1_null[2];
+// Lines that owed samples but found none ready (readable over SWD).
+volatile uint32_t dvi_audio_underruns;
+#endif
+
 // Builds the blanking of `line` into buf; returns its word count.
-static uint __not_in_flash_func(hstx_build_hblank)(uint line, uint32_t *buf) {
+static uint SCAN_FUNC(hstx_build_hblank)(uint line, uint32_t *buf) {
     uint32_t *w = buf;
     const uint vsync = line_is_vsync(line) ? 0u : 1u;
     const bool active = line < MODE_V_ACTIVE_LINES;
     uint x = 0;
 #if OMEGA_HDMI_AUDIO
-    const hdmi_sync_t sync = { MODE_HSYNC_START, MODE_HSYNC_END, vsync };
     *w++ = HSTX_CMD_RAW_REPEAT | ISLAND_X;
     *w++ = sync_word(vsync, 1u);
     *w++ = HSTX_CMD_RAW | HDMI_ISLAND_PIXELS(ISLAND_PACKETS);
-    hdmi_island_head(w, ISLAND_X, &sync);
-    w += 10;
-    // Packet 1: this line's audio samples (48 kHz over LINE_RATE lines/s).
-    int16_t samples[2 * 4];
-    int count = 0;
-    audio_due += 48000u;
-    while (audio_due >= LINE_RATE && count < 4) {
-        audio_due -= LINE_RATE;
-        hdmi_audio_take(&samples[2 * count]);
-        ++count;
-    }
-    hdmi_packet_t p;
-    hdmi_audio_packet(&p, samples, count, &audio_frame);
-    hdmi_encode_packet(w, &p, ISLAND_X + 10u, true, &sync);
-    w += 32;
+    for (uint i = 0; i < 10u; ++i)
+        *w++ = head_words[vsync][i];
+    // Packet 1 (at HBLANK_PACKET1): a null packet here; the audio samples
+    // are written over it per line by hstx_next_hblank().
+    for (uint i = 0; i < 32u; ++i)
+        *w++ = null_words[vsync][i];
     const uint32_t *p2 = line == 0u ? avi_words : line == 1u ? aif_words
                                                             : acr_words[vsync];
     for (uint i = 0; i < 32u; ++i)
         *w++ = p2[i];
-    hdmi_island_tail(w, PACKET2_X + 32u, &sync);
-    w += 2;
+    *w++ = tail_words[vsync][0];
+    *w++ = tail_words[vsync][1];
     x = ISLAND_X + HDMI_ISLAND_PIXELS(ISLAND_PACKETS);
     const uint end = active ? MODE_H_BLANK - 10u : MODE_H_BLANK;
 #else
@@ -661,7 +687,7 @@ static inline uint line_plus_2(uint line) {
 // Blanking channel p finished: build its next line's blanking (two lines
 // ahead), and for the first line of an image row expand the row, nearly
 // two lines before it is sent.
-static void __not_in_flash_func(hstx_next_hblank)(uint p) {
+static void SCAN_FUNC(hstx_next_hblank)(uint p) {
     const uint line = hstx_hblank_line[p];
     hstx_hblank_line[p] = line_plus_2(line);
 
@@ -682,7 +708,65 @@ static void __not_in_flash_func(hstx_next_hblank)(uint p) {
 
     dma_channel_hw_t *ch = &dma_hw->ch[hstx_dma[p]];
     ch->read_addr = (uintptr_t)hblank_buf[p];
+#if OMEGA_HDMI_AUDIO
+    // Rebuild only when the line's fixed content changes: VSYNC level,
+    // active or not, and packet 2 (InfoFrames on lines 0 and 1, else ACR).
+    const uint vsync = line_is_vsync(line) ? 0u : 1u;
+    const uint key = vsync | (line < MODE_V_ACTIVE_LINES ? 2u : 0u) |
+                     (line < 2u ? (line + 1u) << 2 : 0u);
+    if (key != hblank_key[p]) {
+        hblank_key[p] = key;
+        hblank_len[p] = hstx_build_hblank(line, hblank_buf[p]);
+        hblank_p1_null[p] = true;
+    }
+    // Packet 1: four audio samples once four are due (48 kHz over
+    // LINE_RATE lines/s, ~1.5 per line: every 2-3 lines), from the
+    // stretcher's output ring (~10 ms), or a pre-encoded silent packet while
+    // the stretcher holds no sound; else a null packet, rewritten only if
+    // the buffer held samples. VSYNC lines (5 per frame) send none and
+    // catch up after; owed samples are capped at two packets' worth.
+    uint32_t *p1 = hblank_buf[p] + HBLANK_PACKET1;
+    audio_due += 48000u;
+    bool sent = false;
+    if (audio_due >= 4u * LINE_RATE && vsync) {
+        if (hdmi_audio_available() >= 4) {
+            int16_t samples[2 * 4];
+            for (int i = 0; i < 4; ++i)
+                hdmi_audio_take(&samples[2 * i]);
+            hdmi_packet_t pk;
+            hdmi_audio_packet(&pk, samples, 4, &audio_frame);
+            const hdmi_sync_t sync = { MODE_HSYNC_START, MODE_HSYNC_END, 1u };
+            hdmi_encode_packet(p1, &pk, ISLAND_X + 10u, true, &sync);
+            sent = true;
+        } else if (hdmi_audio_idle()) {
+            // Drop the last few samples of the sound (under 4).
+            int16_t lr[2];
+            while (hdmi_audio_available() > 0)
+                hdmi_audio_take(lr);
+            const uint32_t *src = silent_words[audio_frame == 0u ? 0
+                                             : audio_frame == 24u ? 1 : 2];
+            for (uint i = 0; i < 32u; ++i)
+                p1[i] = src[i];
+            audio_frame = audio_frame + 4u == 192u ? 0u : audio_frame + 4u;
+            sent = true;
+        } else {
+            ++dvi_audio_underruns;
+        }
+    }
+    if (sent) {
+        audio_due -= 4u * LINE_RATE;
+        hblank_p1_null[p] = false;
+    } else if (!hblank_p1_null[p]) {
+        for (uint i = 0; i < 32u; ++i)
+            p1[i] = null_words[vsync][i];
+        hblank_p1_null[p] = true;
+    }
+    if (audio_due > 8u * LINE_RATE)
+        audio_due = 8u * LINE_RATE;
+    ch->transfer_count = hblank_len[p];
+#else
     ch->transfer_count = hstx_build_hblank(line, hblank_buf[p]);
+#endif
 
     // The first line of each image row has it expanded, into the row
     // buffer that the previous row's two lines are not using, by the
@@ -925,13 +1009,17 @@ void dvi_display_start(void) {
     boot_pattern_done = false;
     boot_pattern_armed = true;
 
-    // Frame presentation performs large PSRAM writes on core 0. Give scanout
-    // and its DMA channels priority so those writes cannot starve it.
+    // Frame presentation performs large PSRAM writes on core 0. Give the
+    // scanout DMA channels priority so those writes cannot starve it. Core 1
+    // itself does not get it: with priority its SRAM traffic (the HDMI
+    // audio path) slowed core 0 by ~2 %, enough to drop PAL xSysinfo below
+    // 50 frames/s (shown 36); the line interrupt's deadlines are met
+    // without it.
     hw_set_bits(&busctrl_hw->priority,
-                BUSCTRL_BUS_PRIORITY_PROC1_BITS |
                 BUSCTRL_BUS_PRIORITY_DMA_R_BITS |
                 BUSCTRL_BUS_PRIORITY_DMA_W_BITS);
-    hw_clear_bits(&busctrl_hw->priority, BUSCTRL_BUS_PRIORITY_PROC0_BITS);
+    hw_clear_bits(&busctrl_hw->priority, BUSCTRL_BUS_PRIORITY_PROC0_BITS |
+                                         BUSCTRL_BUS_PRIORITY_PROC1_BITS);
     while (!busctrl_hw->priority_ack)
         tight_loop_contents();
 

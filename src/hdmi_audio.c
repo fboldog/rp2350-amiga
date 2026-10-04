@@ -25,12 +25,19 @@
 #define WIN (2u * HOP)         // window length
 #define SEARCH 192u            // +- search range
 #define DECIM 4u               // correlation decimation
+#define SILENCE_HOLD 48000u    // silence (frames) before the stretcher stops
 // Input kept behind the newest sample so a window plus the search fits.
 #define LAG (WIN + SEARCH + 64u)
 
 static int16_t in_ring[IN_RING][2];
 static volatile uint32_t in_head, in_tail;    // free running
-static int16_t out_ring[OUT_RING][2];
+// in_head after the last queued sound (hdmi_audio_put() with samples);
+// input from here on is silence. Once nothing older is kept, the
+// stretcher stops (hdmi_audio_idle()) instead of copying zeros.
+static volatile uint32_t last_sound;
+// In scratch X (core 1's stack bank, otherwise unused): 2 KB more for
+// the core-1 message ring.
+static int16_t __scratch_x("hdmi_audio") out_ring[OUT_RING][2];
 static volatile uint32_t out_head, out_tail;
 
 // Hann window, rising half (0..32767) over HOP samples; the falling half is
@@ -64,6 +71,8 @@ void __not_in_flash_func(hdmi_audio_put)(const int16_t *samples, int frames) {
         slot[1] = samples ? samples[2 * i + 1] : 0;
     }
     __atomic_store_n(&in_head, head, __ATOMIC_RELEASE);
+    if (samples)
+        __atomic_store_n(&last_sound, head, __ATOMIC_RELEASE);
 }
 
 static void __not_in_flash_func(fade_init)(void) {
@@ -83,15 +92,25 @@ static void __not_in_flash_func(fade_init)(void) {
     fade_ready = true;
 }
 
-// Cross-correlation of the decimated mono signal: input at `a` against
-// input at `b`, over the overlap (HOP samples).
-static int32_t __not_in_flash_func(correlate)(uint32_t a, uint32_t b) {
+// The search works on a DECIM-decimated mono copy of the input, made once
+// per window: the natural continuation (HOP / DECIM points) and the whole
+// search range (candidates start every 2 * DECIM samples, so candidate k
+// begins at point 2k). Reading the ring per product (masking, two
+// channels) made a window cost ~170k cycles; on plain arrays it is ~10x
+// less. Points are (L + R) / 16 so a 96-term sum fits in 32 bits.
+#define NAT_POINTS (HOP / DECIM)
+#define SEARCH_POINTS ((2u * SEARCH + HOP) / DECIM + 1u)
+static int16_t nat_mono[NAT_POINTS];
+static int16_t search_mono[SEARCH_POINTS];
+
+static inline int16_t mono(uint32_t i) {
+    return (int16_t)((in_s(i, 0) + in_s(i, 1)) >> 4);
+}
+
+static int32_t __not_in_flash_func(correlate)(const int16_t *b) {
     int32_t sum = 0;
-    for (uint32_t i = 0; i < HOP; i += DECIM) {
-        const int32_t x = (in_s(a + i, 0) + in_s(a + i, 1)) >> 2;
-        const int32_t y = (in_s(b + i, 0) + in_s(b + i, 1)) >> 2;
-        sum += (x * y) >> 6;
-    }
+    for (uint32_t i = 0; i < NAT_POINTS; ++i)
+        sum += nat_mono[i] * b[i];
     return sum;
 }
 
@@ -101,6 +120,18 @@ static bool __not_in_flash_func(stretch_step)(void) {
     if (OUT_RING - (out_head - __atomic_load_n(&out_tail, __ATOMIC_ACQUIRE)) <
         HOP)
         return false;                       // output full
+    // Only silence kept, for a second: stop (the output ring drains first)
+    // and drop the input; sound primes the stretcher again and fades in.
+    // Shorter pauses (RemGame's sound effects) keep it running: restarting
+    // after each one was audible.
+    const uint32_t sound = __atomic_load_n(&last_sound, __ATOMIC_ACQUIRE);
+    if ((int32_t)(sound - in_tail) <= 0 &&
+        (!primed || head - sound >= SILENCE_HOLD)) {
+        primed = false;
+        gain = 0;
+        __atomic_store_n(&in_tail, head, __ATOMIC_RELEASE);
+        return false;
+    }
     if (!primed) {
         if (head - in_tail < LAG + HOP)
             return false;                   // collect some input first
@@ -166,11 +197,17 @@ static bool __not_in_flash_func(stretch_step)(void) {
     const uint32_t natural = prev_seg + HOP;
     uint32_t best = nominal;
     int32_t best_c = INT32_MIN;
+    for (uint32_t i = 0; i < NAT_POINTS; ++i)
+        nat_mono[i] = mono(natural + i * DECIM);
+    const uint32_t first = nominal - SEARCH;
+    for (uint32_t i = 0; i < SEARCH_POINTS; ++i)
+        search_mono[i] = mono(first + i * DECIM);
     for (int32_t d = -(int32_t)SEARCH; d <= (int32_t)SEARCH; d += 2 * (int32_t)DECIM) {
         const uint32_t cand = nominal + (uint32_t)d;
         if ((int32_t)(cand - __atomic_load_n(&in_tail, __ATOMIC_ACQUIRE)) < 0)
             continue;
-        const int32_t c = correlate(natural, cand);
+        const int32_t c =
+            correlate(&search_mono[(uint32_t)(d + (int32_t)SEARCH) / DECIM]);
         if (c > best_c) {
             best_c = c;
             best = cand;
@@ -223,6 +260,14 @@ void __not_in_flash_func(hdmi_audio_service)(void) {
         fade_init();
     while (stretch_step())
         ;
+}
+
+bool __not_in_flash_func(hdmi_audio_idle)(void) {
+    return !primed;
+}
+
+int __not_in_flash_func(hdmi_audio_available)(void) {
+    return (int)(__atomic_load_n(&out_head, __ATOMIC_ACQUIRE) - out_tail);
 }
 
 void __not_in_flash_func(hdmi_audio_take)(int16_t *lr) {
