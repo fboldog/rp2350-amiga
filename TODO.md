@@ -176,11 +176,12 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       changes outside the window; the pointer is missing too). Recheck
       Workbench, the Kickstart screens, RemGame and D-Mob against their
       references.
-- [ ] **PAL lines are 228 colour clocks, should be 227** (`SLOT_LAST`
-      0xE3, Audio.c `SLOTS_PER_LINE`): ATK times CIA E-clock ticks over 5
-      frames (71,364 here, threshold 71,264, real PAL 71,051) and reports
-      OCS/NTSC; PAL frame rate and Paula pitch are 0.4 % off. NTSC should
-      alternate 227/228 (LOL).
+- [x] **Real line lengths (2026-10-04)**: PAL 227 colour clocks (was
+      228), NTSC alternating 228/227. ATK now reports OCS/PAL (it times CIA
+      E-clock ticks over 5 frames: 71,364 before, 71,051 now, threshold
+      71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
+      unchanged (one slot-skip table for both lengths: rebuilding it per
+      NTSC line had cost a third). NTSC frames stay 263 lines.
 - [ ] Unexplained, seen once each during PAL audio benchmarks: a stall
       booting Workbench (not reproduced), and a core-1 fault record (IRQ 51,
       a user IRQ, jumped to 0; possibly from a wedged chip / rescue cycle).

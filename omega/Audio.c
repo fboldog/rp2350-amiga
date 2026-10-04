@@ -29,7 +29,6 @@
 #define OMEGA_AUDIO_OUTPUT 1
 #endif
 
-#define SLOTS_PER_LINE 228   // hPos 0..0xE3
 #define MIN_DMA_PERIOD 124   // shortest period audio DMA can feed
 
 typedef struct {
@@ -51,9 +50,9 @@ static int32_t accum[4];
 static int active;      // channels with mode != 0 (bit per channel)
 // Colour clocks per output sample and until the next one (16.16).
 static const uint32_t outStep = (uint32_t)(
-    ((uint64_t)SLOTS_PER_LINE * OMEGA_VIDEO_FRAME_LINES *
+    ((uint64_t)OMEGA_VIDEO_LINE_CCK2 * OMEGA_VIDEO_FRAME_LINES *
      OMEGA_VIDEO_RATE_NUMERATOR << 16) /
-    ((uint64_t)OMEGA_VIDEO_RATE_DENOMINATOR * AUDIO_RATE));
+    ((uint64_t)2 * OMEGA_VIDEO_RATE_DENOMINATOR * AUDIO_RATE));
 static int32_t outNext;
 // accum (sample x clocks in 16.12) x volume -> fraction of full scale for
 // one output interval; two channels per side, so each counts half.
@@ -248,8 +247,9 @@ static int16_t toS16(float v) {
 }
 
 
-void audioLine(void) {
-    const int32_t lineClocks = SLOTS_PER_LINE << 16;
+// Called at the end of each line of `slots` colour clocks (227 or 228).
+void audioLine(int slots) {
+    const int32_t lineClocks = slots << 16;
 #if !OMEGA_AUDIO_OUTPUT
     // No output: advance the channels (DMA fetches, interrupts) only.
     if (active)

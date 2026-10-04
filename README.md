@@ -359,6 +359,14 @@ Hold BOOTSEL and connect USB, then copy the generated combined UF2 to the
 
 ## CPU timing
 
+Lines are as long as on the real machines: PAL lines are 227 colour clocks
+(hPos 0..0xE2), NTSC lines alternate 228 and 227 (`OMEGA_VIDEO_LONG_LINES`
+in `omega/VideoStandard.h`; `lineLast` in `DMA.c`). One slot-skip table
+serves both lengths. With 228-slot PAL lines the CIA E clock counted
+71,364 ticks per 5 frames instead of 71,051, which the Amiga Test Kit
+(it times the E clock against vertical blanks) took for an NTSC machine;
+the PAL frame rate and Paula's pitch were 0.4 % off as well.
+
 The 68000 gets `OMEGA_CPU_CYCLES_PER_SLOT` cycles per DMA slot (colour clock),
 default 2 as on an A500 (7.09 MHz CPU, 3.55 MHz colour clock); set it at
 configure time with `cmake -DOMEGA_CPU_CYCLES_PER_SLOT=<n>` (a cached value

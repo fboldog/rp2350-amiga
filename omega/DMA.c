@@ -750,7 +750,12 @@ static int lineRowRotation;      // omegaDdfRowRotation(DDFSTRT, DDFSTOP)
 // that can do anything else: bitplane slots inside the fetch window, sprite
 // slots with sprite DMA on, audio slots of enabled channels, disk slots
 // (DSKLEN is not tracked), the fetch-window end and the last slot of a line.
-#define SLOT_LAST 0xE3
+#define SLOT_LAST 0xE3   // last slot of a long line
+// Last slot of the current line: PAL lines are 227 colour clocks (hPos
+// 0..0xE2); NTSC lines alternate 228 and 227. A 228-slot PAL line made the
+// CIA E clock count 71,364 ticks per 5 frames instead of 71,051, which the
+// Amiga Test Kit reads as an NTSC machine.
+static int lineLast = OMEGA_VIDEO_LONG_LINES ? SLOT_LAST : SLOT_LAST - 1;
 static uint8_t slotNext[SLOT_LAST + 1];
 // Inside the bitplane fetch window, slotRunEnd[h] is the first slot >= h
 // that is not a bitplane or free slot of the window (h itself elsewhere).
@@ -766,7 +771,10 @@ static uint8_t slotPlane[SLOT_LAST + 1];
 static uint32_t slotNextKey = ~0u;
 
 static int slotIsActive(void (*f)(), int h) {
-    if (h >= SLOT_LAST || h == bitplaneLine.lastCycle)
+    // The last slot of a short line too, so one table serves both lengths
+    // (rebuilding it whenever NTSC's line length changed cost a third of
+    // the speed).
+    if (h >= SLOT_LAST - 1 || h == bitplaneLine.lastCycle)
         return 1;
     // Audio slots do nothing per slot (Audio.c advances once per line); with
     // audio DMA on they keep the slot from the blitter, which never runs
@@ -795,7 +803,7 @@ static int slotIsActive(void (*f)(), int h) {
 // A slot a fetch run may include: inside the window, and a bitplane slot or
 // one that only offers itself to the Copper and the blitter.
 static int slotInFetchRun(void (*f)(), int h) {
-    if (h >= SLOT_LAST || !lineBitplaneWindow || h < chipset.ddfstrt ||
+    if (h >= SLOT_LAST - 1 || !lineBitplaneWindow || h < chipset.ddfstrt ||
         h > bitplaneLine.lastCycle)
         return 0;
     return f == hiresPlane1 || f == loresPlane1 || f == plane2 ||
@@ -892,9 +900,12 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
     // at it for display only; do not advance any bitplane pointer.
     hiresDisplayPrefetch();
 
-    audioLine();
+    audioLine(lineLast + 1);
     dmaIdleCacheValid = 0;   // the Copper's comparisons depend on the line
     internal.hPos = 0;
+#if OMEGA_VIDEO_LONG_LINES
+    lineLast ^= SLOT_LAST ^ (SLOT_LAST - 1);   // long and short alternate
+#endif
     internal.vPos +=1;
     CIATODEvent(&CIAB);
 
@@ -1061,8 +1072,8 @@ void dma_run(int slots){
 
         beamV = internal.vPos;
         beamH = internal.hPos;
-        //end of line reached! 227 colour clocks have executed
-        if (++internal.hPos > 0xE3)
+        // End of line (227 or 228 colour clocks).
+        if (++internal.hPos > lineLast)
             dmaEndOfLine();
     }
     if (beamV >= 0)
@@ -1142,7 +1153,7 @@ static int __attribute__((noinline)) dmaIdleCompute(int limit) {
         return h;
     if (copperWaitNextBank && (internal.vPos & 0xff) == 0xff)
         return limit;
-    const uint32_t lineEnd = ((uint32_t)(internal.vPos & 0xff) << 8) | SLOT_LAST;
+    const uint32_t lineEnd = ((uint32_t)(internal.vPos & 0xff) << 8) | (uint32_t)lineLast;
     if ((lineEnd & internal.IR2) < copperWaitPosition)
         return limit;               // not before the next line
     const int waitH = (int)(copperWaitPosition & 0xfe);
@@ -1161,7 +1172,7 @@ static int idleHorizon;   // first slot where the Copper/blitter may act
 static int idleLine;      // internal.vPos it was computed for
 
 static void __attribute__((noinline)) dmaIdleRefresh(void) {
-    idleHorizon = dmaIdleCompute(SLOT_LAST + 1);
+    idleHorizon = dmaIdleCompute(lineLast + 1);
     idleLine = internal.vPos;
     dmaIdleCacheValid = 1;
 }

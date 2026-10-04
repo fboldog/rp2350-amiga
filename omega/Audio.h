@@ -16,7 +16,7 @@ void audioDmaconChanged(uint16_t old);
 void audioDatWritten(int channel);
 // Advances the four channels by one raster line and emits the 48 kHz
 // stereo samples that fall into it (called at the end of every line).
-void audioLine(void);
+void audioLine(int slots);
 // Silences all channels (reset).
 void audioReset(void);
 
