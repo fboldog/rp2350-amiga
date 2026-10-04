@@ -19,6 +19,7 @@
 #include "CPU.h"
 #include "m68k.h"
 #include "DMA.h"
+#include "Host.h"
 #include "debug.h"
 
 // Register-stub diagnostics are useful in the desktop debugger, but a ROM can
@@ -873,6 +874,9 @@ static void __attribute__((noinline)) COLOUR_FUNC(setColour)(unsigned n,
     (&chipset.color00)[n] = value; //old register
     internal.palette[n] = OCS2ARGB(value); internal.palette332[n] = omegaRGB332(internal.palette[n]); internal.paletteGeneration++;
     internal.palette[n + 32] = EHB2ARGB(value); internal.palette332[n + 32] = omegaRGB332(internal.palette[n + 32]); internal.paletteGeneration++;
+    // HDMI: the change takes effect at its beam position, mid-line too.
+    if (hostDirectActive)
+        hostDirectColour((int)n, value);
 }
 #define COLOUR(nn) \
     void COLOUR_FUNC(color##nn)(uint16_t value){ setColour(1##nn - 100, value); }

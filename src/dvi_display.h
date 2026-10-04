@@ -37,15 +37,19 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
 // The Amiga Test Kit's RGB palette test (F6, F1) changes colours several
 // times per line: ~6 runs per row, past the earlier limit of 1024.
 #define DVI_MAX_SEGMENTS 4096
-#define DVI_MAX_PALETTE_LOG 2047  // DVI_SEGMENT_POS is 11 bits
+// Copper colour changes on every line (ATK's colour bars: 8 per line) need
+// more than 2047 entries per frame.
+#define DVI_MAX_PALETTE_LOG 4095
 // Segment: image columns [x0, x1) of one row, drawn after `pos` palette-log
-// entries; HAM decodes the pixels as HAM codes.
+// entries; HAM decodes the pixels as HAM codes. Columns are even (blocks,
+// layout offsets, sprites and colour changes all fall on lores pixels) and
+// stored halved, leaving 13 bits for pos.
 #define DVI_SEGMENT(x0, x1, pos, ham) \
-    ((uint32_t)(x0) | (uint32_t)(x1) << 10 | (uint32_t)(pos) << 20 | \
-     (uint32_t)(ham) << 31)
-#define DVI_SEGMENT_X0(s)  ((s) & 0x3ffu)
-#define DVI_SEGMENT_X1(s)  (((s) >> 10) & 0x3ffu)
-#define DVI_SEGMENT_POS(s) (((s) >> 20) & 0x7ffu)
+    ((uint32_t)(x0) >> 1 | ((uint32_t)(x1) >> 1) << 9 | \
+     (uint32_t)(pos) << 18 | (uint32_t)(ham) << 31)
+#define DVI_SEGMENT_X0(s)  (((s) & 0x1ffu) << 1)
+#define DVI_SEGMENT_X1(s)  ((((s) >> 9) & 0x1ffu) << 1)
+#define DVI_SEGMENT_POS(s) (((s) >> 18) & 0x1fffu)
 #define DVI_SEGMENT_HAM(s) ((s) >> 31)
 typedef struct {
     uint16_t initial_palette[32];         // 0x0RGB colours at frame begin

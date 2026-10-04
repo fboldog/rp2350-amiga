@@ -26,6 +26,7 @@
 #include "../omega/CIA.h"
 #include "../omega/Audio.h"
 #include "../omega/CPU.h"
+#include "../omega/DMA.h"
 #include "../omega/VideoStandard.h"
 #include "pico/stdlib.h"
 #include "hardware/sync.h"
@@ -258,6 +259,31 @@ static void hostDirectBegin(void) {
         (uint16_t)first_row | (uint32_t)step << 16 | (uint32_t)narrow << 24,
         (uint32_t)rotation | (uint32_t)height << 16,
     };
+    ringPush(msg, count_of(msg));
+}
+
+// A colour change goes to core 1 with its beam row and raster column, so it
+// takes effect there instead of at the next block (ATK's colour bars: the
+// Copper changes COLOR00 every 22 colour clocks, which block boundaries
+// rounded to 64 or 96 columns). Earlier changes not sent yet (between
+// frames) go as the full palette first.
+void hostDirectColour(int reg, uint16_t value) {
+    // A change before this row's blocks so far (most Copper changes, made
+    // in the horizontal blank) is exact with the palette sync before the
+    // next block, as before; only one inside them needs its position.
+    // (A message per change cost RemGame ~3 %.)
+    const int row = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
+    int x = dmaBeamColumn();
+    if (row != host.rasterRow || x >= host.rasterX)
+        return;
+    if (host_run.palette_sent != internal.paletteGeneration - 2u) {
+        hostDirectSendPalette();
+        return;
+    }
+    host_run.palette_sent = internal.paletteGeneration;
+    runFlush();
+    x = x < 0 ? 0 : x > 0x3ff ? 0x3ff : x;
+    const uint32_t msg[2] = { MSG_HEADER(MSG_COLOUR, row, x, reg), value };
     ringPush(msg, count_of(msg));
 }
 
@@ -639,14 +665,70 @@ static void C1_FUNC(c1Palette)(const uint32_t *pairs) {
             if (colour == c1_palette[reg])
                 continue;
             c1_palette[reg] = colour;
-            // A full log drops the change for this frame; the next frame
-            // starts from the complete palette again.
-            if (c1_image && rec->log_used < DVI_MAX_PALETTE_LOG)
+            if (!c1_image)
+                continue;
+            // Before any row: the frame's starting palette. A full log
+            // drops the change for this frame; the next frame starts from
+            // the complete palette again.
+            if (c1_open_row < 0 && c1_mark_row < 0)
+                rec->initial_palette[reg] = colour;
+            else if (rec->log_used < DVI_MAX_PALETTE_LOG)
                 rec->palette_log[rec->log_used++] = reg << 12 | colour;
         }
     }
 }
 
+
+// Image column of raster column x (as c1Place() maps it).
+static inline int C1_FUNC(c1ImageX)(int x) {
+    if (c1_narrow)
+        return x - HOST_FETCH_LEAD;
+    int image_x = x - c1_rotation;
+    if (image_x < 0)
+        image_x += HOST_RASTER_W;
+    return image_x;
+}
+
+// Colour register `reg` changed at raster column x of row `row`: log it,
+// and the open row's runs drawn before the change show it from x on (a run
+// that spans x is split there).
+static void C1_FUNC(c1Colour)(int row, int x, int reg, uint16_t value) {
+    if (value == c1_palette[reg])
+        return;
+    c1_palette[reg] = value;
+    dvi_indexed_frame_t *rec = c1_record;
+    if (!c1_image || rec->log_used >= DVI_MAX_PALETTE_LOG)
+        return;
+    rec->palette_log[rec->log_used++] = (uint32_t)reg << 12 | value;
+    const uint32_t pos = rec->log_used;
+    if (row % c1_step ||
+        c1_first_row + row / c1_step != c1_open_row || c1_open_row < 0)
+        return;
+    int c = c1ImageX(x);
+    if (c < 0)
+        c = 0;
+    uint32_t used = rec->segments_used;
+    for (uint32_t i = rec->row_segment[c1_open_row]; i < used; ++i) {
+        const uint32_t seg = rec->segment[i];
+        const uint32_t x0 = DVI_SEGMENT_X0(seg), x1 = DVI_SEGMENT_X1(seg);
+        const uint32_t ham = DVI_SEGMENT_HAM(seg);
+        if (x1 <= (uint32_t)c)
+            continue;
+        if (x0 >= (uint32_t)c) {
+            rec->segment[i] = DVI_SEGMENT(x0, x1, pos, ham);
+            continue;
+        }
+        if (used == DVI_MAX_SEGMENTS)
+            continue;               // no room to split: keeps the old colour
+        for (uint32_t j = used; j > i + 1u; --j)
+            rec->segment[j] = rec->segment[j - 1u];
+        rec->segment[i] = DVI_SEGMENT(x0, (uint32_t)c, DVI_SEGMENT_POS(seg), ham);
+        rec->segment[i + 1u] = DVI_SEGMENT((uint32_t)c, x1, pos, ham);
+        ++used;
+        ++i;
+    }
+    rec->segments_used = (uint16_t)used;
+}
 
 void C1_FUNC(hostCore1Loop)(void) {
     uint32_t tail = ring_tail;
@@ -701,6 +783,10 @@ void C1_FUNC(hostCore1Loop)(void) {
             case MSG_PALETTE:
                 c1Palette(&msg[1]);
                 length = 17;
+                break;
+            case MSG_COLOUR:
+                c1Colour(row, x, (int)(header >> 23 & 31u), (uint16_t)msg[1]);
+                length = 2;
                 break;
             case MSG_BEGIN:
                 c1Begin(msg[1], msg[2]);

@@ -15,7 +15,7 @@ subprocess.run(oc+['-c',f'dump_image {out}.frame 0x{F+b*640*H:x} {640*H}','-c',f
 pix=open(out+'.frame','rb').read(); rec=open(out+'.rec','rb').read()
 u16=lambda o,n: struct.unpack_from(f'<{n}H',rec,o); u32=lambda o,n: struct.unpack_from(f'<{n}I',rec,o)
 init=u16(off['initial_palette'],32); rows=u16(off['row_segment'],257); rlog=u16(off['row_log'],256); used,logn=u16(off['segments_used'],2)
-segs=u32(off['segment'],used); log=u32(off['palette_log'],min(logn,2047))
+segs=u32(off['segment'],used); log=u32(off['palette_log'],min(logn,4095))
 c8=lambda c:(((c>>8)&15)*17,((c>>4)&15)*17,(c&15)*17)
 pal=[0]*64
 def setr(r,c): pal[r]=c8(c); pal[r+32]=c8((c>>1)&0x777)
@@ -30,12 +30,12 @@ for y in range(H):
         apply(min(rlog[y],logn))
         for x in range(640): px[x,y]=pal[0]
         continue
-    apply((segs[f]>>20)&0x7ff); border=pal[0]
-    mn=min(s&0x3ff for s in segs[f:l]); mx=max((s>>10)&0x3ff for s in segs[f:l])
+    apply((segs[f]>>18)&0x1fff); border=pal[0]
+    mn=min((s&0x1ff)<<1 for s in segs[f:l]); mx=max(((s>>9)&0x1ff)<<1 for s in segs[f:l])
     for x in list(range(0,mn))+list(range(mx,640)): px[x,y]=border
     hold=border
     for s in segs[f:l]:
-        apply((s>>20)&0x7ff); x0,x1,ham=s&0x3ff,(s>>10)&0x3ff,s>>31
+        apply((s>>18)&0x1fff); x0,x1,ham=(s&0x1ff)<<1,((s>>9)&0x1ff)<<1,s>>31
         for x in range(x0,x1):
             c=row[x]
             if c&0x40: px[x,y]=pal[c&31]; sprites+=1; continue

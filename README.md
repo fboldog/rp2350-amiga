@@ -63,8 +63,8 @@ the same memory). Offsets are defined in `src/board_config.h`
 | `0x11680000` | 1 MB | Presented framebuffer, 640×400 ARGB32 (same fallback path) | cached |
 | `0x11780000` | 32 KB | free | |
 | `0x11788000` | 128 KB | 68000 opcode table scratch: the flat handler index, built at boot and then compressed into SRAM | boot only |
-| `0x117A8000` | 64 KB | HDMI frame records: palette log and pixel runs of the two indexed frames (`dvi_indexed_frame_t` ×2) | cached |
-| `0x117B8000` | ~284 KB | free | |
+| `0x117A8000` | 128 KB | HDMI frame records: palette log and pixel runs of the two indexed frames (`dvi_indexed_frame_t` ×2) | cached |
+| `0x117C8000` | ~220 KB | free | |
 | `0x117FF000` | 12 bytes | DF0 disk rotation state (kept through resets, lost on power-off) | uncached |
 
 The HDMI scanout frames themselves are in internal SRAM, not PSRAM.
@@ -264,14 +264,20 @@ register number (0..31, 32..63 extra half-brite) or, on HAM runs, the raw
 6-bit HAM code. Core 1 converts each bitplane block to those numbers
 (`hostDirectHires()`/`hostDirectLores()`, HAM included) and keeps a record
 per frame (`dvi_indexed_frame_t`): the palette at frame begin, a log of every
-colour change (up to 2047), and for each row the runs of pixels it drew with
+colour change (up to 4095), and for each row the runs of pixels it drew with
 the log position before them (up to 4096: the Amiga Test Kit's RGB palette
 test needs ~1,600). The records live in PSRAM at
-0x7A8000 (64 KB reserved), read and written through the XIP cache that both
+0x7A8000 (128 KB reserved), read and written through the XIP cache that both
 cores share, which keeps ~9.6 KB of SRAM free for the ring at ~1 % speed. Scanout replays the log in drawing
 order and expands each row to RGB888 with the 12-bit colours doubled to 8 bits
 (0xF → 0xFF), so Copper palette changes (the Kickstart 2.04 rainbow, border
-gradients) keep their exact colours even mid-line; a row's undrawn columns
+gradients) keep their exact colours even mid-line. A change normally
+reaches core 1 with the next block; one that falls inside blocks already
+sent for its row (the Copper changing COLOR00 every 22 colour clocks in
+ATK's colour bars) goes as its own message with its beam column
+(`dmaBeamColumn()`, the reference sprites use), and core 1 splits the
+row's runs there, so colour edges land on their pixel instead of the next
+16 or 32-column block; a row's undrawn columns
 and the PAL side borders show that row's COLOR00. A row without any
 bitplane data (a border line) shows COLOR00 as its line ended: core 0
 sends a row-end message (`MSG_ROW_END`) for such a row when the palette

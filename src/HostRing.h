@@ -16,6 +16,7 @@ enum {
     MSG_END,         // + 1 word: border colour (0x0RGB)
     MSG_SPRITE,      // + 1-2 words: sprite planes; extra = base | att | behind
     MSG_ROW_END,     // no words: image row `row` ends (its border colour)
+    MSG_COLOUR,      // + 1 word: 0x0RGB; extra = register, x = raster column
 };
 #define MSG_HEADER(type, row, x, extra) \
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \

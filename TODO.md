@@ -182,6 +182,18 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
+- [x] **Colour changes at their pixel (2026-10-04)**: ATK's colour bars (F6,
+      F4, F6) change COLOR00 every 22 colour clocks; changes took effect
+      at the next 16/32-column block (bars 64/96 wide), plus the Copper ran
+      on odd slots through the bitplane fallbacks (84/92), and a LORES
+      0x3C window started 16 columns left (white edge slivers). Now changes
+      inside drawn blocks carry their beam column and split the row's runs
+      on core 1, free bitplane slots go to the Copper only when even, and
+      the colour log holds 4095 entries (13-bit positions, columns stored
+      halved; records 128 KB). Bars exactly 88 wide on PAL and NTSC.
+      RemGame ~3 % slower on PAL (25.8 -> 25.0), ~1 % on NTSC; not the
+      colour messages, the slot parity or the ring size (bisected); maybe
+      code layout or the changed Copper timing.
 - [x] **DDFSTRT/DDFSTOP fetch window (2026-10-04)**: LORES fetched a fixed
       20 words from DDFSTRT and had no fetch slots before 0x38, so ATK's
       crosshatch (DDFSTRT 0x20, DDFSTOP 0xD8, 24 words) got 17 words a line:

@@ -764,6 +764,14 @@ static int earlyTableKey = -1;
 // standard 320-pixel area keeps its columns and sprites their offset.
 static int lineRasterDdf = 0x38;
 
+int dmaBeamColumn(void) {
+    const int hires = (chipset.bplcon0 & 0x8000) != 0;
+    const int first = 2 * lineRasterDdf +
+                      (hires ? OMEGA_SPRITE_HIRES_OFFSET
+                             : OMEGA_SPRITE_LORES_OFFSET);
+    return 2 * (2 * internal.hPos - first);
+}
+
 static void slotTableUpdate(int hires) {
     void (**base)() = hires ? DMAHires : DMALores;
     const int first = hires ? 0x34 : 0x38;
@@ -1191,6 +1199,17 @@ void oddCycle(void){
     // SDL_AtomicSet(&cpuWait, 0); // single-threaded on RP2350
 }
 
+// A bitplane slot that fetches nothing is free: the Copper may use it only
+// if it is even (OCS gives the Copper even cycles), the blitter/CPU if odd.
+// Falling back to evenCycle() on odd slots let the Copper run a cycle early
+// or late (ATK's colour bars alternated 84/92 columns instead of 88).
+static inline void freeCycle(void) {
+    if (internal.hPos & 1)
+        oddCycle();
+    else
+        evenCycle();
+}
+
 // Returns the first slot in [hPos, limit) where the Copper or the blitter
 // may act on this line, or limit if neither can before it. Conservative:
 // any doubt returns hPos (no skip).
@@ -1527,7 +1546,7 @@ int bitplaneActive(){
 void plane6(void){
     
     if(bitplaneActive()==0){
-        evenCycle(); // let the copper run
+        freeCycle(); // a free slot
         return;
     }
     
@@ -1540,14 +1559,14 @@ void plane6(void){
         return;
     }
     
-    evenCycle();
+    freeCycle();
 }
 
 
 void plane5(void){
     
     if(bitplaneActive()==0){
-        evenCycle(); // let the copper run
+        freeCycle(); // a free slot
         return;
     }
     
@@ -1560,7 +1579,7 @@ void plane5(void){
         return;
     }
 
-    evenCycle();
+    freeCycle();
     
 }
 // This line's LORES rows are anchored at DIWSTRT (full width, one raster row
@@ -1582,8 +1601,11 @@ static inline void loresPlane1Fetch(void){
     if(host.pixels == NULL){
         return;
     }
-    // An early fetch (DDFSTRT < 0x38) starts left of raster column 0.
-    const int raster_x0 = ((chipset.ddfstrt & ~7) - lineRasterDdf) * 4;
+    // An early fetch (DDFSTRT < 0x38) starts left of raster column 0; any
+    // other window starts at column 0 (0x3C too: its first fetch group is
+    // the one at 0x38).
+    const int raster_x0 = chipset.ddfstrt < 0x38
+                        ? ((chipset.ddfstrt & ~7) - 0x38) * 4 : 0;
     if (bitplaneLine.loresWords++ == 0 && hostDirectActive) {
         host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
         host.rasterX = raster_x0 < 0 ? raster_x0 : 0;
@@ -1621,7 +1643,7 @@ static inline void loresPlane1Fetch(void){
     // anchored at DIWSTRT are valid from the window's first line (RemGame's
     // NTSC window opens at line 34).
     if (!loresRowsFromDiw && internal.vPos < OMEGA_LORES_FIRST_RENDER_LINE) {
-        evenCycle();
+        freeCycle();
         return;
     }
     if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
@@ -1651,7 +1673,7 @@ static inline void loresPlane1Fetch(void){
 void plane4(){
     
     if(bitplaneActive()==0){
-        evenCycle(); // let the copper run
+        freeCycle(); // a free slot
         return;
     }
     
@@ -1664,14 +1686,14 @@ void plane4(){
         return;
     }
     
-    evenCycle();
+    freeCycle();
     
 }
 
 void plane2(){
     
     if(bitplaneActive()==0){
-        evenCycle(); // let the copper run
+        freeCycle(); // a free slot
         return;
     }
     
@@ -1691,7 +1713,7 @@ void plane2(){
 void plane3(){
     
     if(bitplaneActive()==0){
-        evenCycle(); // let the copper run
+        freeCycle(); // a free slot
         return;
     }
     
@@ -1704,7 +1726,7 @@ void plane3(){
         return;
     }
     
-    evenCycle();
+    freeCycle();
     
 }
 
@@ -1714,7 +1736,7 @@ void hiresPlane1(){
 
     if(bitplaneActive()==0){
 
-        evenCycle(); // let the copper run
+        freeCycle(); // a free slot
         return;
     }
     hiresPlane1Fetch();
@@ -1757,7 +1779,7 @@ static inline void hiresPlane1Fetch(void){
     }
 
     if (!hostDirectActive && internal.vPos < OMEGA_DISPLAY_RASTER_ORIGIN) {
-        evenCycle();
+        freeCycle();
         return;
     }
     if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||

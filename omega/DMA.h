@@ -20,6 +20,10 @@
 void dma_execute();
 // Runs several DMA slots; equivalent to calling dma_execute() `slots` times.
 void dma_run(int slots);
+// Raster column (hires pixels) shown at the current beam position, the
+// reference sprites use: column 0 is the first pixel of the line's first
+// fetched word. May be negative or past the image.
+int dmaBeamColumn(void);
 // Set by writes to DIWSTRT/DIWSTOP, DDFSTRT/DDFSTOP, BPLCON0 and DMACON:
 // dma_execute() then recomputes its cached per-line display state.
 extern int dmaLineStateDirty;

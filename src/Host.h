@@ -87,11 +87,18 @@ void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
                      uint16_t p3, uint16_t p4);
 void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
                      uint16_t p4, uint16_t p5, uint16_t p6, int ham);
+// Colour register `reg` was set to `value` (0x0RGB) at the current beam
+// position: pixels from that position on show it, even within a block
+// already drawn.
+void hostDirectColour(int reg, uint16_t value);
 // End of image row `row` (`drawn`: it had bitplane blocks): a row without
 // blocks shows COLOR00 as it is now (Copper colour changes outside the
 // display window).
 void hostDirectRowEnd(int row, int drawn);
 #else
+static inline void hostDirectColour(int reg, uint16_t value) {
+    (void)reg; (void)value;
+}
 static inline void hostDirectRowEnd(int row, int drawn) {
     (void)row; (void)drawn;
 }
