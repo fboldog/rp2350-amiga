@@ -182,6 +182,10 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
+- [x] **CIA SDR kept after reads (2026-10-04)**: reading $BFEC01 cleared
+      it, so D-Mob (which polls SDR in its main loop for F1-F4) only saw a
+      key when it read before Kickstart's keyboard interrupt; a real 8520
+      keeps the byte until the next one. F keys now load D-Mob's tunes.
 - [x] **Core 0 stopped with the display running (2026-10-04)**: TinyUSB
       0.18's host driver panics on a USB data sequence error (seen with the
       wireless receivers on the hub; "Data Seq Error" in hcd_rp2040.c).

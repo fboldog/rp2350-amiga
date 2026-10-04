@@ -228,7 +228,10 @@ uint8_t CIARead(CIA_t* cia,int reg){
         case 0x9:value =(cia->tod >> 8 ) & 255;break;//todmid
         case 0xA:value =(cia->tod >> 16) & 255;break;//todhi
         case 0xB:value =(cia->tod >> 24) & 255;break;//todunused
-        case 0xC:value = cia->sdr; cia->sdr = 0;break;//sdr - clear after read.
+        // SDR keeps the last byte shifted in until the next one: programs
+        // that poll it (D-Mob reads $BFEC01 in its main loop) see the key
+        // although the OS keyboard interrupt read it first.
+        case 0xC:value = cia->sdr;break;//sdr
         case 0xD://icr
             value = cia->icr;
             cia->icr = 0;
