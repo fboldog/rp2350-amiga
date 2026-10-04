@@ -153,6 +153,11 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       drops), fading gaps (choppy); kept WSOLA time-stretching on core 1,
       bit-exact bypass within 2 % of real time. Verified by ear on a
       monitor (the capture card records HDMI audio as silence).
+- [x] **Colour register writers in RAM (2026-10-04).** RemGame's Copper
+      writes colours every line; the 32 `colorNN()` writers (157 bytes each,
+      in flash) now share one `setColour()` in RAM (0.4 KB): RemGame 28.7 →
+      29.0 fps. `Audio.c` in RAM as well gave only +0.5 % for 2.6 KB of SRAM
+      (NTSC would keep 0.7 KB), so it stays in flash.
 - [ ] **HDMI audio on PAL**: ~17 KB of SRAM short (the 64 KB core-1 ring, the
       hot opcode list or PAL's 320 KB frames would have to give).
 - [ ] Fallbacks: PWM on a spare GPIO (RC filter), or an I2S DAC (PCM5102)

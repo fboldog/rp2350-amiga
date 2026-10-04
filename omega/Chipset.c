@@ -13,6 +13,7 @@
 //  with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "Chipset.h"
+#include <stddef.h>
 #include "CIA.h"
 #include "Audio.h"
 #include "CPU.h"
@@ -855,167 +856,57 @@ SPRITE_REGISTERS(5)
 SPRITE_REGISTERS(6)
 SPRITE_REGISTERS(7)
 
-void color00(uint16_t value){
-    chipset.color00 = value; //old register
-    internal.palette[0] = OCS2ARGB(value); internal.palette332[0] = omegaRGB332(internal.palette[0]); internal.paletteGeneration++;
-    internal.palette[32] = EHB2ARGB(value); internal.palette332[32] = omegaRGB332(internal.palette[32]); internal.paletteGeneration++;
+// COLOR00..COLOR31: register n, palette entry n and its extra half-brite
+// copy n + 32. One shared body (in RAM: the Copper writes colours on every
+// line in many games) and 32 small entry points for the register table.
+#ifdef PICO_BUILD
+#include "pico.h"
+#define COLOUR_FUNC(name) __not_in_flash_func(name)
+#else
+#define COLOUR_FUNC(name) name
+#endif
+static void __attribute__((noinline)) COLOUR_FUNC(setColour)(unsigned n,
+                                                             uint16_t value){
+    _Static_assert(offsetof(Chipset_t, color31) - offsetof(Chipset_t, color00) ==
+                   31 * sizeof(uint16_t), "colour registers not contiguous");
+    (&chipset.color00)[n] = value; //old register
+    internal.palette[n] = OCS2ARGB(value); internal.palette332[n] = omegaRGB332(internal.palette[n]); internal.paletteGeneration++;
+    internal.palette[n + 32] = EHB2ARGB(value); internal.palette332[n + 32] = omegaRGB332(internal.palette[n + 32]); internal.paletteGeneration++;
 }
-void color01(uint16_t value){
-    chipset.color01 = value; //old register
-    internal.palette[1] = OCS2ARGB(value); internal.palette332[1] = omegaRGB332(internal.palette[1]); internal.paletteGeneration++;
-    internal.palette[33] = EHB2ARGB(value); internal.palette332[33] = omegaRGB332(internal.palette[33]); internal.paletteGeneration++;
-}
-
-void color02(uint16_t value){
-    chipset.color02 = value; //old register
-    internal.palette[2] = OCS2ARGB(value); internal.palette332[2] = omegaRGB332(internal.palette[2]); internal.paletteGeneration++;
-    internal.palette[34] = EHB2ARGB(value); internal.palette332[34] = omegaRGB332(internal.palette[34]); internal.paletteGeneration++;
-}
-void color03(uint16_t value){
-    chipset.color03 = value; //old register
-    internal.palette[3] = OCS2ARGB(value); internal.palette332[3] = omegaRGB332(internal.palette[3]); internal.paletteGeneration++;
-    internal.palette[35] = EHB2ARGB(value); internal.palette332[35] = omegaRGB332(internal.palette[35]); internal.paletteGeneration++;
-}
-void color04(uint16_t value){
-    chipset.color04 = value; //old register
-    internal.palette[4] = OCS2ARGB(value); internal.palette332[4] = omegaRGB332(internal.palette[4]); internal.paletteGeneration++;
-    internal.palette[36] = EHB2ARGB(value); internal.palette332[36] = omegaRGB332(internal.palette[36]); internal.paletteGeneration++;
-}
-void color05(uint16_t value){
-    chipset.color05 = value; //old register
-    internal.palette[5] = OCS2ARGB(value); internal.palette332[5] = omegaRGB332(internal.palette[5]); internal.paletteGeneration++;
-    internal.palette[37] = EHB2ARGB(value); internal.palette332[37] = omegaRGB332(internal.palette[37]); internal.paletteGeneration++;
-}
-void color06(uint16_t value){
-    chipset.color06 = value; //old register
-    internal.palette[6] = OCS2ARGB(value); internal.palette332[6] = omegaRGB332(internal.palette[6]); internal.paletteGeneration++;
-    internal.palette[38] = EHB2ARGB(value); internal.palette332[38] = omegaRGB332(internal.palette[38]); internal.paletteGeneration++;
-}
-void color07(uint16_t value){
-    chipset.color07 = value; //old register
-    internal.palette[7] = OCS2ARGB(value); internal.palette332[7] = omegaRGB332(internal.palette[7]); internal.paletteGeneration++;
-    internal.palette[39] = EHB2ARGB(value); internal.palette332[39] = omegaRGB332(internal.palette[39]); internal.paletteGeneration++;
-}
-void color08(uint16_t value){
-    chipset.color08 = value; //old register
-    internal.palette[8] = OCS2ARGB(value); internal.palette332[8] = omegaRGB332(internal.palette[8]); internal.paletteGeneration++;
-    internal.palette[40] = EHB2ARGB(value); internal.palette332[40] = omegaRGB332(internal.palette[40]); internal.paletteGeneration++;
-}
-void color09(uint16_t value){
-    chipset.color09 = value; //old register
-    internal.palette[9] = OCS2ARGB(value); internal.palette332[9] = omegaRGB332(internal.palette[9]); internal.paletteGeneration++;
-    internal.palette[41] = EHB2ARGB(value); internal.palette332[41] = omegaRGB332(internal.palette[41]); internal.paletteGeneration++;
-}
-void color10(uint16_t value){
-    chipset.color10 = value; //old register
-    internal.palette[10] = OCS2ARGB(value); internal.palette332[10] = omegaRGB332(internal.palette[10]); internal.paletteGeneration++;
-    internal.palette[42] = EHB2ARGB(value); internal.palette332[42] = omegaRGB332(internal.palette[42]); internal.paletteGeneration++;
-}
-void color11(uint16_t value){
-    chipset.color11 = value; //old register
-    internal.palette[11] = OCS2ARGB(value); internal.palette332[11] = omegaRGB332(internal.palette[11]); internal.paletteGeneration++;
-    internal.palette[43] = EHB2ARGB(value); internal.palette332[43] = omegaRGB332(internal.palette[43]); internal.paletteGeneration++;
-}
-void color12(uint16_t value){
-    chipset.color12 = value; //old register
-    internal.palette[12] = OCS2ARGB(value); internal.palette332[12] = omegaRGB332(internal.palette[12]); internal.paletteGeneration++;
-    internal.palette[44] = EHB2ARGB(value); internal.palette332[44] = omegaRGB332(internal.palette[44]); internal.paletteGeneration++;
-}
-void color13(uint16_t value){
-    chipset.color13 = value; //old register
-    internal.palette[13] = OCS2ARGB(value); internal.palette332[13] = omegaRGB332(internal.palette[13]); internal.paletteGeneration++;
-    internal.palette[45] = EHB2ARGB(value); internal.palette332[45] = omegaRGB332(internal.palette[45]); internal.paletteGeneration++;
-}
-void color14(uint16_t value){
-    chipset.color14 = value; //old register
-    internal.palette[14] = OCS2ARGB(value); internal.palette332[14] = omegaRGB332(internal.palette[14]); internal.paletteGeneration++;
-    internal.palette[46] = EHB2ARGB(value); internal.palette332[46] = omegaRGB332(internal.palette[46]); internal.paletteGeneration++;
-}
-void color15(uint16_t value){
-    chipset.color15 = value; //old register
-    internal.palette[15] = OCS2ARGB(value); internal.palette332[15] = omegaRGB332(internal.palette[15]); internal.paletteGeneration++;
-    internal.palette[47] = EHB2ARGB(value); internal.palette332[47] = omegaRGB332(internal.palette[47]); internal.paletteGeneration++;
-}
-void color16(uint16_t value){
-    chipset.color16 = value; //old register
-    internal.palette[16] = OCS2ARGB(value); internal.palette332[16] = omegaRGB332(internal.palette[16]); internal.paletteGeneration++;
-    internal.palette[48] = EHB2ARGB(value); internal.palette332[48] = omegaRGB332(internal.palette[48]); internal.paletteGeneration++;
-}
-void color17(uint16_t value){
-    chipset.color17 = value; //old register
-    internal.palette[17] = OCS2ARGB(value); internal.palette332[17] = omegaRGB332(internal.palette[17]); internal.paletteGeneration++;
-    internal.palette[49] = EHB2ARGB(value); internal.palette332[49] = omegaRGB332(internal.palette[49]); internal.paletteGeneration++;
-}
-void color18(uint16_t value){
-    chipset.color18 = value; //old register
-    internal.palette[18] = OCS2ARGB(value); internal.palette332[18] = omegaRGB332(internal.palette[18]); internal.paletteGeneration++;
-    internal.palette[50] = EHB2ARGB(value); internal.palette332[50] = omegaRGB332(internal.palette[50]); internal.paletteGeneration++;
-}
-void color19(uint16_t value){
-    chipset.color19 = value; //old register
-    internal.palette[19] = OCS2ARGB(value); internal.palette332[19] = omegaRGB332(internal.palette[19]); internal.paletteGeneration++;
-    internal.palette[51] = EHB2ARGB(value); internal.palette332[51] = omegaRGB332(internal.palette[51]); internal.paletteGeneration++;
-}
-void color20(uint16_t value){
-    chipset.color20 = value; //old register
-    internal.palette[20] = OCS2ARGB(value); internal.palette332[20] = omegaRGB332(internal.palette[20]); internal.paletteGeneration++;
-    internal.palette[52] = EHB2ARGB(value); internal.palette332[52] = omegaRGB332(internal.palette[52]); internal.paletteGeneration++;
-}
-void color21(uint16_t value){
-    chipset.color21 = value; //old register
-    internal.palette[21] = OCS2ARGB(value); internal.palette332[21] = omegaRGB332(internal.palette[21]); internal.paletteGeneration++;
-    internal.palette[53] = EHB2ARGB(value); internal.palette332[53] = omegaRGB332(internal.palette[53]); internal.paletteGeneration++;
-}
-void color22(uint16_t value){
-    chipset.color22 = value; //old register
-    internal.palette[22] = OCS2ARGB(value); internal.palette332[22] = omegaRGB332(internal.palette[22]); internal.paletteGeneration++;
-    internal.palette[54] = EHB2ARGB(value); internal.palette332[54] = omegaRGB332(internal.palette[54]); internal.paletteGeneration++;
-}
-void color23(uint16_t value){
-    chipset.color23 = value; //old register
-    internal.palette[23] = OCS2ARGB(value); internal.palette332[23] = omegaRGB332(internal.palette[23]); internal.paletteGeneration++;
-    internal.palette[55] = EHB2ARGB(value); internal.palette332[55] = omegaRGB332(internal.palette[55]); internal.paletteGeneration++;
-}
-void color24(uint16_t value){
-    chipset.color24 = value; //old register
-    internal.palette[24] = OCS2ARGB(value); internal.palette332[24] = omegaRGB332(internal.palette[24]); internal.paletteGeneration++;
-    internal.palette[56] = EHB2ARGB(value); internal.palette332[56] = omegaRGB332(internal.palette[56]); internal.paletteGeneration++;
-}
-void color25(uint16_t value){
-    chipset.color25 = value; //old register
-    internal.palette[25] = OCS2ARGB(value); internal.palette332[25] = omegaRGB332(internal.palette[25]); internal.paletteGeneration++;
-    internal.palette[57] = EHB2ARGB(value); internal.palette332[57] = omegaRGB332(internal.palette[57]); internal.paletteGeneration++;
-}
-void color26(uint16_t value){
-    chipset.color26 = value; //old register
-    internal.palette[26] = OCS2ARGB(value); internal.palette332[26] = omegaRGB332(internal.palette[26]); internal.paletteGeneration++;
-    internal.palette[58] = EHB2ARGB(value); internal.palette332[58] = omegaRGB332(internal.palette[58]); internal.paletteGeneration++;
-}
-void color27(uint16_t value){
-    chipset.color27 = value; //old register
-    internal.palette[27] = OCS2ARGB(value); internal.palette332[27] = omegaRGB332(internal.palette[27]); internal.paletteGeneration++;
-    internal.palette[59] = EHB2ARGB(value); internal.palette332[59] = omegaRGB332(internal.palette[59]); internal.paletteGeneration++;
-}
-void color28(uint16_t value){
-    chipset.color28 = value; //old register
-    internal.palette[28] = OCS2ARGB(value); internal.palette332[28] = omegaRGB332(internal.palette[28]); internal.paletteGeneration++;
-    internal.palette[60] = EHB2ARGB(value); internal.palette332[60] = omegaRGB332(internal.palette[60]); internal.paletteGeneration++;
-}
-void color29(uint16_t value){
-    chipset.color29 = value; //old register
-    internal.palette[29] = OCS2ARGB(value); internal.palette332[29] = omegaRGB332(internal.palette[29]); internal.paletteGeneration++;
-    internal.palette[61] = EHB2ARGB(value); internal.palette332[61] = omegaRGB332(internal.palette[61]); internal.paletteGeneration++;
-}
-void color30(uint16_t value){
-    chipset.color30 = value; //old register
-    internal.palette[30] = OCS2ARGB(value); internal.palette332[30] = omegaRGB332(internal.palette[30]); internal.paletteGeneration++;
-    internal.palette[62] = EHB2ARGB(value); internal.palette332[62] = omegaRGB332(internal.palette[62]); internal.paletteGeneration++;
-}
-void color31(uint16_t value){
-    chipset.color31 = value; //old register
-    internal.palette[31] = OCS2ARGB(value); internal.palette332[31] = omegaRGB332(internal.palette[31]); internal.paletteGeneration++;
-    internal.palette[63] = EHB2ARGB(value); internal.palette332[63] = omegaRGB332(internal.palette[63]); internal.paletteGeneration++;
-}
+#define COLOUR(nn) \
+    void COLOUR_FUNC(color##nn)(uint16_t value){ setColour(1##nn - 100, value); }
+COLOUR(00)
+COLOUR(01)
+COLOUR(02)
+COLOUR(03)
+COLOUR(04)
+COLOUR(05)
+COLOUR(06)
+COLOUR(07)
+COLOUR(08)
+COLOUR(09)
+COLOUR(10)
+COLOUR(11)
+COLOUR(12)
+COLOUR(13)
+COLOUR(14)
+COLOUR(15)
+COLOUR(16)
+COLOUR(17)
+COLOUR(18)
+COLOUR(19)
+COLOUR(20)
+COLOUR(21)
+COLOUR(22)
+COLOUR(23)
+COLOUR(24)
+COLOUR(25)
+COLOUR(26)
+COLOUR(27)
+COLOUR(28)
+COLOUR(29)
+COLOUR(30)
+COLOUR(31)
 
 void color00L(uint32_t value){
     color00(value >> 16);
