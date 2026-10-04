@@ -182,9 +182,14 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
-- [ ] Unexplained, seen once each during PAL audio benchmarks: a stall
-      booting Workbench (not reproduced), and a core-1 fault record (IRQ 51,
-      a user IRQ, jumped to 0; possibly from a wedged chip / rescue cycle).
+- [x] **Core 0 stopped with the display running (2026-10-04)**: TinyUSB
+      0.18's host driver panics on a USB data sequence error (seen with the
+      wireless receivers on the hub; "Data Seq Error" in hcd_rp2040.c).
+      The interrupt is masked now; `usb_seq_errors` counts them. Likely the
+      Workbench boot stall seen during the PAL audio benchmarks.
+- [ ] The core-1 fault record from that time (IRQ 51, a user IRQ, jumped
+      to 0) is still unexplained; watch the boot log for "Previous
+      HARDFAULT".
 - [ ] Fallbacks: PWM on a spare GPIO (RC filter), or an I2S DAC (PCM5102)
       via PIO.
 

@@ -15,6 +15,7 @@
 #include <string.h>
 #include "tusb.h"
 #include "hardware/watchdog.h"
+#include "hardware/structs/usb.h"
 #include "Host.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
@@ -199,8 +200,18 @@ void usb_input_init(void) {
     // Boot protocol: fixed report layouts for mice and keyboards.
     tuh_hid_set_default_protocol(HID_PROTOCOL_BOOT);
     tuh_init(BOARD_TUH_RHPORT);
+    // TinyUSB 0.18's RP2040/RP2350 host driver panics on a data sequence
+    // error (a packet with the wrong DATA0/1 toggle), which stopped the
+    // emulator now and then with the wireless receivers on the hub. The
+    // controller drops such a packet; a HID report can afford that. Mask
+    // the interrupt so the driver never sees it; usb_input_frame() clears
+    // and counts the error instead.
+    hw_clear_bits(&usb_hw->inte, USB_INTE_ERROR_DATA_SEQ_BITS);
     printf("USB: host on the native port (hub, HID mouse/keyboard)\n");
 }
+
+// Data sequence errors so far (readable over SWD).
+volatile uint32_t usb_seq_errors;
 
 void usb_input_task(void) {
     if (tuh_task_event_ready())
@@ -212,6 +223,10 @@ static int clamp_delta(int d) {
 }
 
 void usb_input_frame(void) {
+    if (usb_hw->sie_status & USB_SIE_STATUS_DATA_SEQ_ERROR_BITS) {
+        usb_hw->sie_status = USB_SIE_STATUS_DATA_SEQ_ERROR_BITS;  // write-1-to-clear
+        ++usb_seq_errors;
+    }
     const int dx = clamp_delta(mouse_dx);
     const int dy = clamp_delta(mouse_dy);
     mouse_dx -= dx;

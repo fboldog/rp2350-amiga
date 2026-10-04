@@ -653,6 +653,13 @@ hub. A device on a USB-C to USB-A OTG adapter works either way round; hubs
 wireless mouse receiver and a wireless keyboard receiver through a powered
 hub; Workbench pointer, both buttons and the arrow keys in RemGame work.
 
+TinyUSB 0.18 (Pico SDK 2.3.1) panics in its host interrupt on a USB data
+sequence error (a packet with the wrong DATA0/1 toggle), which stopped
+core 0 now and then with the wireless receivers on the hub while the
+display kept running. `usb_input_init()` masks that interrupt; the
+controller drops the packet, and `usb_input_frame()` clears and counts the
+error (`usb_seq_errors`, readable over SWD).
+
 ## Code map
 
 ### What runs where
