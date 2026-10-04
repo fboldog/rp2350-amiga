@@ -12,7 +12,6 @@ enum {
     OMEGA_DDF_ROTATED_PIXELS = 80,
     OMEGA_DDF_NORMAL_FETCH_TAIL = 7,
     OMEGA_DDF_EXTRA_FETCH_TAIL = 11,
-    OMEGA_DDF_LORES_FETCH_SPAN = 159,
     OMEGA_DDF_NORMAL_UPPER_OVERSCAN = 14,
     // Intuition's extra-word HIRES layout opens its display window at line 5;
     // 5 + 39 anchors raster row 0 on line 44 (0x2c), the first visible line.

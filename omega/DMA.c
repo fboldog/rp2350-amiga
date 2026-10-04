@@ -751,6 +751,44 @@ static int lineRowRotation;      // omegaDdfRowRotation(DDFSTRT, DDFSTOP)
 // slots with sprite DMA on, audio slots of enabled channels, disk slots
 // (DSKLEN is not tracked), the fetch-window end and the last slot of a line.
 #define SLOT_LAST 0xE3   // last slot of a long line
+// Slot functions of the current line: DMALores/DMAHires, or a copy whose
+// bitplane fetch starts before their first fetch group (0x38 LORES, 0x34
+// HIRES). A display data fetch that starts early (overscan, e.g. DDFSTRT
+// 0x20 in the Amiga Test Kit's crosshatch) takes those slots from sprite
+// DMA, as on OCS; the fetch pattern keeps the tables' phase.
+static void (**slotTable)() = DMALores;
+static void (*earlyTable[SLOT_LAST + 1])();
+static int earlyTableKey = -1;
+// DDFSTRT that raster column 0 belongs to: an early LORES fetch places its
+// first words left of the image (beam positions before 0x38), so the
+// standard 320-pixel area keeps its columns and sprites their offset.
+static int lineRasterDdf = 0x38;
+
+static void slotTableUpdate(int hires) {
+    void (**base)() = hires ? DMAHires : DMALores;
+    const int first = hires ? 0x34 : 0x38;
+    const int start = chipset.ddfstrt & (hires ? ~3 : ~7);
+    if (!lineBitplaneWindow || start >= first) {
+        slotTable = base;
+        return;
+    }
+    const int key = hires | start << 1;
+    if (key != earlyTableKey) {
+        static void (*const lores[8])() = {
+            evenCycle, plane4, plane6, plane2,
+            evenCycle, plane3, plane5, loresPlane1,
+        };
+        static void (*const hiresPattern[4])() = {
+            plane4, plane2, plane3, hiresPlane1,
+        };
+        for (int h = 0; h <= SLOT_LAST; ++h)
+            earlyTable[h] = base[h];
+        for (int h = start < 0 ? 0 : start; h < first; ++h)
+            earlyTable[h] = hires ? hiresPattern[h & 3] : lores[h & 7];
+        earlyTableKey = key;
+    }
+    slotTable = earlyTable;
+}
 // Last slot of the current line: PAL lines are 227 colour clocks (hPos
 // 0..0xE2); NTSC lines alternate 228 and 227. A 228-slot PAL line made the
 // CIA E clock count 71,364 ticks per 5 frames instead of 71,051, which the
@@ -823,7 +861,7 @@ static void slotNextUpdate(void) {
     if (key == slotNextKey)
         return;
     slotNextKey = key;
-    void (**table)() = hires ? DMAHires : DMALores;
+    void (**table)() = slotTable;
     int next = SLOT_LAST;
     int runEnd = SLOT_LAST;
     for (int h = SLOT_LAST; h >= 0; --h) {
@@ -869,9 +907,25 @@ static void dmaUpdateLineState(void) {
         bitplaneLine.lastCycle = chipset.ddfstop +
             omegaDdfHiresFetchTail(chipset.ddfstrt, chipset.ddfstop);
     }else{
-        // LORES: 20 active fetches (table slots at ddfstrt+7 offset from real OCS)
-        bitplaneLine.lastCycle =
-            chipset.ddfstrt + OMEGA_DDF_LORES_FETCH_SPAN;
+        // LORES: one word per plane every 8 slots (plane 1 last, at +7),
+        // in groups from DDFSTRT (the tables' phase) through the group
+        // DDFSTOP falls in: 0x38-0xD0 is 20 words, the Test Kit's overscan
+        // 0x20-0xD8 is 24. (A fixed 20-word span gave narrow and wide
+        // windows the wrong line stride.)
+        const int start = chipset.ddfstrt & ~7;
+        int words = ((int)chipset.ddfstop - start) / 8 + 1;
+        if (words < 1)
+            words = 1;
+        int last = start + 8 * words - 1;
+        if (last > 0xDF)
+            last = 0xDF;   // the last fetch group of the tables
+        bitplaneLine.lastCycle = last;
+    }
+    {
+        const int hires = (chipset.bplcon0 & 0x8000) != 0;
+        slotTableUpdate(hires);
+        lineRasterDdf = !hires && chipset.ddfstrt < 0x38 ? 0x38
+                                                         : chipset.ddfstrt;
     }
     // Disabled planes' slots may be skipped (see slotIsActive()); clear their
     // data latches here, as those slots would.
@@ -1003,8 +1057,7 @@ void dma_run(int slots){
                 end = dmaIdleUntil(end);
                 const int k = end - h;
                 if (k > 1) {
-                    void (**table)() =
-                        (chipset.bplcon0 & 0x8000) ? DMAHires : DMALores;
+                    void (**table)() = slotTable;
                     // Inactive slots do nothing while the Copper and the
                     // blitter are idle; run only the others. Inside the
                     // window bitplaneActive() holds, so plane 2-6 slots are
@@ -1061,11 +1114,7 @@ void dma_run(int slots){
 #endif
 
         // SDL_AtomicSet(&cpuWait, 1); // single-threaded on RP2350
-        if(chipset.bplcon0 & 0x8000){
-            DMAHires[internal.hPos]();
-        }else{
-            DMALores[internal.hPos]();
-        }
+        slotTable[internal.hPos]();
 
         if (internal.hPos == bitplaneLine.lastCycle)
             dmaFetchWindowComplete();
@@ -1388,7 +1437,7 @@ static void spriteRenderLine(void) {
     // Raster column 0 is the first pixel of the first fetched word; OCS
     // shows it at lores position 2 * DDFSTRT + 17 (LORES) or + 9 (HIRES).
     const int hires = (chipset.bplcon0 & 0x8000) != 0;
-    const int first = 2 * chipset.ddfstrt +
+    const int first = 2 * lineRasterDdf +
                       (hires ? OMEGA_SPRITE_HIRES_OFFSET
                              : OMEGA_SPRITE_LORES_OFFSET);
     const unsigned front_pairs = (chipset.bplcon2 >> 3) & 7u;
@@ -1533,9 +1582,11 @@ static inline void loresPlane1Fetch(void){
     if(host.pixels == NULL){
         return;
     }
+    // An early fetch (DDFSTRT < 0x38) starts left of raster column 0.
+    const int raster_x0 = ((chipset.ddfstrt & ~7) - lineRasterDdf) * 4;
     if (bitplaneLine.loresWords++ == 0 && hostDirectActive) {
         host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
-        host.rasterX = 0;
+        host.rasterX = raster_x0 < 0 ? raster_x0 : 0;
         loresRowsFromDiw = 1;   // rows are beam lines: no first-line skip
     } else if (bitplaneLine.loresWords == 1) {
         int full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
@@ -1554,7 +1605,7 @@ static inline void loresPlane1Fetch(void){
         int display_line = internal.vPos - raster_origin;
         host.rasterRow =
             alternate_rows ? display_line * 2 : display_line;
-        host.rasterX = 0;
+        host.rasterX = raster_x0 < 0 ? raster_x0 : 0;
         loresRowsFromDiw = full_width && !alternate_rows;
     }
     chipset.bpl1dat = 0;
@@ -1574,8 +1625,10 @@ static inline void loresPlane1Fetch(void){
         return;
     }
     if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
-        host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W)
+        host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W) {
+        host.rasterX += 32;   // words outside the image keep their place
         return;
+    }
     
     spriteLineRow = host.rasterRow;
     if (hostDirectActive) {

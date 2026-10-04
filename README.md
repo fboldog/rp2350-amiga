@@ -540,6 +540,21 @@ Workbench 61.6 emulated frames/s). Boots are capped too: the CLI appears
 after 7.4 s instead of 5.5 s, xSysinfo is drawn after 14.9 s instead of
 13.4 s.
 
+## Bitplane fetch window
+
+`DMALores`/`DMAHires` lay out each line's slots as OCS does: LORES fetches
+in groups of 8 slots (free, planes 4, 6, 2, free, 3, 5, 1) from 0x38,
+HIRES in groups of 4 (planes 4, 2, 3, 1) from 0x34, sprite DMA before
+that. A LORES fetch runs from DDFSTRT through the group DDFSTOP falls in
+(0x38-0xD0: 20 words; it used to be a fixed 20 words for every window,
+which broke the line stride of narrower and wider ones). A fetch that
+starts earlier (overscan: the Amiga Test Kit's crosshatch uses DDFSTRT
+0x20, 24 words) runs on a per-line copy of the table with the fetch
+pattern extended back over the sprite slots, which it takes from sprite
+DMA as on OCS. Its first words land left of image column 0, so the
+standard 320-pixel area keeps its place (and sprites their offset); the
+overscan beyond the 640-column image is cut at its edges.
+
 ## Sprites
 
 `omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per

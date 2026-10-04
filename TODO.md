@@ -182,6 +182,14 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
+- [x] **DDFSTRT/DDFSTOP fetch window (2026-10-04)**: LORES fetched a fixed
+      20 words from DDFSTRT and had no fetch slots before 0x38, so ATK's
+      crosshatch (DDFSTRT 0x20, DDFSTOP 0xD8, 24 words) got 17 words a line:
+      skewed chaos. The fetch now ends at the group DDFSTOP falls in, and an
+      early start extends the fetch pattern over the sprite slots (per-line
+      table copy). Clean grid on PAL and NTSC; reference screens unchanged.
+      Possible follow-ups: show horizontal overscan beyond 320 lores pixels
+      (needs a wider image), HIRES overscan before 0x34.
 - [x] **CIA SDR kept after reads (2026-10-04)**: reading $BFEC01 cleared
       it, so D-Mob (which polls SDR in its main loop for F1-F4) only saw a
       key when it read before Kickstart's keyboard interrupt; a real 8520
