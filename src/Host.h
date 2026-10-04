@@ -87,7 +87,14 @@ void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
                      uint16_t p3, uint16_t p4);
 void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
                      uint16_t p4, uint16_t p5, uint16_t p6, int ham);
+// End of image row `row` (`drawn`: it had bitplane blocks): a row without
+// blocks shows COLOR00 as it is now (Copper colour changes outside the
+// display window).
+void hostDirectRowEnd(int row, int drawn);
 #else
+static inline void hostDirectRowEnd(int row, int drawn) {
+    (void)row; (void)drawn;
+}
 #define hostDirectActive 0
 static inline void hostDirectSprite(int row, int x, int colour_base,
                                     int attached, int behind, uint16_t a,

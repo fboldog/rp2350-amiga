@@ -7,14 +7,14 @@ from PIL import Image
 E,H,out=sys.argv[1],int(sys.argv[2]),sys.argv[3]
 def gdb(x): return int(subprocess.run(['arm-none-eabi-gdb','-batch','-ex',f'p/x {x}',E],capture_output=True,text=True).stdout.split()[-1],16)
 F=gdb('(int)&sram_frames'); D=gdb('(int)&frame_state'); HOLD=gdb('(int)&hostCaptureHold'); RS=gdb('sizeof(dvi_indexed_frame_t)'); R=0x11780000
-off={n:gdb(f'(int)&((dvi_indexed_frame_t*)0)->{n}') for n in ['initial_palette','row_segment','segments_used','segment','palette_log']}
+off={n:gdb(f'(int)&((dvi_indexed_frame_t*)0)->{n}') for n in ['initial_palette','row_segment','row_log','segments_used','segment','palette_log']}
 oc=['openocd','-s','/usr/share/openocd/scripts','-f','interface/cmsis-dap.cfg','-f','target/rp2350.cfg','-c','adapter speed 15000','-c','init']
 o=subprocess.run(oc+['-c',f'mww 0x{HOLD:x} 1','-c','sleep 100','-c',f'echo st:[capture {{mdw 0x{D:x} 1}}]','-c','exit'],capture_output=True,text=True).stderr
 b=int([l for l in o.splitlines() if l.startswith('st:')][0].split(': ')[1],16)&1
 subprocess.run(oc+['-c',f'dump_image {out}.frame 0x{F+b*640*H:x} {640*H}','-c',f'dump_image {out}.rec 0x{R+b*RS:x} {RS}','-c',f'mww 0x{HOLD:x} 0','-c','exit'],capture_output=True,text=True)
 pix=open(out+'.frame','rb').read(); rec=open(out+'.rec','rb').read()
 u16=lambda o,n: struct.unpack_from(f'<{n}H',rec,o); u32=lambda o,n: struct.unpack_from(f'<{n}I',rec,o)
-init=u16(off['initial_palette'],32); rows=u16(off['row_segment'],257); used,logn=u16(off['segments_used'],2)
+init=u16(off['initial_palette'],32); rows=u16(off['row_segment'],257); rlog=u16(off['row_log'],256); used,logn=u16(off['segments_used'],2)
 segs=u32(off['segment'],used); log=u32(off['palette_log'],min(logn,2047))
 c8=lambda c:(((c>>8)&15)*17,((c>>4)&15)*17,(c&15)*17)
 pal=[0]*64
@@ -26,7 +26,8 @@ def apply(p):
     while applied<min(p,len(log)): e=log[applied]; applied+=1; setr(e>>12,e&0xfff)
 for y in range(H):
     f,l=min(rows[y],used),min(rows[y+1],used); row=pix[y*640:(y+1)*640]
-    if f==l:
+    if f==l:  # no runs: COLOR00 as the row's line ended
+        apply(min(rlog[y],logn))
         for x in range(640): px[x,y]=pal[0]
         continue
     apply((segs[f]>>20)&0x7ff); border=pal[0]

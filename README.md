@@ -246,6 +246,16 @@ The image is 640 pixels wide without upscaling, so HIRES (e.g. Workbench
 text) keeps every pixel. Its two 640×240 (NTSC) or 640×256 (PAL) frames live
 in internal SRAM, not PSRAM: the emulator saturates the shared QMI bus.
 
+Every beam line has a fixed image row, as on a monitor: row = line −
+`OMEGA_DIRECT_FIRST_LINE` (`omega/DisplayLayout.h`). PAL rows 0–255 are
+lines 44–299 (the standard 256-line window), NTSC rows 0–239 lines 23–262
+(everything an NTSC frame shows). No layout needs its own anchor:
+Kickstart and Workbench open their display window at line 5 and start the
+bitplanes with the Copper, overscan screens run to the end of the NTSC
+frame, and a window that opens lower (the Amiga Test Kit's, at line 0x46)
+keeps the border lines above and below it. Screens taller than 240 lines
+lose their last lines on NTSC, as on a real NTSC Amiga.
+
 Colours are exact. The frames hold one byte per pixel: the Amiga colour
 register number (0..31, 32..63 extra half-brite) or, on HAM runs, the raw
 6-bit HAM code. Core 1 converts each bitplane block to those numbers
@@ -258,7 +268,13 @@ cores share, which keeps ~9.6 KB of SRAM free for the ring at ~1 % speed. Scanou
 order and expands each row to RGB888 with the 12-bit colours doubled to 8 bits
 (0xF → 0xFF), so Copper palette changes (the Kickstart 2.04 rainbow, border
 gradients) keep their exact colours even mid-line; a row's undrawn columns
-and the PAL side borders show that row's COLOR00. HAM holds its colour across
+and the PAL side borders show that row's COLOR00. A row without any
+bitplane data (a border line) shows COLOR00 as its line ended: core 0
+sends a row-end message (`MSG_ROW_END`) for such a row when the palette
+changed since the last one, core 1 records its log position
+(`row_log[]`) and fills the rows in between, which saw no change. Copper
+colour bars in the borders (the Test Kit's white lines and blue/red
+bands) come out right; RemGame, with bitplanes on every row, sends none. HAM holds its colour across
 the row from COLOR00, as on real hardware. A full log drops further changes
 for the rest of that frame; the next frame starts from the full palette.
 Narrow fetch layouts use the same path with the presentation mapping; only

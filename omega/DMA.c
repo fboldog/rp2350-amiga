@@ -901,6 +901,13 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
     hiresDisplayPrefetch();
 
     audioLine(lineLast + 1);
+    if (hostDirectActive) {
+        // Border colour of this image row: COLOR00 as the line ends.
+        const int row = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
+        if (row >= 0 && row < OMEGA_DIRECT_ROWS)
+            hostDirectRowEnd(row, (bitplaneLine.loresWords |
+                                   bitplaneLine.hiresWords) != 0);
+    }
     dmaIdleCacheValid = 0;   // the Copper's comparisons depend on the line
     internal.hPos = 0;
 #if OMEGA_VIDEO_LONG_LINES
@@ -1526,7 +1533,11 @@ static inline void loresPlane1Fetch(void){
     if(host.pixels == NULL){
         return;
     }
-    if (bitplaneLine.loresWords++ == 0) {
+    if (bitplaneLine.loresWords++ == 0 && hostDirectActive) {
+        host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
+        host.rasterX = 0;
+        loresRowsFromDiw = 1;   // rows are beam lines: no first-line skip
+    } else if (bitplaneLine.loresWords == 1) {
         int full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
         int alternate_rows =
             full_width &&
@@ -1674,7 +1685,12 @@ static inline void hiresPlane1Fetch(void){
 
     // The full-width raster begins 40 PAL beam lines below DIWSTRT. Remove
     // that upper overscan so all 200 useful rows fit in the host framebuffer.
-    if (lineFullWidth) {
+    if (hostDirectActive) {
+        if (bitplaneLine.hiresWords == 1) {
+            host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
+            host.rasterX = 0;
+        }
+    } else if (lineFullWidth) {
         int display_line = internal.vPos - lineHiresDisplayTop;
         if (display_line < 0)
             return;
@@ -1687,7 +1703,7 @@ static inline void hiresPlane1Fetch(void){
         host.rasterX = 0;
     }
 
-    if (internal.vPos < OMEGA_DISPLAY_RASTER_ORIGIN) {
+    if (!hostDirectActive && internal.vPos < OMEGA_DISPLAY_RASTER_ORIGIN) {
         evenCycle();
         return;
     }

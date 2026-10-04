@@ -229,6 +229,10 @@ static inline void hostDirectSyncPalette(void) {
         hostDirectSendPalette();
 }
 
+// Palette generation as of the last row-end message (core 1 fills the rows
+// in between with that message's position: nothing changed there).
+static uint32_t row_end_generation;
+
 static void hostDirectBegin(void) {
     runFlush();
     const bool full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
@@ -240,45 +244,34 @@ static void hostDirectBegin(void) {
     hostDirectActive = direct_frame;
     if (!direct_frame)
         return;
-    int step, first_row, rotation;
-    if (narrow) {
-        // hostPresentFrame(): raster row sy lands on framebuffer line
-        // HOST_CONTENT_Y + 2 * sy - viewport_y_offset, and columns
-        // [HOST_VISIBLE_X0, HOST_VISIBLE_X1) come from raster column
-        // x + HOST_FETCH_LEAD.
-        const int viewport_y_offset =
-            (OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL &&
-             omegaDiwVerticalStart(chipset.diwstrt) < 64)
-            ? HOST_CONTENT_Y : OMEGA_VIDEO_VIEWPORT_Y_OFFSET;
-        step = 1;
-        first_row = (HOST_CONTENT_Y - viewport_y_offset) / 2;
-        rotation = 0;
-    } else {
-        const int alternate_rows =
-            host.displayIsLores &&
-            omegaLoresUsesAlternateRasterRows(chipset.diwstrt,
-                                               chipset.diwstop);
-        step = alternate_rows ? 2 : 1;
-        first_row = 0;  // LORES single-row layouts are centred below
-        rotation = omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
-    }
+    row_end_generation = host_run.palette_sent;   // core 1's palette
+    // Rows are beam lines (DMA.c: line - OMEGA_DIRECT_FIRST_LINE), so every
+    // layout maps one raster row to one image row.
+    const int step = 1, first_row = 0;
+    const int rotation =
+        narrow ? 0 : omegaDdfRowRotation(chipset.ddfstrt, chipset.ddfstop);
     int height = dvi_display_direct_height();
     if (height > DIRECT_MAX_ROWS)
         height = DIRECT_MAX_ROWS;
-    if (!narrow && step == 1 && host.displayIsLores) {
-        // LORES raster row 0 is the DIWSTRT line: centre the display window
-        // in the frame. A fixed 32-row offset (for 200-line screens) pushed
-        // the last 32 lines of full 256-line PAL screens (RemGame) off the
-        // frame.
-        const int span = omegaDiwVisibleSpan(chipset.diwstrt, chipset.diwstop);
-        first_row = span > 0 && span < height ? (height - span) / 2 : 0;
-    }
     const uint32_t msg[3] = {
         MSG_HEADER(MSG_BEGIN, 0, 0, 0),
         (uint16_t)first_row | (uint32_t)step << 16 | (uint32_t)narrow << 24,
         (uint32_t)rotation | (uint32_t)height << 16,
     };
     ringPush(msg, count_of(msg));
+}
+
+// Only rows without blocks need their own colour position (rows with
+// blocks take their border from their first run), and only when the
+// palette changed since the last message: RemGame sends none, ATK four.
+void hostDirectRowEnd(int row, int drawn) {
+    if (drawn || internal.paletteGeneration == row_end_generation)
+        return;
+    row_end_generation = internal.paletteGeneration;
+    hostDirectSyncPalette();
+    runFlush();
+    runStart(MSG_HEADER(MSG_ROW_END, row, 0, 0));   // a one-word message
+    runFlush();
 }
 
 void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
@@ -342,6 +335,8 @@ static int c1_step;                // raster rows per image row
 static int c1_rotation;            // DDF row rotation in raster columns
 static bool c1_narrow;             // narrow fetch layout
 static int c1_height;              // image rows
+static int c1_mark_row;            // last row with a row-end message
+static uint16_t c1_mark_pos;       // its palette-log position
 // Core 1's loops must not become libc memset/memcpy calls (flash code).
 #define C1_FUNC(name) \
     __attribute__((optimize("no-tree-loop-distribute-patterns"))) \
@@ -599,6 +594,25 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     rec->log_used = 0;
     rec->segment_overflow = false;
     c1_open_row = -1;
+    c1_mark_row = -1;
+    c1_mark_pos = 0;
+}
+
+// Image row `row` has ended: a row without drawn runs shows the colours
+// logged so far.
+// Rows since the previous message saw no palette change: they keep its
+// position.
+static void C1_FUNC(c1RowEnd)(int row) {
+    if (!c1_image || row % c1_step)
+        return;
+    const int y = c1_first_row + row / c1_step;
+    if (y <= c1_mark_row || y >= c1_height)
+        return;
+    dvi_indexed_frame_t *rec = c1_record;
+    while (++c1_mark_row < y)
+        rec->row_log[c1_mark_row] = c1_mark_pos;
+    c1_mark_pos = rec->log_used;
+    rec->row_log[y] = c1_mark_pos;
 }
 
 // Unwritten columns need no fill: scanout shows them in the row's COLOR00.
@@ -608,6 +622,8 @@ static void C1_FUNC(c1End)(uint16_t border) {
     dvi_indexed_frame_t *rec = c1_record;
     while (c1_open_row < DVI_MAX_ROWS)
         rec->row_segment[++c1_open_row] = rec->segments_used;
+    while (++c1_mark_row < c1_height)
+        rec->row_log[c1_mark_row] = c1_mark_pos;
     dvi_display_direct_publish(border);
     c1_image = NULL;
 }
@@ -697,6 +713,10 @@ void C1_FUNC(hostCore1Loop)(void) {
             case MSG_END:
                 c1End((uint16_t)msg[1]);
                 length = 2;
+                break;
+            case MSG_ROW_END:
+                c1RowEnd(row);
+                length = 1;
                 break;
             default:
                 panic("host: bad core-1 ring message %08lx",

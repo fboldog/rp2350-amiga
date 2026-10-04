@@ -14,7 +14,10 @@ while time.time()-t0<limit:
     try: i=int([l for l in out.splitlines() if l.startswith('disp:')][0].split()[1],16)&1
     except Exception: continue
     f=open(dump,'rb').read()[i*w*H:(i+1)*w*H]
-    body=all(set(f[y*w:y*w+500])=={0} for y in range(20,191,10))
-    if body and 1 in f[3*w:4*w]:
+    # Image rows are beam lines (NTSC from line 23, PAL from line 44);
+    # Workbench 1.3 starts at line 44.
+    top=44-(23 if H==240 else 44)
+    body=all(set(f[(top+y)*w:(top+y)*w+500])=={0} for y in range(20,191,10))
+    if body and 1 in f[(top+3)*w:(top+4)*w]:
         print('Workbench after %.1f s'%(time.time()-t0)); break
 else: print('not reached in %d s'%limit)

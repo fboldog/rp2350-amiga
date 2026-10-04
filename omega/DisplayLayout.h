@@ -21,6 +21,21 @@ enum {
     OMEGA_LORES_FIRST_RENDER_LINE = 44,
 };
 
+// HDMI direct frames place every beam line at a fixed image row, as a
+// monitor would: row = line - OMEGA_DIRECT_FIRST_LINE. PAL rows 0..255 are
+// lines 44..299 (the standard 256-line window), NTSC rows 0..239 lines
+// 23..262 (every line an NTSC frame shows). Display windows that open
+// early (Kickstart and Workbench open theirs at line 5 and start the
+// bitplanes with the Copper) need no per-layout anchor, and the borders
+// around a smaller window show their own lines.
+#if OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_PAL
+#define OMEGA_DIRECT_FIRST_LINE 44
+#define OMEGA_DIRECT_ROWS 256
+#else
+#define OMEGA_DIRECT_FIRST_LINE 23
+#define OMEGA_DIRECT_ROWS 240
+#endif
+
 static inline int omegaDdfIsFullWidth(uint16_t start) {
     return start < OMEGA_DDF_FULL_WIDTH_LIMIT;
 }

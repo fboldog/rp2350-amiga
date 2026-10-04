@@ -168,14 +168,14 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       RemGame 30.0 -> 31.4, PAL no audio 25.4 -> 26.9). A queue of
       thread-encoded packets (0.67 ms) underran in RemGame (audible gaps)
       and was dropped.
-- [ ] **Amiga Test Kit display** (`image_refs/atk-pal.png`, `atk-ntsc.png`):
-      map beam lines to fixed image rows per standard instead of the
-      per-layout anchors (ATK's full-width hires window at line 0x46 loses
-      its top 14 lines and sits at row 0), and record COLOR00 per line in
-      the borders (ATK's white lines and blue/red bands are Copper colour
-      changes outside the window; the pointer is missing too). Recheck
-      Workbench, the Kickstart screens, RemGame and D-Mob against their
-      references.
+- [x] **Amiga Test Kit display (2026-10-04)**: HDMI direct frames map beam
+      lines to fixed rows (PAL lines 44-299, NTSC 23-262) instead of the
+      per-layout anchors, and rows without bitplanes show COLOR00 as their
+      line ended (MSG_ROW_END only when the palette changed; core 1 fills
+      the rows in between). ATK matches atk-pal/atk-ntsc (bands, white
+      lines, pointer); D-Mob PAL shows F1-F3; Kickstart 1.3, Workbench 1.3,
+      xSysinfo, RemGame checked on both standards. Speed unchanged (NTSC
+      RemGame 31.0/30.9).
 - [x] **Real line lengths (2026-10-04)**: PAL 227 colour clocks (was
       228), NTSC alternating 228/227. ATK now reports OCS/PAL (it times CIA
       E-clock ticks over 5 frames: 71,364 before, 71,051 now, threshold

@@ -50,6 +50,9 @@ typedef struct {
     // Segments of image row y: [row_segment[y], row_segment[y + 1]), in the
     // order they were drawn. A row without segments shows its border colour.
     uint16_t row_segment[DVI_MAX_ROWS + 1];
+    // Palette-log position at the end of each row's line: a row without
+    // segments shows COLOR00 as of then (Copper colour bars in the border).
+    uint16_t row_log[DVI_MAX_ROWS];
     uint16_t segments_used;
     uint16_t log_used;
     bool segment_overflow;                // rows past the overflow: no segments

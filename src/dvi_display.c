@@ -497,10 +497,17 @@ static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
     const uint32_t first = rec->row_segment[y];
     const uint32_t last = rec->row_segment[y + 1u];
     if (first == last) {
-        if (rec->segment_overflow && first == rec->segments_used)
+        if (rec->segment_overflow && first == rec->segments_used) {
             scan_indexed(out, row, 0, AMIGA_SOURCE_WIDTH);
-        else
+        } else {
+            // COLOR00 as the row's line ended (a stale position from an
+            // earlier frame is clamped to this frame's log).
+            uint32_t pos = rec->row_log[y];
+            if (pos > rec->log_used)
+                pos = rec->log_used;
+            scan_apply_log(rec, pos);
             scan_fill(out, 0, AMIGA_SOURCE_WIDTH, scan_palette[0]);
+        }
         return scan_palette[0];
     }
     // Columns outside the drawn runs show COLOR00 as the row began.
