@@ -536,9 +536,14 @@ appears only ~2 min 12 s later.
       s, Workbench boot 30.1 → 29.5 s; RemGame unchanged (30.0 fps).
       Finding: 99 % of RemGame's 68000 instructions are its wait-for-line
       loop at 0x1F64C (VPOSR/VHPOSR polling, 12 instructions).
+- [x] **Copper idle horizon cached (2026-10-04)**: `dmaIdleUntil()` per line,
+      invalidated by Copper/blitter activity at the horizon, line end, CPU
+      custom register writes and reset; check inlined. Exact (A/B). Idle
+      xSysinfo +4 %, Workbench boot −6 %, RemGame +1.4 %.
+- [x] **Real-time limit (2026-10-04)**: `OMEGA_REALTIME`, emulation locked to
+      the display refresh (credit capped at two frames); idle Workbench had
+      reached 61.6 emulated frames/s. Boots now take real time.
 - [ ] **Remaining exact chipset items** (each small, RemGame estimates):
-      cache the Copper idle horizon instead of `dmaIdleUntil()` per run
-      (~3-4 %, needs invalidation on every Copper/DMACON/blitter change);
       whole fetch groups without the per-slot `switch` (~2-4 %);
       single-colour palette messages instead of 32 colours per Copper
       colour write (~1 %); skip sprite slots of idle/finished sprites

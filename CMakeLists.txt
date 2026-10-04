@@ -21,6 +21,8 @@ option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OF
 # be a multiple of 48 MHz: 336 MHz (PSRAM and flash at 112 MHz); 320 MHz
 # (without USB host) was the previous default.
 set(OMEGA_SYS_CLK_KHZ 336000 CACHE STRING "clk_sys in kHz for HDMI builds")
+option(OMEGA_REALTIME
+       "Limit emulation to real Amiga speed (frame pacing on core 0)" ON)
 option(OMEGA_ENABLE_USB_HOST
        "USB host on the native port for HID mice and keyboards (HDMI builds)" ON)
 # 68000 cycles per DMA slot (colour clock): 2 matches an A500 (7.09 MHz CPU,
@@ -174,6 +176,7 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_ENABLE_USB_HOST=$<BOOL:${OMEGA_USB_HOST_ACTIVE}>
     OMEGA_HDMI_AUDIO=$<BOOL:${OMEGA_HDMI_AUDIO_ACTIVE}>
     OMEGA_AUDIO_OUTPUT=$<BOOL:${OMEGA_HDMI_AUDIO_ACTIVE}>
+    OMEGA_REALTIME=$<BOOL:${OMEGA_REALTIME}>
     OMEGA_HOT_OPCODES_IN_RAM=$<BOOL:${OMEGA_HOT_OPCODES_IN_RAM}>
     # Nothing on the device mallocs; keep the SDK's minimum heap so the SRAM
     # goes to the frames and the core-1 ring.

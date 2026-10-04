@@ -486,6 +486,31 @@ instruction: xSysinfo drawn 12.3 → 12.1 s, Workbench 1.3 boot 30.1 →
 wait-for-raster-line loop (`move.w $dff004/$dff006` polling), which exact
 emulation has to interpret.
 
+`dmaIdleUntil()` (the first slot where the Copper or the blitter may act,
+asked for every skip and fetch run) is cached per line: its inputs only
+change when the Copper or the blitter act (not before the cached slot), at
+the end of the line, on a CPU write to a custom register between slices,
+or at reset, which all invalidate it. The check is inlined into
+`dma_run()`, the recomputation is not. Native frames and logs are
+unchanged (8/64-slot A/B, RemGame included). Board, NTSC: idle xSysinfo
+54.4 → 56.5 frames/s, Workbench 1.3 boot 30.8 → 28.9 s, RemGame 29.0 →
+29.4 fps.
+
+### Real-time limit
+
+`OMEGA_REALTIME` (default ON) keeps the emulation at real Amiga speed: on
+average at most one emulated frame per display refresh (60.0 Hz on NTSC,
+0.1 % above a real Amiga; 50 Hz on PAL). Core 0 waits at the end of a frame
+(after handing it to core 1) only while it is ahead of the display's
+refresh count; a slower emulation builds credit for occasional fast frames,
+capped at two frames so a slow stretch is not followed by a sprint.
+Locking to the display rather than a clock keeps frames in phase with its
+swaps: a 59.94 Hz clock against the 60 Hz display skipped ~3 frames per
+second. Without it, light screens ran faster than a real Amiga (idle
+Workbench 61.6 emulated frames/s). Boots are capped too: the CLI appears
+after 7.4 s instead of 5.5 s, xSysinfo is drawn after 14.9 s instead of
+13.4 s.
+
 ## Sprites
 
 `omega/DMA.c` implements OCS sprite DMA. Sprite n owns two DMA slots per

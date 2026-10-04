@@ -836,7 +836,40 @@ void hostInit(void) {
            (void *)fb, SCREEN_W, SCREEN_H);
 }
 
+#if OMEGA_REALTIME
+// Real-time limit: on average at most one emulated frame per display refresh (60.0 Hz
+// for NTSC, 0.1 % above a real Amiga; 50 Hz for PAL), so screens that
+// emulate faster than a real Amiga (idle Workbench) do not run games, music
+// and timers too fast. Locking to the display rather than a clock keeps
+// the frames in phase with its swaps, so none are skipped. Slower emulation
+// never waits.
+static void hostPaceFrame(void) {
+    // Frames emulated against display refreshes: wait only while ahead.
+    // Behind (slow emulation) builds credit for occasional fast frames,
+    // capped at two frames so a slow stretch is not followed by a sprint.
+    static uint32_t frames;
+    const uint32_t refreshes = __atomic_load_n(&dvi_refreshes, __ATOMIC_ACQUIRE);
+    if ((int32_t)(refreshes - frames) > 2)
+        frames = refreshes - 2;
+    ++frames;
+    while ((int32_t)(frames - __atomic_load_n(&dvi_refreshes,
+                                             __ATOMIC_ACQUIRE)) > 0)
+        tight_loop_contents();
+}
+#endif
+
+static void hostDisplayFrame(void);
+
+// Once per VBL: hand the finished frame over, then wait for real time, so
+// the frame reaches core 1 without the wait's delay.
 void hostDisplay(void) {
+    hostDisplayFrame();
+#if OMEGA_REALTIME
+    hostPaceFrame();
+#endif
+}
+
+static void hostDisplayFrame(void) {
 #if OMEGA_ENABLE_USB_HOST
     usb_input_frame();  // mouse counters, buttons, one queued key
 #endif

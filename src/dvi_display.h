@@ -73,3 +73,6 @@ static inline uint8_t dvi_rgb332(uint32_t argb) {
                      ((argb >> 11) & 0x1cu) |
                      ((argb >> 6) & 0x03u));
 }
+
+// Display refreshes so far (incremented by the scanout at each frame start).
+extern volatile uint32_t dvi_refreshes;

@@ -106,6 +106,8 @@ static volatile uint32_t frame_state;
 // Emulator frames actually shown (swapped in at line 0); read over SWD to
 // measure the display update rate.
 volatile uint32_t dvi_frames_shown;
+// Display refreshes (line 0 reached), for core 0's frame pacing.
+volatile uint32_t dvi_refreshes;
 
 // Everything core 1 calls from its thread loop runs from RAM: a flash (XIP)
 // fetch can stall behind core 0's PSRAM traffic long enough to delay the
@@ -656,6 +658,7 @@ static void __not_in_flash_func(hstx_next_hblank)(uint p) {
     hstx_hblank_line[p] = line_plus_2(line);
 
     if (line == 0u) {
+        dvi_refreshes++;
         // Switch to the pending frame unless core 0 just took it back.
         uint32_t state = __atomic_load_n(&frame_state, __ATOMIC_ACQUIRE);
         if ((state & FRAME_PENDING) &&
