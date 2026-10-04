@@ -40,6 +40,8 @@ board header ships with the Pico SDK.
   Raspberry Pi's Pico DVI Sock ordering: D0=12/13, CLK=14/15, D2=16/17,
   D1=18/19.
 - **KEY button** (GPIO23): inserts/ejects the DF0 disk.
+- **LED** (GPIO25): DF0's drive light, on while its motor runs (flash-floppy
+  builds), like the light on the Amiga's floppy drive.
 - **microSD** (optional, external module): SPI1 defaults SCK=GPIO30,
   MOSI=GPIO31, MISO=GPIO40, CS=GPIO43, overridable with `-DBOARD_SD_*_PIN`.
 

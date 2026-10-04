@@ -221,7 +221,27 @@ static void disk_button_init(void) {
            BOARD_USER_BUTTON_PIN);
 }
 
+// The board LED (GPIO25) is DF0's drive light: on while its motor runs,
+// as on the Amiga's floppy drive (the motor line is bit 7 of the drive's
+// latched CIA-B PRB, active low).
+static bool drive_led;
+
+static void drive_led_init(void) {
+    gpio_init(BOARD_LED_PIN);
+    gpio_set_dir(BOARD_LED_PIN, GPIO_OUT);
+    gpio_put(BOARD_LED_PIN, 0);
+}
+
+static inline void drive_led_update(void) {
+    const bool on = !(df[0].prb & 0x80);
+    if (on != drive_led) {
+        drive_led = on;
+        gpio_put(BOARD_LED_PIN, on);
+    }
+}
+
 static void disk_button_poll(void) {
+    drive_led_update();
     bool pressed = disk_button_pressed();
     uint32_t now = time_us_32();
     if (pressed != disk_button_raw) {
@@ -445,6 +465,7 @@ int main(void) {
     bool df0_loaded = load_df0_from_flash();
     df0_image_ready = df0_loaded;
     disk_button_init();
+    drive_led_init();
 #if OMEGA_DF0_INSERT_AT_BOOT
     if (df0_loaded) {
         df[0].hasDisk = 1;
