@@ -6,7 +6,7 @@ import subprocess,sys,struct
 from PIL import Image
 E,H,out=sys.argv[1],int(sys.argv[2]),sys.argv[3]
 def gdb(x): return int(subprocess.run(['arm-none-eabi-gdb','-batch','-ex',f'p/x {x}',E],capture_output=True,text=True).stdout.split()[-1],16)
-F=gdb('(int)&sram_frames'); D=gdb('(int)&frame_state'); HOLD=gdb('(int)&hostCaptureHold'); RS=gdb('sizeof(dvi_indexed_frame_t)'); R=0x11780000
+F=gdb('(int)&sram_frames'); D=gdb('(int)&frame_state'); HOLD=gdb('(int)&hostCaptureHold'); RS=gdb('sizeof(dvi_indexed_frame_t)'); R=0x117A8000
 off={n:gdb(f'(int)&((dvi_indexed_frame_t*)0)->{n}') for n in ['initial_palette','row_segment','row_log','segments_used','segment','palette_log']}
 oc=['openocd','-s','/usr/share/openocd/scripts','-f','interface/cmsis-dap.cfg','-f','target/rp2350.cfg','-c','adapter speed 15000','-c','init']
 o=subprocess.run(oc+['-c',f'mww 0x{HOLD:x} 1','-c','sleep 100','-c',f'echo st:[capture {{mdw 0x{D:x} 1}}]','-c','exit'],capture_output=True,text=True).stderr

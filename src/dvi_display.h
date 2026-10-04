@@ -34,7 +34,9 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
 // Copper palette changes, even mid-line, keep their exact 12-bit colours.
 #define DVI_DIRECT_IMAGE_WIDTH 640
 #define DVI_MAX_ROWS 256
-#define DVI_MAX_SEGMENTS 1024
+// The Amiga Test Kit's RGB palette test (F6, F1) changes colours several
+// times per line: ~6 runs per row, past the earlier limit of 1024.
+#define DVI_MAX_SEGMENTS 4096
 #define DVI_MAX_PALETTE_LOG 2047  // DVI_SEGMENT_POS is 11 bits
 // Segment: image columns [x0, x1) of one row, drawn after `pos` palette-log
 // entries; HAM decodes the pixels as HAM codes.

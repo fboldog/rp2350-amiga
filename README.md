@@ -61,9 +61,10 @@ the same memory). Offsets are defined in `src/board_config.h`
 | `0x11540000` | 1000 KB | Video DMA raster, 640×400 ARGB32 (fallback path for layouts the direct HDMI path cannot draw) | cached |
 | `0x1163A000` | 280 KB | free | |
 | `0x11680000` | 1 MB | Presented framebuffer, 640×400 ARGB32 (same fallback path) | cached |
-| `0x11780000` | 32 KB | HDMI frame records: palette log and pixel runs of the two indexed frames (`dvi_indexed_frame_t` ×2) | cached |
+| `0x11780000` | 32 KB | free | |
 | `0x11788000` | 128 KB | 68000 opcode table scratch: the flat handler index, built at boot and then compressed into SRAM | boot only |
-| `0x117A8000` | ~348 KB | free | |
+| `0x117A8000` | 64 KB | HDMI frame records: palette log and pixel runs of the two indexed frames (`dvi_indexed_frame_t` ×2) | cached |
+| `0x117B8000` | ~284 KB | free | |
 | `0x117FF000` | 12 bytes | DF0 disk rotation state (kept through resets, lost on power-off) | uncached |
 
 The HDMI scanout frames themselves are in internal SRAM, not PSRAM.
@@ -263,9 +264,10 @@ register number (0..31, 32..63 extra half-brite) or, on HAM runs, the raw
 6-bit HAM code. Core 1 converts each bitplane block to those numbers
 (`hostDirectHires()`/`hostDirectLores()`, HAM included) and keeps a record
 per frame (`dvi_indexed_frame_t`): the palette at frame begin, a log of every
-colour change (up to 1024), and for each row the runs of pixels it drew with
-the log position before them (up to 1024). The records live in PSRAM at
-0x780000 (32 KB reserved), read and written through the XIP cache that both
+colour change (up to 2047), and for each row the runs of pixels it drew with
+the log position before them (up to 4096: the Amiga Test Kit's RGB palette
+test needs ~1,600). The records live in PSRAM at
+0x7A8000 (64 KB reserved), read and written through the XIP cache that both
 cores share, which keeps ~9.6 KB of SRAM free for the ring at ~1 % speed. Scanout replays the log in drawing
 order and expands each row to RGB888 with the 12-bit colours doubled to 8 bits
 (0xF → 0xFF), so Copper palette changes (the Kickstart 2.04 rainbow, border
