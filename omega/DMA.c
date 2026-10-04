@@ -838,7 +838,7 @@ static void slotNextUpdate(void) {
     }
 }
 
-static int dmaIdleUntil(int h);
+static inline int dmaIdleUntil(int limit);
 
 static void dmaUpdateLineState(void) {
     uint8_t enabledPlanes = enabledBitplaneMask();
@@ -893,6 +893,7 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
     hiresDisplayPrefetch();
 
     audioLine();
+    dmaIdleCacheValid = 0;   // the Copper's comparisons depend on the line
     internal.hPos = 0;
     internal.vPos +=1;
     CIATODEvent(&CIAB);
@@ -1126,7 +1127,7 @@ void oddCycle(void){
 // Returns the first slot in [hPos, limit) where the Copper or the blitter
 // may act on this line, or limit if neither can before it. Conservative:
 // any doubt returns hPos (no skip).
-static int dmaIdleUntil(int limit) {
+static int __attribute__((noinline)) dmaIdleCompute(int limit) {
     const int h = internal.hPos;
     if (blitterState != 0 || (chipset.dmaconr & 0x4240) == 0x4240)
         return h;
@@ -1148,6 +1149,29 @@ static int dmaIdleUntil(int limit) {
     if (waitH <= h)
         return h;
     return waitH < limit ? waitH : limit;
+}
+
+// dmaIdleCompute() for the whole line, cached. Its inputs (blitter state,
+// DMACON, the Copper's state and wait, the line) only change when the Copper
+// or the blitter act, which they cannot before the horizon, at the end of
+// the line, or by a CPU write to a custom register between slices; so a
+// query on the same line before the horizon gives the same answer.
+int dmaIdleCacheValid;
+static int idleHorizon;   // first slot where the Copper/blitter may act
+static int idleLine;      // internal.vPos it was computed for
+
+static void __attribute__((noinline)) dmaIdleRefresh(void) {
+    idleHorizon = dmaIdleCompute(SLOT_LAST + 1);
+    idleLine = internal.vPos;
+    dmaIdleCacheValid = 1;
+}
+
+// Inlined into dma_run(): a cache hit is a few compares, no call.
+static inline __attribute__((always_inline)) int dmaIdleUntil(int limit) {
+    if (!dmaIdleCacheValid || idleLine != internal.vPos ||
+        internal.hPos >= idleHorizon)
+        dmaIdleRefresh();
+    return idleHorizon < limit ? idleHorizon : limit;
 }
 
 void dramCycle(void){

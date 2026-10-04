@@ -62,6 +62,7 @@ void ChipsetInit(){
     internal.vPos = 0;
     internal.bitplaneMask = 0;
     dmaLineStateDirty = 1;
+    dmaIdleCacheValid = 0;
     audioReset();
     
     //For OS 1.x

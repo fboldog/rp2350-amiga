@@ -439,6 +439,7 @@ void chipWriteWord(unsigned int address,unsigned int value){
         
         debugChipAddress = address;    // used for debugging to identify the register being called
         debugChipValue = value;
+        dmaIdleCacheValid = 0;
         putChipReg16[address](value);
         return;
     }

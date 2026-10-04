@@ -302,6 +302,7 @@ void chipWriteWord(unsigned int address, unsigned int value) {
         if (off >= 256u) return;
         debugChipAddress = off;
         debugChipValue   = value;
+        dmaIdleCacheValid = 0;
         putChipReg16[off]((uint16_t)value);
         return;
     }
@@ -333,6 +334,7 @@ void chipWriteLong(unsigned int address, unsigned int value) {
         uint32_t off = (address - 0xDFF000u) >> 1;
         if (off >= 256u) return;    // see chipWriteWord
         debugChipAddress = off;
+        dmaIdleCacheValid = 0;
         putChipReg32[off](value);
         return;
     }

@@ -23,6 +23,9 @@ void dma_run(int slots);
 // Set by writes to DIWSTRT/DIWSTOP, DDFSTRT/DDFSTOP, BPLCON0 and DMACON:
 // dma_execute() then recomputes its cached per-line display state.
 extern int dmaLineStateDirty;
+// dmaIdleUntil()'s cached horizon; cleared by every CPU write to a custom
+// register (and at reset), which may start the blitter or move the Copper.
+extern int dmaIdleCacheValid;
 void dmaBitplanePointerWrite(unsigned plane, int highWord);
 int copperExecute();
 int blitterExecute();
