@@ -41,13 +41,36 @@ static inline int omegaDiwVerticalSpan(uint16_t diwstrt, uint16_t diwstop) {
            omegaDiwVerticalStart(diwstrt);
 }
 
+// Lines of the window the beam actually draws: an NTSC frame ends at line
+// 263, so a PAL-sized window (to line 300) is cut there, as on a real NTSC
+// Amiga.
+static inline int omegaDiwVisibleSpan(uint16_t diwstrt, uint16_t diwstop) {
+    int stop = omegaDiwVerticalStop(diwstop);
+    if (stop > OMEGA_VIDEO_FRAME_LINES)
+        stop = OMEGA_VIDEO_FRAME_LINES;
+    return stop - omegaDiwVerticalStart(diwstrt);
+}
+
+// LORES lines the output shows at one raster row per line: the native
+// viewport's height, or on HDMI the scanout image (240 rows on NTSC, so a
+// PAL-sized window shows down to the end of the NTSC frame instead of being
+// cut at 200 lines).
+#ifndef OMEGA_LORES_SINGLE_ROW_LINES
+#if defined(PICO_BUILD) && OMEGA_ENABLE_HDMI && \
+    OMEGA_VIDEO_STANDARD == OMEGA_VIDEO_NTSC
+#define OMEGA_LORES_SINGLE_ROW_LINES 240
+#else
+#define OMEGA_LORES_SINGLE_ROW_LINES (OMEGA_VIDEO_NATIVE_HEIGHT / 2)
+#endif
+#endif
+
 // Overscan LORES displays can advance through more beam rows than fit in the
-// native progressive viewport.  Keep their logical rows on alternating raster
-// rows; normal 200/256-line displays use every raster row.
+// output.  Keep their logical rows on alternating raster rows; normal
+// 200/256-line displays use every raster row.
 static inline int omegaLoresUsesAlternateRasterRows(uint16_t diwstrt,
                                                      uint16_t diwstop) {
-    return omegaDiwVerticalSpan(diwstrt, diwstop) >
-           OMEGA_VIDEO_NATIVE_HEIGHT / 2;
+    return omegaDiwVisibleSpan(diwstrt, diwstop) >
+           OMEGA_LORES_SINGLE_ROW_LINES;
 }
 
 static inline int omegaDiwCrossesVerticalBank(uint16_t diwstrt,

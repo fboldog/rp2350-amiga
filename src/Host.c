@@ -270,7 +270,7 @@ static void hostDirectBegin(void) {
         // in the frame. A fixed 32-row offset (for 200-line screens) pushed
         // the last 32 lines of full 256-line PAL screens (RemGame) off the
         // frame.
-        const int span = omegaDiwVerticalSpan(chipset.diwstrt, chipset.diwstop);
+        const int span = omegaDiwVisibleSpan(chipset.diwstrt, chipset.diwstop);
         first_row = span > 0 && span < height ? (height - span) / 2 : 0;
     }
     const uint32_t msg[3] = {
