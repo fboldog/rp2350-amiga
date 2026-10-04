@@ -12,6 +12,10 @@
 #include "board_config.h"
 #include "Host.h"
 #include "../omega/VideoStandard.h"
+#if OMEGA_HDMI_AUDIO
+#include "hdmi_island.h"
+#include "hdmi_audio.h"
+#endif
 
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
@@ -39,6 +43,7 @@
 #define MODE_BIT_CLK_KHZ   270000u
 #define DVI_ACTIVE_WIDTH   720u
 #define DVI_MODE_NAME      "720x576p50"
+#define MODE_VIC           17u       // CEA-861 720x576p50 4:3
 #define SOURCE_HEIGHT      288u
 // PAL screens such as Workbench use 256 lines; showing only 200 cut off the
 // lower edge of windows.
@@ -57,6 +62,7 @@
 #define MODE_BIT_CLK_KHZ   252000u
 #define DVI_ACTIVE_WIDTH   640u
 #define DVI_MODE_NAME      "640x480p60"
+#define MODE_VIC           1u        // CEA-861 640x480p60
 #define SOURCE_HEIGHT      240u
 // Use every row of the 480-line mode: overscan screens (e.g. xsysinfo) run
 // to the end of the NTSC frame, beyond 200 lines.
@@ -310,38 +316,57 @@ bool dvi_display_submit_raster(const uint32_t *argb_raster,
 #define MODE_V_TOTAL_LINES (MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH + \
                             MODE_V_SYNC_WIDTH + MODE_V_BACK_PORCH)
 
-#define HBLANK_CMDS(vsync)                                      \
-    HSTX_CMD_RAW_REPEAT | MODE_H_FRONT_PORCH, SYNC_V##vsync##_H1, \
-    HSTX_CMD_NOP,                                               \
-    HSTX_CMD_RAW_REPEAT | MODE_H_SYNC_WIDTH, SYNC_V##vsync##_H0,  \
-    HSTX_CMD_NOP,                                               \
-    HSTX_CMD_RAW_REPEAT | MODE_H_BACK_PORCH, SYNC_V##vsync##_H1
+#define HSTX_CMD_RAW         (0x0u << 12)
+#define MODE_H_BLANK (MODE_H_FRONT_PORCH + MODE_H_SYNC_WIDTH + MODE_H_BACK_PORCH)
+#define MODE_H_TOTAL (MODE_H_BLANK + DVI_ACTIVE_WIDTH)
+// Blanking pixels x in [MODE_HSYNC_START, MODE_HSYNC_END) carry HSYNC.
+#define MODE_HSYNC_START MODE_H_FRONT_PORCH
+#define MODE_HSYNC_END   (MODE_H_FRONT_PORCH + MODE_H_SYNC_WIDTH)
 
-static uint32_t vblank_line[] = {
-    HBLANK_CMDS(1),
+// Each line is two DMA transfers: its horizontal blanking from an hblank_buf,
+// built per line by an interrupt (HDMI audio: a data island and the video
+// preamble/guard band), then its active part (an image row, a border line
+// or a blank control period). Four channels chain in a ring, blanking 0 ->
+// active 0 -> blanking 1 -> active 1 -> ..., channel pair p sending lines
+// of parity p: a blanking transfer drains into the HSTX FIFO almost at
+// once, so with two channels the active channel would restart before its
+// interrupt could reprogram it. With four, each channel has nearly two
+// lines between finishing and its next start.
+#if OMEGA_HDMI_AUDIO
+// Data island of two packets (audio samples + clock regeneration or an
+// InfoFrame) from blanking pixel 4: 76 pixels, all before the back porch's
+// final 10 (video preamble + guard band).
+#define ISLAND_X 4u
+#define ISLAND_PACKETS 2u
+#define HBLANK_WORDS 104u
+_Static_assert(ISLAND_X + HDMI_ISLAND_PIXELS(ISLAND_PACKETS) + 10u <=
+               MODE_H_BLANK, "data island does not fit the blanking");
+#else
+#define HBLANK_WORDS 16u
+#endif
+static uint32_t hblank_buf[2][HBLANK_WORDS];
+
+static uint32_t vblank_active[] = {
     HSTX_CMD_RAW_REPEAT | DVI_ACTIVE_WIDTH, SYNC_V1_H1,
     HSTX_CMD_NOP,
 };
-static uint32_t vsync_line[] = {
-    HBLANK_CMDS(0),
+static uint32_t vsync_active[] = {
     HSTX_CMD_RAW_REPEAT | DVI_ACTIVE_WIDTH, SYNC_V0_H1,
     HSTX_CMD_NOP,
 };
 // Active line entirely in the border colour (rows above/below the image).
-#define BORDER_LINE_COLOUR_WORD 9
-static uint32_t border_line[] = {
-    HBLANK_CMDS(1),
+#define BORDER_LINE_COLOUR_WORD 1
+static uint32_t border_active[] = {
     HSTX_CMD_TMDS_REPEAT | DVI_ACTIVE_WIDTH, 0,
     HSTX_CMD_NOP,
 };
 
-// Image row: blanking, left border, 640 RGB888 pixels, right border. Each
-// row is expanded once and sent on both of its lines, from buffer
-// (row & 1): the other buffer's row is still being sent.
+// Image row: left border, 640 RGB888 pixels, right border. Each row is
+// expanded once and sent on both of its lines, from buffer (row & 1): the
+// other buffer's row is still being sent.
 #define IMAGE_PIXEL_WORDS AMIGA_SOURCE_WIDTH
 enum {
-    IMAGE_LINE_HEADER = 8,
-    IMAGE_LINE_LEFT = IMAGE_LINE_HEADER,          // TMDS_REPEAT, colour
+    IMAGE_LINE_LEFT = 0,                          // TMDS_REPEAT, colour
     IMAGE_LINE_PIXELS_CMD = IMAGE_LINE_LEFT + 2,  // TMDS | 640
     IMAGE_LINE_PIXELS = IMAGE_LINE_PIXELS_CMD + 1,
     IMAGE_LINE_RIGHT = IMAGE_LINE_PIXELS + IMAGE_PIXEL_WORDS,
@@ -494,15 +519,12 @@ static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
     return border;
 }
 
-static uint hstx_dma[2];
-static uint hstx_next_line;
+static uint hstx_dma[4];
 static int hstx_active_frame;
 
 static void hstx_init_line_buffers(void) {
-    static const uint32_t header[IMAGE_LINE_HEADER] = { HBLANK_CMDS(1) };
     for (uint i = 0; i < 2; ++i) {
         uint32_t *line = image_lines[i];
-        memcpy(line, header, sizeof(header));
         // 640-wide modes have no side border: NOPs instead.
         const uint32_t border_cmd = DVI_IMAGE_X0
             ? HSTX_CMD_TMDS_REPEAT | DVI_IMAGE_X0 : HSTX_CMD_NOP;
@@ -514,11 +536,124 @@ static void hstx_init_line_buffers(void) {
     }
 }
 
-// Points DMA channel `index` at the next line; called for the channel that
-// just finished, while the other channel is still sending its line.
-static void __not_in_flash_func(hstx_program_next)(uint index) {
-    const uint line = hstx_next_line;
-    hstx_next_line = line + 1u == MODE_V_TOTAL_LINES ? 0u : line + 1u;
+// Channels: hstx_dma[0..1] blanking, [2..3] active, index = line parity.
+static uint hstx_hblank_line[2];   // line each blanking channel sends next
+// Row expansion request for the expansion interrupt (-1: none).
+static volatile int expand_y = -1;
+static volatile int expand_frame;
+static uint expand_irq;
+static uint hstx_active_line[2];   // line each active channel sends next
+
+static inline bool line_is_vsync(uint line) {
+    return line >= MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH &&
+           line < MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH + MODE_V_SYNC_WIDTH;
+}
+
+static inline uint32_t sync_word(uint vsync, uint hsync) {
+    return (vsync ? (hsync ? SYNC_V1_H1 : SYNC_V1_H0)
+                  : (hsync ? SYNC_V0_H1 : SYNC_V0_H0));
+}
+
+#if OMEGA_HDMI_AUDIO
+// Packet 2 of each island, encoded once at start-up (fixed content): audio
+// clock regeneration on every line (per VSYNC level), the AVI and Audio
+// InfoFrames on lines 0 and 1.
+#define PACKET2_X (ISLAND_X + 10u + 32u)
+static uint32_t acr_words[2][32];
+static uint32_t avi_words[32];
+static uint32_t aif_words[32];
+static unsigned audio_frame;     // IEC 60958 frame counter
+static uint32_t audio_due;       // samples owed, in 1/line_rate units
+#define LINE_RATE (MODE_BIT_CLK_KHZ * 100u / MODE_H_TOTAL)  // lines per second
+
+static void hdmi_audio_prepare(void) {
+    hdmi_packet_t p;
+    for (uint v = 0; v < 2u; ++v) {
+        const hdmi_sync_t sync = { MODE_HSYNC_START, MODE_HSYNC_END, v };
+        // N = 6144 at 48 kHz; CTS = pixel clock * N / (128 * 48000).
+        hdmi_acr_packet(&p, 6144u, MODE_BIT_CLK_KHZ / 10u);
+        hdmi_encode_packet(acr_words[v], &p, PACKET2_X, false, &sync);
+    }
+    const hdmi_sync_t sync = { MODE_HSYNC_START, MODE_HSYNC_END, 1u };
+    hdmi_avi_infoframe(&p, MODE_VIC);
+    hdmi_encode_packet(avi_words, &p, PACKET2_X, false, &sync);
+    hdmi_audio_infoframe(&p);
+    hdmi_encode_packet(aif_words, &p, PACKET2_X, false, &sync);
+}
+#endif
+
+// Builds the blanking of `line` into buf; returns its word count.
+static uint __not_in_flash_func(hstx_build_hblank)(uint line, uint32_t *buf) {
+    uint32_t *w = buf;
+    const uint vsync = line_is_vsync(line) ? 0u : 1u;
+    const bool active = line < MODE_V_ACTIVE_LINES;
+    uint x = 0;
+#if OMEGA_HDMI_AUDIO
+    const hdmi_sync_t sync = { MODE_HSYNC_START, MODE_HSYNC_END, vsync };
+    *w++ = HSTX_CMD_RAW_REPEAT | ISLAND_X;
+    *w++ = sync_word(vsync, 1u);
+    *w++ = HSTX_CMD_RAW | HDMI_ISLAND_PIXELS(ISLAND_PACKETS);
+    hdmi_island_head(w, ISLAND_X, &sync);
+    w += 10;
+    // Packet 1: this line's audio samples (48 kHz over LINE_RATE lines/s).
+    int16_t samples[2 * 4];
+    int count = 0;
+    audio_due += 48000u;
+    while (audio_due >= LINE_RATE && count < 4) {
+        audio_due -= LINE_RATE;
+        hdmi_audio_take(&samples[2 * count]);
+        ++count;
+    }
+    hdmi_packet_t p;
+    hdmi_audio_packet(&p, samples, count, &audio_frame);
+    hdmi_encode_packet(w, &p, ISLAND_X + 10u, true, &sync);
+    w += 32;
+    const uint32_t *p2 = line == 0u ? avi_words : line == 1u ? aif_words
+                                                            : acr_words[vsync];
+    for (uint i = 0; i < 32u; ++i)
+        *w++ = p2[i];
+    hdmi_island_tail(w, PACKET2_X + 32u, &sync);
+    w += 2;
+    x = ISLAND_X + HDMI_ISLAND_PIXELS(ISLAND_PACKETS);
+    const uint end = active ? MODE_H_BLANK - 10u : MODE_H_BLANK;
+#else
+    const uint end = MODE_H_BLANK;
+#endif
+    // Control period up to `end`, split at the HSYNC edges.
+    while (x < end) {
+        const uint hsync = x >= MODE_HSYNC_START && x < MODE_HSYNC_END ? 0u : 1u;
+        uint next = hsync ? (x < MODE_HSYNC_START ? MODE_HSYNC_START : end)
+                          : MODE_HSYNC_END;
+        if (next > end)
+            next = end;
+        *w++ = HSTX_CMD_RAW_REPEAT | (next - x);
+        *w++ = sync_word(vsync, hsync);
+        x = next;
+    }
+#if OMEGA_HDMI_AUDIO
+    if (active) {
+        // HDMI video data period: 8-pixel preamble, 2-pixel guard band.
+        *w++ = HSTX_CMD_RAW_REPEAT | 8u;
+        *w++ = (sync_word(vsync, 1u) & 0x3ffu) | HDMI_VIDEO_PREAMBLE_L12;
+        *w++ = HSTX_CMD_RAW_REPEAT | 2u;
+        *w++ = HDMI_VIDEO_GUARD;
+    }
+#endif
+    *w++ = HSTX_CMD_NOP;
+    return (uint)(w - buf);
+}
+
+static inline uint line_plus_2(uint line) {
+    line += 2u;
+    return line >= MODE_V_TOTAL_LINES ? line - MODE_V_TOTAL_LINES : line;
+}
+
+// Blanking channel p finished: build its next line's blanking (two lines
+// ahead), and for the first line of an image row expand the row, nearly
+// two lines before it is sent.
+static void __not_in_flash_func(hstx_next_hblank)(uint p) {
+    const uint line = hstx_hblank_line[p];
+    hstx_hblank_line[p] = line_plus_2(line);
 
     if (line == 0u) {
         // Switch to the pending frame unless core 0 just took it back.
@@ -530,46 +665,38 @@ static void __not_in_flash_func(hstx_program_next)(uint index) {
             hstx_active_frame = (int)((state & 1u) ^ 1u);
             dvi_frames_shown++;
         }
-        border_line[BORDER_LINE_COLOUR_WORD] = frame_border[hstx_active_frame];
+        border_active[BORDER_LINE_COLOUR_WORD] = frame_border[hstx_active_frame];
         scan_begin_frame(hstx_active_frame);
     }
 
-    const uint32_t *list;
-    uint count;
-    int expand_y = -1;
-    if (line < MODE_V_ACTIVE_LINES) {
+    dma_channel_hw_t *ch = &dma_hw->ch[hstx_dma[p]];
+    ch->read_addr = (uintptr_t)hblank_buf[p];
+    ch->transfer_count = hstx_build_hblank(line, hblank_buf[p]);
+
+    // The first line of each image row has it expanded, into the row
+    // buffer that the previous row's two lines are not using, by the
+    // low-priority expansion interrupt.
+    if (line < MODE_V_ACTIVE_LINES && !(line & 1u)) {
         const uint image_y = line / 2u - DVI_IMAGE_Y0;
         if (image_y < AMIGA_SOURCE_HEIGHT) {
-            uint32_t *out = image_lines[image_y & 1u];
-            // The first line of each row expands it; the second resends it.
-            if (!(line & 1u))
-                expand_y = (int)image_y;
-            list = out;
-            count = IMAGE_LINE_WORDS;
-        } else {
-            list = border_line;
-            count = count_of(border_line);
+            expand_frame = hstx_active_frame;
+            expand_y = (int)image_y;
+            irq_set_pending(expand_irq);
         }
-    } else if (line >= MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH &&
-               line < MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH +
-                      MODE_V_SYNC_WIDTH) {
-        list = vsync_line;
-        count = count_of(vsync_line);
-    } else {
-        list = vblank_line;
-        count = count_of(vblank_line);
     }
-    dma_channel_hw_t *ch = &dma_hw->ch[hstx_dma[index]];
-    ch->read_addr = (uintptr_t)list;
-    ch->transfer_count = count;
+}
 
-    // Expand after reprogramming: this channel starts only when the other
-    // finishes its line, and the line's commands never change, so a late
-    // expansion can at worst tear a row, never lose sync.
-    if (expand_y >= 0) {
-        uint32_t *out = image_lines[expand_y & 1];
-        const uint32_t border = scan_expand_row(
-            hstx_active_frame, (uint)expand_y, out + IMAGE_LINE_PIXELS);
+// Row expansion runs at a lower priority than the DMA interrupt, which can
+// preempt it to reprogram its channels on time: a slow row (HAM with many
+// palette changes) can at worst arrive late and tear, never desynchronise
+// the four channels. It loops while the DMA interrupt queued another row.
+static void __not_in_flash_func(hstx_expand_irq)(void) {
+    int y;
+    while ((y = expand_y) >= 0) {
+        expand_y = -1;
+        uint32_t *out = image_lines[y & 1];
+        const uint32_t border = scan_expand_row(expand_frame, (uint)y,
+                                                out + IMAGE_LINE_PIXELS);
         if (DVI_IMAGE_X0) {
             out[IMAGE_LINE_LEFT + 1] = border;
             out[IMAGE_LINE_RIGHT + 1] = border;
@@ -577,12 +704,44 @@ static void __not_in_flash_func(hstx_program_next)(uint index) {
     }
 }
 
+// Active channel p finished: point it at its next line's active part.
+static void __not_in_flash_func(hstx_next_active)(uint p) {
+    const uint line = hstx_active_line[p];
+    hstx_active_line[p] = line_plus_2(line);
+    const uint32_t *list;
+    uint count;
+    if (line < MODE_V_ACTIVE_LINES) {
+        const uint image_y = line / 2u - DVI_IMAGE_Y0;
+        if (image_y < AMIGA_SOURCE_HEIGHT) {
+            list = image_lines[image_y & 1u];
+            count = IMAGE_LINE_WORDS;
+        } else {
+            list = border_active;
+            count = count_of(border_active);
+        }
+    } else if (line_is_vsync(line)) {
+        list = vsync_active;
+        count = count_of(vsync_active);
+    } else {
+        list = vblank_active;
+        count = count_of(vblank_active);
+    }
+    dma_channel_hw_t *ch = &dma_hw->ch[hstx_dma[2u + p]];
+    ch->read_addr = (uintptr_t)list;
+    ch->transfer_count = count;
+}
+
 static void __not_in_flash_func(hstx_dma_irq)(void) {
-    for (uint index = 0; index < 2u; ++index) {
-        const uint32_t mask = 1u << hstx_dma[index];
-        if (dma_hw->ints1 & mask) {
-            dma_hw->ints1 = mask;
-            hstx_program_next(index);
+    for (uint p = 0; p < 2u; ++p) {
+        const uint32_t active = 1u << hstx_dma[2u + p];
+        if (dma_hw->ints1 & active) {
+            dma_hw->ints1 = active;
+            hstx_next_active(p);
+        }
+        const uint32_t hblank = 1u << hstx_dma[p];
+        if (dma_hw->ints1 & hblank) {
+            dma_hw->ints1 = hblank;
+            hstx_next_hblank(p);
         }
     }
 }
@@ -639,19 +798,43 @@ static void hstx_configure(void) {
 static void hstx_start(void) {
     hstx_init_line_buffers();
     hstx_active_frame = (int)(frame_state & 1u);
-    hstx_next_line = 0;
-    for (uint index = 0; index < 2u; ++index) {
-        dma_channel_config c = dma_channel_get_default_config(hstx_dma[index]);
-        channel_config_set_chain_to(&c, hstx_dma[index ^ 1u]);
-        channel_config_set_dreq(&c, DREQ_HSTX);
-        dma_channel_configure(hstx_dma[index], &c, &hstx_fifo_hw->fifo,
-                              vblank_line, count_of(vblank_line), false);
-        hstx_program_next(index); // lines 0 and 1
+    // Expansion: a software interrupt below the DMA interrupt's priority.
+    expand_irq = (uint)user_irq_claim_unused(true);
+    irq_set_exclusive_handler(expand_irq, hstx_expand_irq);
+    irq_set_priority(expand_irq, 0xc0);
+    irq_set_enabled(expand_irq, true);
+    for (uint p = 0; p < 2u; ++p)
+        hstx_hblank_line[p] = hstx_active_line[p] = p;
+#if OMEGA_HDMI_AUDIO
+    hdmi_audio_prepare();
+#endif
+    // Ring: blanking p -> active p -> blanking p^1.
+    for (uint p = 0; p < 2u; ++p) {
+        const uint chans[2][2] = {
+            { hstx_dma[p], hstx_dma[2u + p] },          // blanking -> active
+            { hstx_dma[2u + p], hstx_dma[p ^ 1u] },     // active -> next blanking
+        };
+        for (uint i = 0; i < 2u; ++i) {
+            dma_channel_config c = dma_channel_get_default_config(chans[i][0]);
+            channel_config_set_chain_to(&c, chans[i][1]);
+            channel_config_set_dreq(&c, DREQ_HSTX);
+            dma_channel_configure(chans[i][0], &c, &hstx_fifo_hw->fifo,
+                                  vblank_active, count_of(vblank_active),
+                                  false);
+        }
+    }
+    for (uint p = 0; p < 2u; ++p) {
+        hstx_next_hblank(p);   // lines 0 and 1
+        hstx_next_active(p);
     }
     // The interrupt runs on this core (core 1); core 0 never sees it.
-    dma_hw->ints1 = (1u << hstx_dma[0]) | (1u << hstx_dma[1]);
-    dma_hw->inte1 = (1u << hstx_dma[0]) | (1u << hstx_dma[1]);
+    uint32_t mask = 0;
+    for (uint i = 0; i < 4u; ++i)
+        mask |= 1u << hstx_dma[i];
+    dma_hw->ints1 = mask;
+    dma_hw->inte1 = mask;
     irq_set_exclusive_handler(DMA_IRQ_1, hstx_dma_irq);
+    irq_set_priority(DMA_IRQ_1, PICO_HIGHEST_IRQ_PRIORITY);
     irq_set_enabled(DMA_IRQ_1, true);
     hstx_configure();
     dma_channel_start(hstx_dma[0]);
@@ -694,8 +877,8 @@ void dvi_display_init(void) {
     // The SDK's runtime init leaves HSTX in reset; release it once its
     // clock runs, before core 1 configures it.
     reset_unreset_block_num_wait_blocking(RESET_HSTX);
-    hstx_dma[0] = (uint)dma_claim_unused_channel(true);
-    hstx_dma[1] = (uint)dma_claim_unused_channel(true);
+    for (uint i = 0; i < 4u; ++i)
+        hstx_dma[i] = (uint)dma_claim_unused_channel(true);
     multicore_launch_core1(dvi_core1);
 }
 

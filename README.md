@@ -23,7 +23,7 @@ Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | Custom chipset + CIA + DMA | ✅ |
 | Floppy (DF0 raw flash ADF + PSRAM track buffer) | ✅ verified; build-disabled by default |
 | HDMI output (HSTX) | ✅ verified NTSC and PAL; build-disabled by default |
-| Paula audio | ✅ emulated, 48 kHz stereo (native: `OMEGA_PCM=<file>`); HDMI output not yet |
+| Paula audio | ✅ emulated, 48 kHz stereo; over HDMI on NTSC builds (`OMEGA_HDMI_AUDIO`), native: `OMEGA_PCM=<file>` |
 | USB HID keyboard/mouse | ✅ verified (mouse + keyboard receivers through a powered hub); HDMI builds |
 
 ## Hardware
@@ -95,7 +95,7 @@ differ.
 | `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
 | Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
 | Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
-| **Free** | **~2 KB / ~22 KB** | Between the heap and the end of main SRAM; USB host takes ~6 KB of it (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
+| **Free** | **~3 KB / ~4 KB** (NTSC ~23 KB without HDMI audio) | Between the heap and the end of main SRAM; HDMI audio takes ~20 KB (rings 10 KB, encoder tables and code), USB host ~6 KB (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
 | `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and 2 KB free |
 | `SCRATCH_Y` | 4 KB | Core 0 stack |
 
@@ -168,12 +168,20 @@ Output: `<build-directory>/omega-amiga.uf2`
 
 `src/dvi_display.c` drives the RP2350 **HSTX** peripheral. HSTX TMDS-encodes
 RGB888 pixels (one per 32-bit word) in hardware; its command lists generate
-syncs and porches, and `TMDS_REPEAT` commands fill the borders. Two ping-pong
-DMA channels feed it one scanline at a time. Core 1 services one DMA
-interrupt per line: it re-arms the finished channel first and then expands
-the next image row into one of two RGB888 row buffers, which is sent on both
-of the row's lines. Because the line commands never change, a late expansion
-could at worst tear a row, never lose sync; swaps happen at line 0.
+syncs and porches, and `TMDS_REPEAT` commands fill the borders. Each line is
+two DMA transfers: its horizontal blanking, built per line by core 1's DMA
+interrupt into a small buffer (with HDMI audio: a data island and the video
+preamble/guard band), then its active part (an image row, a border line or
+a blank control period). Four channels chain in a ring, blanking 0 → active
+0 → blanking 1 → active 1, each pair sending lines of one parity: a blanking
+transfer drains into the HSTX FIFO almost at once, so with two channels the
+active channel restarted before its interrupt could re-arm it and the lines
+lost sync. With four, every channel has nearly two lines to be re-armed.
+The DMA interrupt (highest priority) only builds the blanking and re-arms
+channels; image rows are expanded into two RGB888 row buffers (each sent on
+both of the row's lines) by a lower-priority software interrupt it
+triggers, so a slow row (HAM with many palette changes) can at worst tear,
+never delay a re-arm. Swaps happen at line 0.
 
 HSTX has its own clock: `PLL_USB` is retuned to the TMDS bit rate (252 MHz
 NTSC, 270 MHz PAL) and `clk_hstx` is `PLL_USB / 2`, since HSTX outputs two
@@ -522,10 +530,45 @@ are not emulated.
 
 The native runner writes the output with `OMEGA_PCM=<file>` (48 kHz signed
 16-bit stereo; e.g. `ffmpeg -f s16le -ar 48000 -ac 2 -i <file> out.wav`).
-RemGame's music plays this way. On the board the samples are not output yet:
-HDMI audio is the next step (TODO.md, Phase 5). Paula costs ~3 % in RemGame
-(31.0 → 30.0 frames/s) and ~4 % on idle xSysinfo, most of it not the
-per-line work itself (~1 %).
+RemGame's music plays this way. Paula itself costs ~3 % in RemGame and ~4 %
+on idle xSysinfo, most of it not the per-line work itself (~1 %).
+
+Each output sample is the average of Paula's output over its 1/48000 s
+interval (a box filter, against aliasing), then goes through the Amiga's
+analogue output stage: the A500's fixed first-order low-pass (~4.9 kHz)
+and the "LED" filter, a second-order Butterworth at ~3.3 kHz, while CIA-A's
+`/LED` output (PRA bit 1) is low.
+
+### HDMI audio
+
+`OMEGA_HDMI_AUDIO` (default ON for NTSC, OFF for PAL) sends the audio in
+HDMI data islands; no extra hardware is needed. OFF gives plain DVI, and
+Paula is then emulated (its interrupts) but not mixed. PAL builds cannot
+enable it yet: PAL's larger scanout frames leave ~17 KB too little SRAM, and
+CMake refuses the combination.
+
+- Every line's horizontal blanking carries a data island from pixel 4: an
+  audio sample packet with that line's samples (48 kHz at the 31.5 / 31.25
+  kHz line rate: one or two per line) and either an Audio Clock Regeneration
+  packet (N = 6144, CTS = pixel clock / 1000) or, on lines 0 and 1, the AVI
+  and Audio InfoFrames. Active lines end their blanking with the HDMI video
+  preamble and guard band. Packet layouts, TERC4, BCH ECC and guard bands
+  follow HDMI 1.4 and match hdl-util's `hdmi` core (`src/hdmi_island.c`).
+- Encoding runs in the DMA interrupt (~3 µs per line, table driven); the
+  ACR and InfoFrame packets are encoded once at start-up.
+- Paula produces samples per second of *emulated* time. `src/hdmi_audio.c`
+  time-stretches them to real time on core 1's thread loop with WSOLA
+  (16 ms windows, 50 % overlap, Hann cross-fades, the next window placed
+  within ±4 ms where its waveform best matches the previous one's
+  continuation), so slow emulation (RemGame at ~half speed) keeps its pitch
+  and plays smoothly, stretched. Within 2 % of real time (left again beyond
+  3 %) the input is copied straight through, bit-exact, with no search.
+  Below a quarter of real time it fades to silence. The line interrupt only
+  takes the stretched samples from a 512-frame output ring.
+- Cost: RemGame 30.0 → 28.8 frames/s; core 1 keeps idle time (row
+  expansion ~26 %, island encoding ~11 %, stretching ~12 % in RemGame).
+- The capture card used for testing records the HDMI audio as silence
+  while a monitor plays it; check audio by ear or with the native PCM.
 
 ## USB keyboard and mouse
 
@@ -589,7 +632,9 @@ deadline.
 | `Host.c` / `Host.h` | Host side of the video path: the core 0 → core 1 message ring and producers (`hostDirect*`), core 1's converter and sprite overlay, the ARGB raster fallback, keyboard entry points |
 | `usb_input.c` / `.h`, `tusb_config.h` | USB host (TinyUSB, hub) for HID mice and keyboards: mouse counters and buttons, queued key events |
 | `HostRing.h` | Core 0 → core 1 message format and the inline fast path for appending a bitplane block to the current run (used by `DMA.c`) |
-| `dvi_display.c` / `dvi_display.h` | HDMI over HSTX: video modes, double-buffered SRAM frames, frame handshake, per-line DMA interrupt, row expansion to RGB888 (exact 12-bit colours, HAM), boot colour bars, ARGB/RGB332 submit for the fallback path |
+| `dvi_display.c` / `dvi_display.h` | HDMI over HSTX: video modes, double-buffered SRAM frames, frame handshake, four-channel line DMA (blanking + active per line), row expansion to RGB888 in a low-priority interrupt (exact 12-bit colours, HAM), boot colour bars, ARGB/RGB332 submit for the fallback path |
+| `hdmi_island.c` / `.h` | HDMI data islands: packets (audio samples, clock regeneration, InfoFrames), BCH ECC, TERC4 encoding into raw HSTX words |
+| `hdmi_audio.c` / `.h` | HDMI audio path: Paula's samples from core 0, WSOLA time-stretching to real time on core 1, output ring for the line interrupt |
 | `Planar.c` | Planar-to-chunky ARGB conversion (HIRES, LORES, HAM) for the fallback raster and the native build |
 | `Presentation.c` / `.h` | ARGB fallback presentation: maps the DMA raster to a 640×400 frame, rebuilds wrapped-fetch rows |
 | `sd_card.c` / `sd_card.h`, `sd_diskio.c` | SD card over SPI (FatFs disk driver) and Kickstart loading from SD (SD-card builds only) |

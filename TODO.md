@@ -141,24 +141,20 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       31.0 → 30.0 fps), ~4 % idle xSysinfo; ~1 % is the audio work, the rest
       could not be pinned down (not flash placement, not loop alignment).
 - [ ] Attach modes (ADKCON USE*V*/USE*P*): volume/period modulation.
-- [ ] **Mixer**: channels 0+3 left, 1+2 right at 48 kHz (done, in
-      `audioLine()`), into a buffer core 1 reads. Emulation is not always real time
-      (RemGame runs at half speed), so the buffer needs a policy for
-      under/overrun (resample, or drop/repeat samples).
-- [ ] **HDMI audio over HSTX** (the SDK only does DVI):
-      - Data islands in horizontal blanking: preamble, guard bands, TERC4
-        symbols with BCH ECC, sent as raw 10-bit HSTX symbols in each line's
-        command list (the driver already sends raw control symbols there).
-        640×480p60 has 160 and 720×576p50 144 blanking pixels; a data
-        island with one or two packets takes roughly 50-90 pixel times.
-      - Packets: audio samples (up to 4 stereo samples each; ~1.5 per line
-        at 48 kHz on the NTSC line rate), Audio Clock Regeneration (N/CTS
-        for the 25.2 MHz / 27 MHz pixel clocks), and once per frame the AVI
-        and Audio InfoFrames (also switch the sink from DVI to HDMI mode).
-      - Encoding on core 1 (30-50 % idle; the PicoDVI community encodes
-        HDMI audio in software on the RP2040).
-      - Start with a test tone and record it with the HDMI capture card,
-        then connect the mixer. DVI-only monitors ignore the audio.
+- [x] **Mixer and output stage (2026-10-04):** 48 kHz stereo, box-filtered,
+      A500 low-pass (~4.9 kHz) and LED filter (~3.3 kHz Butterworth).
+- [x] **HDMI audio over HSTX (2026-10-04)**, `OMEGA_HDMI_AUDIO` (NTSC
+      default ON): data islands per line (audio sample + ACR/InfoFrames),
+      video preamble/guard, table-driven encoding in the DMA interrupt.
+      Scanout became four DMA channels (blanking + active per line; two lost
+      sync) with row expansion in a lower-priority software interrupt (a
+      slow HAM row delayed re-arming by up to 338 µs). Slow emulation:
+      tried holding the last sample (buzz), stretching by resampling (pitch
+      drops), fading gaps (choppy); kept WSOLA time-stretching on core 1,
+      bit-exact bypass within 2 % of real time. Verified by ear on a
+      monitor (the capture card records HDMI audio as silence).
+- [ ] **HDMI audio on PAL**: ~17 KB of SRAM short (the 64 KB core-1 ring, the
+      hot opcode list or PAL's 320 KB frames would have to give).
 - [ ] Fallbacks: PWM on a spare GPIO (RC filter), or an I2S DAC (PCM5102)
       via PIO.
 

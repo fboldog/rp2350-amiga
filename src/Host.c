@@ -7,6 +7,12 @@
 
 #include "Host.h"
 #include "HostRing.h"
+#if OMEGA_HDMI_AUDIO
+#include "hdmi_audio.h"
+#define AUDIO_SERVICE() hdmi_audio_service()
+#else
+#define AUDIO_SERVICE() ((void)0)
+#endif
 #if OMEGA_ENABLE_USB_HOST
 #include "usb_input.h"
 #endif
@@ -578,7 +584,7 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     // the emulator never stalls. A finished frame is never discarded.
     while (dvi_display_frame_pending() &&
            ringFill(ring_head, ring_tail) < OMEGA_RING_SKIP_WORDS)
-        tight_loop_contents();
+        AUDIO_SERVICE();
     // hostCaptureHold (set over SWD) freezes the displayed frame so it can
     // be dumped consistently; emulation keeps running.
     c1_image = dvi_display_frame_pending() || hostCaptureHold
@@ -630,9 +636,16 @@ void C1_FUNC(hostCore1Loop)(void) {
     uint32_t tail = ring_tail;
     for (;;) {
         uint32_t head;
-        while ((head = __atomic_load_n(&ring_head, __ATOMIC_ACQUIRE)) == tail)
+        while ((head = __atomic_load_n(&ring_head, __ATOMIC_ACQUIRE)) == tail) {
+            AUDIO_SERVICE();   // HDMI audio stretching between messages
             __wfe();
+        }
+        unsigned since_audio = 0;
         while (tail != head) {
+            if (++since_audio == 32u) {   // keep the audio output ring fed
+                since_audio = 0;
+                AUDIO_SERVICE();
+            }
             // Messages are read in place; only one that may wrap around
             // the end of the ring is first copied out (MSG_MAX_WORDS: the
             // longest).
@@ -759,11 +772,14 @@ void releaseKey(uint16_t keyCode) {
 
 int hostResetRequested;
 
-// Paula's 48 kHz stereo output (omega/Audio.c). Not played yet: HDMI audio
-// is the next step (TODO.md, Phase 5).
+// Paula's 48 kHz stereo output (omega/Audio.c), sent over HDMI.
 void hostAudioOut(const int16_t *samples, int frames) {
+#if OMEGA_HDMI_AUDIO
+    hdmi_audio_put(samples, frames);
+#else
     (void)samples;
     (void)frames;
+#endif
 }
 
 // Sends one Amiga raw keycode (0x00-0x67) to the keyboard serial port, as

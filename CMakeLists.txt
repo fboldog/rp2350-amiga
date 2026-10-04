@@ -59,6 +59,22 @@ set(CMAKE_CXX_STANDARD 17)
 set(OMEGA_VIDEO_MODE "NTSC" CACHE STRING "Amiga video standard: NTSC or PAL")
 set_property(CACHE OMEGA_VIDEO_MODE PROPERTY STRINGS NTSC PAL)
 string(TOUPPER "${OMEGA_VIDEO_MODE}" OMEGA_VIDEO_MODE)
+# HDMI audio (Paula output over HDMI data islands, time-stretched to real
+# time). Default ON for NTSC; PAL's larger scanout frames leave no SRAM for
+# it yet (~17 KB short), so it defaults OFF there and cannot be enabled.
+# OFF: plain DVI output; Paula is still emulated (its interrupts) but not
+# mixed.
+if(OMEGA_VIDEO_MODE STREQUAL "PAL")
+    set(_omega_hdmi_audio_default OFF)
+else()
+    set(_omega_hdmi_audio_default ON)
+endif()
+option(OMEGA_HDMI_AUDIO
+       "Send audio over HDMI (data islands in the HSTX blanking; HDMI builds)"
+       ${_omega_hdmi_audio_default})
+if(OMEGA_HDMI_AUDIO AND OMEGA_VIDEO_MODE STREQUAL "PAL")
+    message(FATAL_ERROR "OMEGA_HDMI_AUDIO does not fit in SRAM with PAL frames yet (~17 KB short); configure with -DOMEGA_HDMI_AUDIO=OFF")
+endif()
 if(OMEGA_VIDEO_MODE STREQUAL "NTSC")
     set(OMEGA_VIDEO_STANDARD_VALUE 0)
 elseif(OMEGA_VIDEO_MODE STREQUAL "PAL")
@@ -125,6 +141,12 @@ target_include_directories(omega-amiga PRIVATE
 )
 
 # ── Compile definitions ────────────────────────────────────────────────────
+set(OMEGA_HDMI_AUDIO_ACTIVE OFF)
+if(OMEGA_ENABLE_HDMI AND OMEGA_HDMI_AUDIO)
+    set(OMEGA_HDMI_AUDIO_ACTIVE ON)
+    target_sources(omega-amiga PRIVATE src/hdmi_island.c src/hdmi_audio.c)
+endif()
+
 # USB host is only built with HDMI (which sets up the clocks for it).
 set(OMEGA_USB_HOST_ACTIVE OFF)
 if(OMEGA_ENABLE_HDMI AND OMEGA_ENABLE_USB_HOST)
@@ -150,6 +172,8 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_CPU_SLICE_SLOTS=${OMEGA_CPU_SLICE_SLOTS}
     $<$<NOT:$<BOOL:${OMEGA_SLOT_SKIP}>>:OMEGA_NO_SLOT_SKIP=1>
     OMEGA_ENABLE_USB_HOST=$<BOOL:${OMEGA_USB_HOST_ACTIVE}>
+    OMEGA_HDMI_AUDIO=$<BOOL:${OMEGA_HDMI_AUDIO_ACTIVE}>
+    OMEGA_AUDIO_OUTPUT=$<BOOL:${OMEGA_HDMI_AUDIO_ACTIVE}>
     OMEGA_HOT_OPCODES_IN_RAM=$<BOOL:${OMEGA_HOT_OPCODES_IN_RAM}>
     # Nothing on the device mallocs; keep the SDK's minimum heap so the SRAM
     # goes to the frames and the core-1 ring.
