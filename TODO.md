@@ -182,6 +182,13 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
+- [x] **LORES rows by beam position (2026-10-05)**: every row's first
+      fetched pixel sat at image column 0, so LORES 0x3C rows (below
+      Workbench's HIRES 0x3C screen) were 16 columns left of where the
+      hardware shows them, and the pointer split there. Full-width LORES
+      rows now start at their beam position (column 0 = lores pixel
+      0x81) and sprites on them use that origin. ATK's colour bars (LORES
+      0x3C) moved 16 columns right with it.
 - [x] **Colour edges (2026-10-05)**: a row's right border (and undrawn
       columns right of its runs) shows COLOR00 as the runs end, not as the
       row began (ATK's colour bars had a white right border); colour

@@ -560,9 +560,13 @@ which broke the line stride of narrower and wider ones). A fetch that
 starts earlier (overscan: the Amiga Test Kit's crosshatch uses DDFSTRT
 0x20, 24 words) runs on a per-line copy of the table with the fetch
 pattern extended back over the sprite slots, which it takes from sprite
-DMA as on OCS. Its first words land left of image column 0, so the
-standard 320-pixel area keeps its place (and sprites their offset); the
-overscan beyond the 640-column image is cut at its edges.
+DMA as on OCS. Full-width LORES rows are placed by beam position: image
+column 0 is lores pixel 0x81, where both HIRES 0x3C and LORES 0x38 start.
+An early fetch starts left of column 0 (the overscan beyond the
+640-column image is cut at its edges), LORES 0x3C 16 columns right of
+0x38, and sprites on LORES rows use that same origin, so a sprite keeps
+its place across rows of either resolution (Workbench's HIRES screen
+ends in LORES 0x3C lines; the pointer used to jump 16 columns there).
 
 ## Sprites
 

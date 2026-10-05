@@ -935,8 +935,13 @@ static void dmaUpdateLineState(void) {
     {
         const int hires = (chipset.bplcon0 & 0x8000) != 0;
         slotTableUpdate(hires);
-        lineRasterDdf = !hires && chipset.ddfstrt < 0x38 ? 0x38
-                                                         : chipset.ddfstrt;
+        // Full-width LORES rows are placed by beam position (raster
+        // column 0 at lores pixel 0x81, where HIRES 0x3C and LORES 0x38
+        // start), so sprites keep their place across rows of either
+        // resolution: Workbench's hires screen ends in LORES 0x3C lines,
+        // where the pointer was drawn 16 columns left.
+        lineRasterDdf = !hires && omegaDdfIsFullWidth(chipset.ddfstrt)
+                      ? 0x38 : chipset.ddfstrt;
     }
     // Disabled planes' slots may be skipped (see slotIsActive()); clear their
     // data latches here, as those slots would.
@@ -1604,14 +1609,16 @@ static inline void loresPlane1Fetch(void){
     if(host.pixels == NULL){
         return;
     }
-    // An early fetch (DDFSTRT < 0x38) starts left of raster column 0; any
-    // other window starts at column 0 (0x3C too: its first fetch group is
-    // the one at 0x38).
-    const int raster_x0 = chipset.ddfstrt < 0x38
-                        ? ((chipset.ddfstrt & ~7) - 0x38) * 4 : 0;
+    // A full-width LORES row's first word sits at its beam position:
+    // DDFSTRT 0x3C starts 16 columns right of 0x38, an early fetch left of
+    // column 0 (from its 8-slot group).
+    const int raster_x0 =
+        !omegaDdfIsFullWidth(chipset.ddfstrt) ? 0 :
+        chipset.ddfstrt < 0x38 ? ((chipset.ddfstrt & ~7) - 0x38) * 4
+                               : (chipset.ddfstrt - 0x38) * 4;
     if (bitplaneLine.loresWords++ == 0 && hostDirectActive) {
         host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
-        host.rasterX = raster_x0 < 0 ? raster_x0 : 0;
+        host.rasterX = raster_x0;
         loresRowsFromDiw = 1;   // rows are beam lines: no first-line skip
     } else if (bitplaneLine.loresWords == 1) {
         int full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
@@ -1630,7 +1637,7 @@ static inline void loresPlane1Fetch(void){
         int display_line = internal.vPos - raster_origin;
         host.rasterRow =
             alternate_rows ? display_line * 2 : display_line;
-        host.rasterX = raster_x0 < 0 ? raster_x0 : 0;
+        host.rasterX = raster_x0;
         loresRowsFromDiw = full_width && !alternate_rows;
     }
     chipset.bpl1dat = 0;
