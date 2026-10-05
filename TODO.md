@@ -191,9 +191,18 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       ~1 %). Hot opcode list regenerated from 5 sessions (WB boot,
       xSysinfo, RemGame, D-Mob, Agony): 75 handlers cover 7.0 % of core 0
       against 4.4 % for the old 100, in ~3 KB less SRAM.
-- [ ] Interpolators (per-core SIO) for scan_indexed() and planar-to-chunky
-      on core 1; the FPU and the double coprocessor have nothing to
-      accelerate here (audio filters already use the FPU).
+- [x] **Evaluated, not worth it (2026-10-05)**:
+      - Interpolators: the M33 already does each lookup in one bit-field
+        extract plus a scaled load (scan_indexed, planar-to-chunky), and
+        core 1 is no longer the bottleneck (frames shown = emulated).
+      - FPU / double coprocessor: no floating point in the hot paths; the
+        audio filters already use the FPU.
+      - DMA sniffer CRC for the row hash: the plane words never pass
+        through DMA; the inline hash costs ~1 %. (Its CRC16 mode fits SD
+        card block reads: use it for SD/HDF.)
+      - DMA prefetch of bitplane data into SRAM: reading bitplanes from
+        SRAM instead of PSRAM made RemGame (unlimited, PAL) 24.8 -> 25.0
+        frames/s, so cache misses on bitplanes cost <1 %.
 - [x] **Interlace and fine scroll (2026-10-05)**: LOF toggles with LACE
       (fields 313/312, 263/262 lines; VPOSR bit 15; VPOSW sets it); HDMI
       weaves the two fields (one buffer each, per-line expansion, third
