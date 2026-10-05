@@ -214,7 +214,9 @@ static inline uint32_t argbToOcs(uint32_t argb) {
 
 // Out of line, like the other rare paths, so the per-block producers stay
 // small (no large stack frame or register saves on every block).
-static void __attribute__((noinline)) hostDirectSendPalette(void) {
+// Sends the whole palette; register `except` (if >= 0) as `colour`.
+static void __attribute__((noinline)) hostDirectSendPaletteWith(
+    int except, uint16_t colour) {
     host_run.palette_sent = internal.paletteGeneration;
     runFlush(); // the blocks before the change use the old palette
     uint32_t msg[17];
@@ -222,7 +224,16 @@ static void __attribute__((noinline)) hostDirectSendPalette(void) {
     for (int i = 0; i < 16; ++i)
         msg[1 + i] = argbToOcs(internal.palette[2 * i]) |
                      argbToOcs(internal.palette[2 * i + 1]) << 16;
+    if (except >= 0) {
+        uint32_t *pair = &msg[1 + except / 2];
+        const int shift = (except & 1) ? 16 : 0;
+        *pair = (*pair & ~(0xffffu << shift)) | (uint32_t)colour << shift;
+    }
     ringPush(msg, count_of(msg));
+}
+
+static void hostDirectSendPalette(void) {
+    hostDirectSendPaletteWith(-1, 0);
 }
 
 static inline void hostDirectSyncPalette(void) {
@@ -267,19 +278,21 @@ static void hostDirectBegin(void) {
 // Copper changes COLOR00 every 22 colour clocks, which block boundaries
 // rounded to 64 or 96 columns). Earlier changes not sent yet (between
 // frames) go as the full palette first.
-void hostDirectColour(int reg, uint16_t value) {
-    // A change before this row's blocks so far (most Copper changes, made
-    // in the horizontal blank) is exact with the palette sync before the
-    // next block, as before; only one inside them needs its position.
-    // (A message per change cost RemGame ~3 %.)
+void hostDirectColour(int reg, uint16_t old, uint16_t value) {
+    // A change left of the image (most Copper changes, made in the
+    // horizontal blank) or right of it is exact with the palette sync
+    // before the next block or row end, as before; only one inside the
+    // image's columns needs its position: inside drawn blocks, or in the
+    // border (ATK's colour bars run through the border lines too). A
+    // message per change cost RemGame ~3 %.
     const int row = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
     int x = dmaBeamColumn();
-    if (row != host.rasterRow || x >= host.rasterX)
+    if (row < 0 || row >= OMEGA_DIRECT_ROWS || x <= 0 || x >= HOST_RASTER_W)
         return;
-    if (host_run.palette_sent != internal.paletteGeneration - 2u) {
-        hostDirectSendPalette();
-        return;
-    }
+    // Earlier changes still pending go first, with this register as it
+    // was before this change.
+    if (host_run.palette_sent != internal.paletteGeneration - 2u)
+        hostDirectSendPaletteWith(reg, old);
     host_run.palette_sent = internal.paletteGeneration;
     runFlush();
     x = x < 0 ? 0 : x > 0x3ff ? 0x3ff : x;
@@ -690,8 +703,11 @@ static inline int C1_FUNC(c1ImageX)(int x) {
 }
 
 // Colour register `reg` changed at raster column x of row `row`: log it,
-// and the open row's runs drawn before the change show it from x on (a run
-// that spans x is split there).
+// and the row shows it from x on. Runs drawn before the change that reach
+// x take the new colour from there (a run spanning x is split). If x is
+// right of the row's runs, or the row has none yet (a border line), the
+// undrawn rest of the row becomes a run of colour 0 (COLOR00) first, so
+// Copper colour changes show in the border too (ATK's colour bars).
 static void C1_FUNC(c1Colour)(int row, int x, int reg, uint16_t value) {
     if (value == c1_palette[reg])
         return;
@@ -699,15 +715,37 @@ static void C1_FUNC(c1Colour)(int row, int x, int reg, uint16_t value) {
     dvi_indexed_frame_t *rec = c1_record;
     if (!c1_image || rec->log_used >= DVI_MAX_PALETTE_LOG)
         return;
-    rec->palette_log[rec->log_used++] = (uint32_t)reg << 12 | value;
-    const uint32_t pos = rec->log_used;
-    if (row % c1_step ||
-        c1_first_row + row / c1_step != c1_open_row || c1_open_row < 0)
-        return;
+    const int y = row % c1_step ? -1 : c1_first_row + row / c1_step;
+    const bool on_row = y >= 0 && y < c1_height && y >= c1_open_row;
     int c = c1ImageX(x);
     if (c < 0)
         c = 0;
     uint32_t used = rec->segments_used;
+    if (on_row && c < DVI_DIRECT_IMAGE_WIDTH) {
+        uint32_t start = 0;
+        if (y == c1_open_row) {
+            for (uint32_t i = rec->row_segment[y]; i < used; ++i)
+                if (DVI_SEGMENT_X1(rec->segment[i]) > start)
+                    start = DVI_SEGMENT_X1(rec->segment[i]);
+        } else {
+            while (c1_open_row < y)
+                rec->row_segment[++c1_open_row] = (uint16_t)used;
+        }
+        if ((uint32_t)c >= start && start < DVI_DIRECT_IMAGE_WIDTH &&
+            used < DVI_MAX_SEGMENTS) {
+            uint8_t *line = c1_image + y * DVI_DIRECT_IMAGE_WIDTH;
+            for (uint32_t i = start; i < DVI_DIRECT_IMAGE_WIDTH; ++i)
+                line[i] = 0;
+            rec->segment[used++] =
+                DVI_SEGMENT(start, DVI_DIRECT_IMAGE_WIDTH, rec->log_used, 0);
+        }
+    }
+    rec->palette_log[rec->log_used++] = (uint32_t)reg << 12 | value;
+    const uint32_t pos = rec->log_used;
+    if (!on_row || y != c1_open_row) {
+        rec->segments_used = (uint16_t)used;
+        return;
+    }
     for (uint32_t i = rec->row_segment[c1_open_row]; i < used; ++i) {
         const uint32_t seg = rec->segment[i];
         const uint32_t x0 = DVI_SEGMENT_X0(seg), x1 = DVI_SEGMENT_X1(seg);

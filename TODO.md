@@ -182,6 +182,16 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
+- [x] **Colour edges (2026-10-05)**: a row's right border (and undrawn
+      columns right of its runs) shows COLOR00 as the runs end, not as the
+      row began (ATK's colour bars had a white right border); colour
+      writes take effect one colour clock before the bitplane pixel
+      reference (ATK's RGB screen: its Copper lines now meet the frame).
+      Copper colour changes in border lines and right of a row's runs show
+      too: core 1 turns the undrawn rest of the row into a colour-0 run
+      and splits it (ATK's colour bars run the full height, as in
+      atk-vertical-color-bars-pal.png). A change waiting for the batched
+      sync goes first, with the register's old value.
 - [x] **Colour changes at their pixel (2026-10-04)**: ATK's colour bars (F6,
       F4, F6) change COLOR00 every 22 colour clocks; changes took effect
       at the next 16/32-column block (bars 64/96 wide), plus the Copper ran

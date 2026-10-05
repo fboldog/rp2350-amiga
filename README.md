@@ -277,7 +277,10 @@ sent for its row (the Copper changing COLOR00 every 22 colour clocks in
 ATK's colour bars) goes as its own message with its beam column
 (`dmaBeamColumn()`, the reference sprites use), and core 1 splits the
 row's runs there, so colour edges land on their pixel instead of the next
-16 or 32-column block; a row's undrawn columns
+16 or 32-column block. In a border line, or right of a row's runs, the
+undrawn rest of the row first becomes a run of colour 0, so Copper colour
+changes show there too (ATK's colour bars run through the border lines).
+A row's right border shows COLOR00 as its runs end; a row's undrawn columns
 and the PAL side borders show that row's COLOR00. A row without any
 bitplane data (a border line) shows COLOR00 as its line ended: core 0
 sends a row-end message (`MSG_ROW_END`) for such a row when the palette

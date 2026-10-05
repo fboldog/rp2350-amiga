@@ -769,7 +769,10 @@ int dmaBeamColumn(void) {
     const int first = 2 * lineRasterDdf +
                       (hires ? OMEGA_SPRITE_HIRES_OFFSET
                              : OMEGA_SPRITE_LORES_OFFSET);
-    return 2 * (2 * internal.hPos - first);
+    // A colour register write shows one colour clock (4 columns) before
+    // the bitplane pixel reference: ATK's RGB palette screen, whose Copper
+    // lines must meet its bitplane frame, left a 4-column gap otherwise.
+    return 2 * (2 * internal.hPos - first) - 4;
 }
 
 static void slotTableUpdate(int hires) {

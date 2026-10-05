@@ -871,12 +871,13 @@ static void __attribute__((noinline)) COLOUR_FUNC(setColour)(unsigned n,
                                                              uint16_t value){
     _Static_assert(offsetof(Chipset_t, color31) - offsetof(Chipset_t, color00) ==
                    31 * sizeof(uint16_t), "colour registers not contiguous");
+    const uint16_t old = (&chipset.color00)[n];
     (&chipset.color00)[n] = value; //old register
     internal.palette[n] = OCS2ARGB(value); internal.palette332[n] = omegaRGB332(internal.palette[n]); internal.paletteGeneration++;
     internal.palette[n + 32] = EHB2ARGB(value); internal.palette332[n + 32] = omegaRGB332(internal.palette[n + 32]); internal.paletteGeneration++;
     // HDMI: the change takes effect at its beam position, mid-line too.
     if (hostDirectActive)
-        hostDirectColour((int)n, value);
+        hostDirectColour((int)n, old, value);
 }
 #define COLOUR(nn) \
     void COLOUR_FUNC(color##nn)(uint16_t value){ setColour(1##nn - 100, value); }

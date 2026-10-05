@@ -32,7 +32,7 @@ for y in range(H):
         continue
     apply((segs[f]>>18)&0x1fff); border=pal[0]
     mn=min((s&0x1ff)<<1 for s in segs[f:l]); mx=max(((s>>9)&0x1ff)<<1 for s in segs[f:l])
-    for x in list(range(0,mn))+list(range(mx,640)): px[x,y]=border
+    for x in range(0,mn): px[x,y]=border
     hold=border
     for s in segs[f:l]:
         apply((s>>18)&0x1fff); x0,x1,ham=(s&0x1ff)<<1,((s>>9)&0x1ff)<<1,s>>31
@@ -47,5 +47,6 @@ for y in range(H):
                 else: hold=(hold[0],v,hold[2])
                 px[x,y]=hold
             else: px[x,y]=pal[c&63]
+    for x in range(mx,640): px[x,y]=pal[0]  # right of the runs: COLOR00 as they end
 print(f'buffer {b}: segments {used}, log {logn}, sprite pixels {sprites}')
 img.resize((640,H*2)).save(out+'.png')

@@ -484,13 +484,17 @@ static uint32_t SCAN_FUNC(scan_ham)(uint32_t *out, const uint8_t *row,
     return hold;
 }
 
-// Expands image row y of `frame` into out[0..640); returns the row's
-// border colour.
+// COLOR00 at the end of the last expanded row's runs: its right border.
+static uint32_t scan_right_border;
+
+// Expands image row y of `frame` into out[0..640); returns the row's left
+// border colour (COLOR00 as it began) and sets scan_right_border.
 static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
     const uint8_t *row = dvi_image_row(source_frames[frame], y);
     if (!frame_indexed[frame]) {
         for (uint x = 0; x < AMIGA_SOURCE_WIDTH; ++x)
             out[x] = rgb332_rgb888[row[x]];
+        scan_right_border = frame_border[frame];
         return frame_border[frame];
     }
     const dvi_indexed_frame_t *rec = &frame_records[frame];
@@ -508,6 +512,7 @@ static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
             scan_apply_log(rec, pos);
             scan_fill(out, 0, AMIGA_SOURCE_WIDTH, scan_palette[0]);
         }
+        scan_right_border = scan_palette[0];
         return scan_palette[0];
     }
     // Columns outside the drawn runs show COLOR00 as the row began.
@@ -520,7 +525,6 @@ static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
         if (DVI_SEGMENT_X1(seg) > max) max = DVI_SEGMENT_X1(seg);
     }
     scan_fill(out, 0, min, border);
-    scan_fill(out, max, AMIGA_SOURCE_WIDTH, border);
     // Runs in drawing order, so the palette log only moves forward; HAM
     // holds its colour across runs, starting from COLOR00.
     uint32_t hold = border;
@@ -533,6 +537,10 @@ static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
         else
             scan_indexed(out, row, DVI_SEGMENT_X0(seg), DVI_SEGMENT_X1(seg));
     }
+    // Right of the runs: COLOR00 as they end (ATK's colour bars end black
+    // after starting white; the start colour showed a white right border).
+    scan_right_border = scan_palette[0];
+    scan_fill(out, max, AMIGA_SOURCE_WIDTH, scan_right_border);
     return border;
 }
 
@@ -801,7 +809,7 @@ static void __not_in_flash_func(hstx_expand_irq)(void) {
                                                 out + IMAGE_LINE_PIXELS);
         if (DVI_IMAGE_X0) {
             out[IMAGE_LINE_LEFT + 1] = border;
-            out[IMAGE_LINE_RIGHT + 1] = border;
+            out[IMAGE_LINE_RIGHT + 1] = scan_right_border;
         }
     }
 }
