@@ -182,6 +182,18 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
+- [x] **Unchanged rows not redrawn (2026-10-05)**: line transactions on
+      core 0 (publish at line end), per-row hash mixed where blocks are
+      made, MSG_ROW_SAME when unchanged since the oldest frame both
+      buffers hold; core 1 copies the row's runs from the buffer's last
+      record (two records per buffer). NTSC xSysinfo 60/49 -> 60/60, PAL
+      D-Mob 36.9 shown; PAL xSysinfo 49.5 (core 0 at its limit, hashing
+      ~1 %). Hot opcode list regenerated from 5 sessions (WB boot,
+      xSysinfo, RemGame, D-Mob, Agony): 75 handlers cover 7.0 % of core 0
+      against 4.4 % for the old 100, in ~3 KB less SRAM.
+- [ ] Interpolators (per-core SIO) for scan_indexed() and planar-to-chunky
+      on core 1; the FPU and the double coprocessor have nothing to
+      accelerate here (audio filters already use the FPU).
 - [x] **Interlace and fine scroll (2026-10-05)**: LOF toggles with LACE
       (fields 313/312, 263/262 lines; VPOSR bit 15; VPOSW sets it); HDMI
       weaves the two fields (one buffer each, per-line expansion, third

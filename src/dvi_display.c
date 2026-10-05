@@ -96,14 +96,25 @@ static bool frame_indexed[2];
                                               BOARD_MAP_DVI_RECORDS_OFFSET))
 _Static_assert(4u * sizeof(dvi_indexed_frame_t) <= BOARD_MAP_DVI_RECORDS_SIZE,
                "frame records overrun their PSRAM area");
-// Record each frame buffer is shown with (scanout, set at line 0):
-// progressive frames use records 0 and 1; an interlaced field f
-// alternates between records f and f + 2, so core 1 writes the next
-// field's record while the scanout still replays the last one. (Sharing
-// one record, rows core 1 had not reached yet pointed at runs it was
-// overwriting: a black line ran down the screen behind its drawing.)
+// Each frame buffer b alternates between records b and b + 2: core 1
+// writes one while the other keeps the buffer's last finished frame, which
+// the scanout replays (interlace: a field is drawn while shown; with one
+// record, rows core 1 had not reached yet pointed at runs it was
+// overwriting and a black line ran down the screen) and which core 1 copies
+// unchanged rows from (MSG_ROW_SAME). buf_rec: the buffer's last finished
+// record; frame_rec: the record the scanout uses, taken at line 0.
 volatile uint8_t frame_rec[2] = { 0, 1 };
-static volatile uint8_t field_rec_ready[2] = { 0, 1 };
+static volatile uint8_t buf_rec[2] = { 0, 1 };
+static int rec_target;   // record being written
+
+// Picks the record buffer b's next frame is written into; *prev is its
+// last finished one.
+static inline dvi_indexed_frame_t *__not_in_flash_func(dvi_next_record)(
+    int b, dvi_indexed_frame_t **prev) {
+    *prev = &frame_records[buf_rec[b]];
+    rec_target = buf_rec[b] == b ? b + 2 : b;
+    return &frame_records[rec_target];
+}
 // Frame handshake, one atomic word: bit 0 is the displayed buffer, bit 1 set
 // means the other buffer holds a finished frame waiting for the next DVI
 // frame boundary (the scanout interrupt swaps at line 0). A finished frame
@@ -216,18 +227,15 @@ static volatile bool weave_wanted, weave_active, weave_new_field;
 static volatile uint32_t weave_ready;
 static volatile int weave_last;
 static int field_target = -1;
-static int field_rec_target;
 
 uint8_t *__not_in_flash_func(dvi_display_field_acquire)(
-    int field, dvi_indexed_frame_t **record) {
+    int field, dvi_indexed_frame_t **record, dvi_indexed_frame_t **prev) {
     if (boot_pattern_showing())
         return NULL;
     weave_wanted = true;
     field_target = field;
     source_frame_has_emulator[field] = true;
-    // The record the scanout is not replaying for this field.
-    field_rec_target = field_rec_ready[field] == field ? field + 2 : field;
-    *record = &frame_records[field_rec_target];
+    *record = dvi_next_record(field, prev);
     return source_frames[field];
 }
 
@@ -236,7 +244,7 @@ void __not_in_flash_func(dvi_display_field_publish)(uint16_t border) {
         return;
     frame_indexed[field_target] = true;
     frame_border[field_target] = ocs_rgb888(border);
-    field_rec_ready[field_target] = (uint8_t)field_rec_target;
+    buf_rec[field_target] = (uint8_t)rec_target;
     weave_last = field_target;
     weave_ready |= 1u << field_target;
     weave_new_field = true;
@@ -261,12 +269,13 @@ int __not_in_flash_func(dvi_display_direct_height)(void) {
 }
 
 uint8_t *__not_in_flash_func(dvi_display_direct_acquire)(
-    dvi_indexed_frame_t **record) {
+    dvi_indexed_frame_t **record, dvi_indexed_frame_t **prev, int *buffer) {
     if (boot_pattern_showing())
         return NULL;
     direct_target = dvi_claim_back_buffer();
     source_frame_has_emulator[direct_target] = true;
-    *record = &frame_records[direct_target];
+    *record = dvi_next_record(direct_target, prev);
+    *buffer = direct_target;
     return source_frames[direct_target];
 }
 
@@ -275,6 +284,7 @@ void __not_in_flash_func(dvi_display_direct_publish)(uint16_t border) {
         return;
     frame_indexed[direct_target] = true;
     frame_border[direct_target] = ocs_rgb888(border);
+    buf_rec[direct_target] = (uint8_t)rec_target;
     dvi_publish_frame(direct_target);
     direct_target = -1;
 }
@@ -787,8 +797,8 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
                 dvi_frames_shown++;
             }
             border_active[BORDER_LINE_COLOUR_WORD] = frame_border[weave_last];
-            frame_rec[0] = field_rec_ready[0];
-            frame_rec[1] = field_rec_ready[1];
+            frame_rec[0] = buf_rec[0];
+            frame_rec[1] = buf_rec[1];
             scan_begin_frame(0);
             scan_begin_frame(1);
             goto line0_done;
@@ -797,10 +807,7 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
             // Back to progressive frames: show the last field until the
             // next frame is published.
             weave_active = false;
-            frame_rec[0] = 0;
-            frame_rec[1] = 1;
-            field_rec_ready[0] = 0;
-            field_rec_ready[1] = 1;
+
             hstx_active_frame = (int)(__atomic_load_n(&frame_state,
                                                        __ATOMIC_ACQUIRE) & 1u);
         }
@@ -814,6 +821,7 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
             dvi_frames_shown++;
         }
         border_active[BORDER_LINE_COLOUR_WORD] = frame_border[hstx_active_frame];
+        frame_rec[hstx_active_frame] = buf_rec[hstx_active_frame];
         scan_begin_frame(hstx_active_frame);
     }
 line0_done:;

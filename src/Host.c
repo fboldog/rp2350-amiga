@@ -109,8 +109,19 @@ int hostDirectActive;             // mirrors direct_frame for DMA.c
 #define OMEGA_RING_SKIP_WORDS (RING_WORDS - MSG_MAX_WORDS)
 #endif
 static uint32_t ring[RING_WORDS];
-static volatile uint32_t ring_head; // produce position (core 0)
+static volatile uint32_t ring_head; // published position (core 0)
 static volatile uint32_t ring_tail; // consume position (core 1)
+// Core 0's write position. A line's messages are published (ring_head
+// moves up to it) at the end of the line, so an unchanged image row can
+// still be taken back and replaced by MSG_ROW_SAME (hostDirectRowEnd()).
+static uint32_t ring_wr;
+
+static inline void ringPublish(void) {
+    if (ring_head != ring_wr) {
+        __atomic_store_n(&ring_head, ring_wr, __ATOMIC_RELEASE);
+        __sev(); // wake core 1 from __wfe()
+    }
+}
 
 static inline uint32_t ringAdvance(uint32_t pos, uint32_t words) {
     pos += words;
@@ -127,16 +138,21 @@ static inline uint32_t ringSlot(uint32_t pos) {
 }
 
 // The run being collected on core 0 (host_run, see HostRing.h). It is
-// written straight into the ring past ring_head and published by advancing
-// ring_head (runFlush()), so core 1 never sees it early; only a run that
+// written straight into the ring past ring_wr and published with its line
+// (ringPublish()), so core 1 never sees it early; only a run that
 // could reach the end of the ring is collected in run_stage and copied in
 // (core 1 copies such a message out).
 static uint32_t run_stage[MSG_MAX_WORDS];
+// The open line (hostDirectRowEnd()): where its messages start, whether it
+// sent blocks, and whether colours changed in it (such a row is never
+// replaced: its runs carry the colour positions).
+static uint32_t row_start;
+static bool row_has_blocks, row_colours_changed;
 HostRun host_run = { run_stage, 0, 0, ~0u };
 
 // ── Core 0: producer ──────────────────────────────────────────────────────
 static inline void ringPush(const uint32_t *words, uint32_t count) {
-    uint32_t head = ring_head;
+    uint32_t head = ring_wr;
     // Wait for room: core 1 converts faster than the emulator fetches, so
     // this only waits after a burst.
     while (ringFill(head, __atomic_load_n(&ring_tail, __ATOMIC_ACQUIRE)) +
@@ -153,8 +169,7 @@ static inline void ringPush(const uint32_t *words, uint32_t count) {
                 slot = 0;
         }
     }
-    __atomic_store_n(&ring_head, ringAdvance(head, count), __ATOMIC_RELEASE);
-    __sev(); // wake core 1 from __wfe()
+    ring_wr = ringAdvance(head, count);
 }
 
 static void __attribute__((noinline)) runPushStaged(void) {
@@ -167,9 +182,7 @@ static inline void runFlush(void) {
     if (host_run.msg == run_stage) {
         runPushStaged();
     } else {
-        __atomic_store_n(&ring_head, ringAdvance(ring_head, host_run.words),
-                         __ATOMIC_RELEASE);
-        __sev(); // wake core 1 from __wfe()
+        ring_wr = ringAdvance(ring_wr, host_run.words);
     }
     host_run.words = 0;
 }
@@ -177,7 +190,9 @@ static inline void runFlush(void) {
 // Starts a run with this header where it will be published.
 static void __attribute__((noinline)) runStart(uint32_t header) {
     // Room for the longest run, as ringPush() would wait for it.
-    const uint32_t head = ring_head;
+    row_has_blocks = true;
+    host_row_hash = hostMix(host_row_hash, header);
+    const uint32_t head = ring_wr;
     while (ringFill(head, __atomic_load_n(&ring_tail, __ATOMIC_ACQUIRE)) +
            MSG_MAX_WORDS > RING_WORDS)
         tight_loop_contents();
@@ -218,6 +233,7 @@ static inline uint32_t argbToOcs(uint32_t argb) {
 static void __attribute__((noinline)) hostDirectSendPaletteWith(
     int except, uint16_t colour) {
     host_run.palette_sent = internal.paletteGeneration;
+    row_colours_changed = true;
     runFlush(); // the blocks before the change use the old palette
     uint32_t msg[17];
     msg[0] = MSG_HEADER(MSG_PALETTE, 0, 0, 0);
@@ -245,8 +261,20 @@ static inline void hostDirectSyncPalette(void) {
 // in between with that message's position: nothing changed there).
 static uint32_t row_end_generation;
 
+// Unchanged rows (static screens: idle Workbench, xSysinfo) are not sent
+// again: core 1 copies them from the buffer's last frame. Per image row,
+// the hash of its messages and the frame it last changed in; in
+// SCRATCH_Y (core 0's stack bank: its stack peaks at ~1 KB of 4 KB).
+static uint32_t __scratch_y("row_hash") row_hash[DIRECT_MAX_ROWS];
+static uint32_t __scratch_y("row_hash") row_since[DIRECT_MAX_ROWS];
+static uint32_t row_layout[2];
+static uint32_t direct_frame_no;
+// Oldest frame either scanout buffer holds (core 1, 0: unknown).
+static volatile uint32_t c1_oldest_frame;
+
 static void hostDirectBegin(void) {
     runFlush();
+    ringPublish();
     const bool full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
     // Narrow layouts that need hostPresentFrame()'s wrapped-fetch
     // reconstruction (pixels moved between lines) keep the ARGB path.
@@ -267,13 +295,23 @@ static void hostDirectBegin(void) {
         height = DIRECT_MAX_ROWS;
     // Interlace (BPLCON0 LACE): which field this frame is (LOF: long).
     const uint32_t lace = (chipset.bplcon0 & 0x4) != 0;
-    const uint32_t msg[3] = {
+    const uint32_t msg[4] = {
         MSG_HEADER(MSG_BEGIN, 0, 0, 0),
         (uint16_t)first_row | (uint32_t)step << 16 | (uint32_t)narrow << 24 |
             lace << 25 | (uint32_t)(internal.LOF & 1u) << 26,
         (uint32_t)rotation | (uint32_t)height << 16,
+        ++direct_frame_no,
     };
+    // A new layout maps rows differently: nothing is unchanged.
+    if (msg[1] != row_layout[0] || msg[2] != row_layout[1]) {
+        row_layout[0] = msg[1];
+        row_layout[1] = msg[2];
+        for (int r = 0; r < DIRECT_MAX_ROWS; ++r)
+            row_since[r] = direct_frame_no;
+    }
     ringPush(msg, count_of(msg));
+    ringPublish();
+    row_start = ring_wr;
 }
 
 // A colour change goes to core 1 with its beam row and raster column, so it
@@ -297,6 +335,7 @@ void hostDirectColour(int reg, uint16_t old, uint16_t value) {
     if (host_run.palette_sent != internal.paletteGeneration - 2u)
         hostDirectSendPaletteWith(reg, old);
     host_run.palette_sent = internal.paletteGeneration;
+    row_colours_changed = true;
     runFlush();
     x = x < 0 ? 0 : x > 0x3ff ? 0x3ff : x;
     const uint32_t msg[2] = { MSG_HEADER(MSG_COLOUR, row, x, reg), value };
@@ -306,8 +345,34 @@ void hostDirectColour(int reg, uint16_t old, uint16_t value) {
 // Only rows without blocks need their own colour position (rows with
 // blocks take their border from their first run), and only when the
 // palette changed since the last message: RemGame sends none, ATK four.
+uint32_t host_row_hash = 0x811c9dc5u;
+
 void hostDirectRowEnd(int row, int drawn) {
-    if (drawn || internal.paletteGeneration == row_end_generation)
+    runFlush();
+    if (row >= 0 && row < DIRECT_MAX_ROWS && row_has_blocks) {
+        const uint32_t h = row_colours_changed ? 0u : host_row_hash | 1u;
+        if (h && h == row_hash[row]) {
+            // Unchanged since row_since[row]: if every buffer core 1 may
+            // draw into holds that frame or a later one, it already has the
+            // row; take its messages back and let core 1 copy the row.
+            const uint32_t oldest =
+                __atomic_load_n(&c1_oldest_frame, __ATOMIC_ACQUIRE);
+            if (oldest && (int32_t)(oldest - row_since[row]) >= 0) {
+                ring_wr = row_start;
+                runStart(MSG_HEADER(MSG_ROW_SAME, row, 0, 0)); // one word
+                runFlush();
+            }
+        } else {
+            row_hash[row] = h;
+            row_since[row] = direct_frame_no;
+        }
+    }
+    row_has_blocks = false;
+    row_colours_changed = false;
+    host_row_hash = 0x811c9dc5u;
+    ringPublish();
+    row_start = ring_wr;
+    if (row < 0 || drawn || internal.paletteGeneration == row_end_generation)
         return;
     row_end_generation = internal.paletteGeneration;
     hostDirectSyncPalette();
@@ -322,6 +387,7 @@ void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
     uint32_t *planes = runAppend(MSG_HEADER(MSG_HIRES, row, 0, 0), x, 16, 2);
     planes[0] = p1 | (uint32_t)p2 << 16;
     planes[1] = p3 | (uint32_t)p4 << 16;
+    hostRowMix2(planes[0], planes[1]);
 }
 
 void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
@@ -332,6 +398,7 @@ void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
     planes[0] = p1 | (uint32_t)p2 << 16;
     planes[1] = p3 | (uint32_t)p4 << 16;
     planes[2] = p5 | (uint32_t)p6 << 16;
+    hostRowMix3(planes[0], planes[1], planes[2]);
 }
 
 void hostDirectSprite(int row, int x, int colour_base, int attached,
@@ -349,6 +416,7 @@ void hostDirectSprite(int row, int x, int colour_base, int attached,
         a | (uint32_t)b << 16,
         c | (uint32_t)d << 16,
     };
+    hostRowMix3(msg[0], msg[1], attached ? msg[2] : 0u);
     ringPush(msg, attached ? 3u : 2u);
 }
 
@@ -360,6 +428,7 @@ static void hostDirectFinish(void) {
         argbToOcs(internal.palette[0]),
     };
     ringPush(msg, count_of(msg));
+    ringPublish();
     static bool first_frame_queued;
     if (!first_frame_queued) {
         first_frame_queued = true;
@@ -378,6 +447,10 @@ static int c1_rotation;            // DDF row rotation in raster columns
 static bool c1_narrow;             // narrow fetch layout
 static int c1_height;              // image rows
 static int c1_field;               // interlace field buffer, or -1
+static int c1_buffer;              // scanout buffer being drawn
+static uint32_t c1_frame_no;       // core 0's frame number
+static dvi_indexed_frame_t *c1_prev_record; // the buffer's last frame
+static uint32_t c1_buf_frame[2];   // frame each buffer holds (0: none)
 static int c1_mark_row;            // last row with a row-end message
 static uint16_t c1_mark_pos;       // its palette-log position
 // Core 1's loops must not become libc memset/memcpy calls (flash code).
@@ -612,7 +685,9 @@ static void C1_FUNC(c1Lores)(int row, int x, uint32_t p12,
     c1Place(row, x, pixels, 32);
 }
 
-static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
+static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size,
+                             uint32_t frame_no) {
+    c1_frame_no = frame_no;
     c1_first_row = (int16_t)(layout & 0xffffu);
     c1_step = (int)((layout >> 16) & 0xffu);
     c1_narrow = (layout >> 24) & 1u;
@@ -626,7 +701,9 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
         // Interlace: draw the field over its own buffer, no swap to wait
         // for (scanout weaves both buffers).
         c1_image = hostCaptureHold ? NULL
-                 : dvi_display_field_acquire(c1_field, &c1_record);
+                 : dvi_display_field_acquire(c1_field, &c1_record,
+                                             &c1_prev_record);
+        c1_buffer = c1_field;
     } else {
         dvi_display_weave_stop();
         // The previous frame may still wait for the next DVI frame boundary
@@ -640,7 +717,8 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
         // be dumped consistently; emulation keeps running.
         c1_image = dvi_display_frame_pending() || hostCaptureHold
                  ? NULL
-                 : dvi_display_direct_acquire(&c1_record); // NULL: boot pattern
+                 : dvi_display_direct_acquire(&c1_record, &c1_prev_record,
+                                              &c1_buffer); // NULL: boot pattern
     }
     if (!c1_image)
         return;
@@ -653,6 +731,37 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     c1_open_row = -1;
     c1_mark_row = -1;
     c1_mark_pos = 0;
+}
+
+// Image row `row` is unchanged since a frame this buffer holds: its pixels
+// are in place; take its runs from the buffer's last record, at the current
+// colour-log position (the palette may have changed since).
+static void C1_FUNC(c1RowSame)(int row) {
+    if (!c1_image || row % c1_step)
+        return;
+    const int y = c1_first_row + row / c1_step;
+    if (y < c1_open_row || y >= c1_height)
+        return;
+    dvi_indexed_frame_t *rec = c1_record;
+    const dvi_indexed_frame_t *old = c1_prev_record;
+    uint32_t used = rec->segments_used;
+    while (c1_open_row < y)
+        rec->row_segment[++c1_open_row] = (uint16_t)used;
+    uint32_t first = old->row_segment[y], last = old->row_segment[y + 1];
+    if (last > old->segments_used)
+        last = old->segments_used;
+    const uint32_t pos = rec->log_used;
+    for (uint32_t i = first; i < last; ++i) {
+        if (used == DVI_MAX_SEGMENTS) {
+            rec->segment_overflow = true;
+            break;
+        }
+        const uint32_t seg = old->segment[i];
+        rec->segment[used++] = DVI_SEGMENT(DVI_SEGMENT_X0(seg),
+                                           DVI_SEGMENT_X1(seg), pos,
+                                           DVI_SEGMENT_HAM(seg));
+    }
+    rec->segments_used = (uint16_t)used;
 }
 
 // Image row `row` has ended: a row without drawn runs shows the colours
@@ -685,6 +794,13 @@ static void C1_FUNC(c1End)(uint16_t border) {
         dvi_display_field_publish(border);
     else
         dvi_display_direct_publish(border);
+    // Core 0 leaves out a row unchanged since the oldest frame either
+    // buffer holds.
+    c1_buf_frame[c1_buffer] = c1_frame_no;
+    const uint32_t a = c1_buf_frame[0], b = c1_buf_frame[1];
+    __atomic_store_n(&c1_oldest_frame,
+                     !a || !b ? 0u : (int32_t)(a - b) < 0 ? a : b,
+                     __ATOMIC_RELEASE);
     c1_image = NULL;
 }
 
@@ -848,8 +964,12 @@ void C1_FUNC(hostCore1Loop)(void) {
                 length = 2;
                 break;
             case MSG_BEGIN:
-                c1Begin(msg[1], msg[2]);
-                length = 3;
+                c1Begin(msg[1], msg[2], msg[3]);
+                length = 4;
+                break;
+            case MSG_ROW_SAME:
+                c1RowSame(row);
+                length = 1;
                 break;
             case MSG_SPRITE:
                 c1Sprite(row, x - SPRITE_X_BIAS, header >> 23, msg[1], msg[2]);

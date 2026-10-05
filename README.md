@@ -570,6 +570,25 @@ ends in LORES 0x3C lines; the pointer used to jump 16 columns there). An early H
 rotated layout) is placed the same way against HIRES 0x3C, 4 columns a
 slot (Agony's interlaced intro fetches from 0x30).
 
+## Unchanged rows
+
+Core 1 used to convert every row of every frame, even on a still screen:
+an idle xSysinfo kept it ~80 % busy, and frames that missed the display
+swap by a fraction of a millisecond were skipped (NTSC: 49 of 60 shown).
+Now core 0 publishes a line's messages at the line's end (it writes ahead
+of `ring_head` at `ring_wr`) and hashes the row's blocks and sprites as it
+makes them. A row whose hash has not changed since a frame that both
+scanout buffers already hold (core 1 publishes the oldest,
+`c1_oldest_frame`) is taken back and replaced by a one-word
+`MSG_ROW_SAME`; core 1 copies that row's runs from the buffer's last
+record at the current colour-log position (each buffer alternates two
+records). A row with colour changes inside it is always sent; a new
+layout resets all rows. The per-row hashes and frame numbers (2 KB) are
+in SCRATCH_Y, below core 0's stack (which peaks at ~1 KB). Hashing costs
+core 0 ~1 %: NTSC xSysinfo 60/60 shown (was 49), PAL D-Mob 36.9 shown
+(was 33-35); PAL xSysinfo, at core 0's limit, emulates 49.5 instead of
+50.
+
 ## Interlace and fine scroll
 
 Interlaced screens (BPLCON0 LACE) alternate long and short fields: LOF

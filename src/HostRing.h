@@ -9,7 +9,7 @@
 #include "../omega/Chipset.h"
 
 enum {
-    MSG_BEGIN = 1,   // + 2 words: frame layout
+    MSG_BEGIN = 1,   // + 3 words: frame layout, frame number
     MSG_HIRES,       // + 2 words per block: planes 1..4
     MSG_LORES,       // + 3 words per block: planes 1..6; extra bit 0 = HAM
     MSG_PALETTE,     // + 16 words: 32 colours, 0x0RGB, two per word
@@ -17,6 +17,7 @@ enum {
     MSG_SPRITE,      // + 1-2 words: sprite planes; extra = base | att | behind
     MSG_ROW_END,     // no words: image row `row` ends (its border colour)
     MSG_COLOUR,      // + 1 word: 0x0RGB; extra = register, x = raster column
+    MSG_ROW_SAME,    // no words: image row `row` is unchanged (copy it)
 };
 #define MSG_HEADER(type, row, x, extra) \
     ((uint32_t)(type) | (uint32_t)(row) << 4 | (uint32_t)(x) << 13 | \
@@ -42,6 +43,23 @@ typedef struct {
     uint32_t palette_sent;
 } HostRun;
 extern HostRun host_run;
+
+// Hash of the open line's blocks and sprites (Host.c hostDirectRowEnd():
+// an unchanged image row is not sent again). Mixed in where each block is
+// made, from values already in registers: re-reading the line's messages
+// from the ring cost xSysinfo ~4 % of core 0.
+// A run's header (type, row, start x, HAM) is mixed in when the run starts
+// (Host.c runStart()); each block adds its plane words.
+extern uint32_t host_row_hash;
+static inline uint32_t hostMix(uint32_t h, uint32_t w) {
+    return (h ^ w) * 0x01000193u;
+}
+static inline void hostRowMix2(uint32_t a, uint32_t b) {
+    host_row_hash = hostMix(hostMix(host_row_hash, a), b);
+}
+static inline void hostRowMix3(uint32_t a, uint32_t b, uint32_t c) {
+    host_row_hash = hostMix(hostMix(hostMix(host_row_hash, a), b), c);
+}
 
 void hostDirectHires(int row, int x, uint16_t p1, uint16_t p2,
                      uint16_t p3, uint16_t p4);
@@ -78,6 +96,7 @@ static inline void hostDirectHiresFast(int row, int x, uint16_t p1,
     }
     planes[0] = p1 | (uint32_t)p2 << 16;
     planes[1] = p3 | (uint32_t)p4 << 16;
+    hostRowMix2(planes[0], planes[1]);
 }
 
 static inline void hostDirectLoresFast(int row, int x, uint16_t p1,
@@ -92,6 +111,7 @@ static inline void hostDirectLoresFast(int row, int x, uint16_t p1,
     planes[0] = p1 | (uint32_t)p2 << 16;
     planes[1] = p3 | (uint32_t)p4 << 16;
     planes[2] = p5 | (uint32_t)p6 << 16;
+    hostRowMix3(planes[0], planes[1], planes[2]);
 }
 
 #endif

@@ -141,15 +141,15 @@ if(OMEGA_ENABLE_HDMI AND OMEGA_HDMI_AUDIO)
     target_sources(omega-amiga PRIVATE src/hdmi_island.c src/hdmi_audio.c)
 endif()
 # Core-1 message ring (32-bit words): the SRAM the frames and the rest leave.
-# PAL frames are larger, so PAL with HDMI audio gets 42 KB instead of ~62 KB
+# PAL frames are larger, so PAL with HDMI audio gets 41 KB instead of 61 KB
 # (all that fits).
 set(OMEGA_RING_WORDS "" CACHE STRING "Core-1 ring size in words (empty: automatic)")
 if(OMEGA_RING_WORDS)
     set(OMEGA_RING_WORDS_VALUE ${OMEGA_RING_WORDS})
 elseif(OMEGA_HDMI_AUDIO_ACTIVE AND OMEGA_VIDEO_MODE STREQUAL "PAL")
-    set(OMEGA_RING_WORDS_VALUE 10752)
+    set(OMEGA_RING_WORDS_VALUE 10496)
 else()
-    set(OMEGA_RING_WORDS_VALUE 15808)
+    set(OMEGA_RING_WORDS_VALUE 15616)
 endif()
 
 # USB host is only built with HDMI (which sets up the clocks for it).

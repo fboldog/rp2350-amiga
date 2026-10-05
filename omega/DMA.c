@@ -983,11 +983,12 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
 
     audioLine(lineLast + 1);
     if (hostDirectActive) {
-        // Border colour of this image row: COLOR00 as the line ends.
+        // The line's messages go out (or are replaced if its image row is
+        // unchanged); a row without blocks gets its border colour.
         const int row = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
-        if (row >= 0 && row < OMEGA_DIRECT_ROWS)
-            hostDirectRowEnd(row, (bitplaneLine.loresWords |
-                                   bitplaneLine.hiresWords) != 0);
+        hostDirectRowEnd(row >= 0 && row < OMEGA_DIRECT_ROWS ? row : -1,
+                         (bitplaneLine.loresWords |
+                          bitplaneLine.hiresWords) != 0);
     }
     dmaIdleCacheValid = 0;   // the Copper's comparisons depend on the line
     internal.hPos = 0;

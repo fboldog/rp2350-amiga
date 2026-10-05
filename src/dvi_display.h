@@ -73,14 +73,18 @@ bool dvi_display_frame_pending(void);
 // Claims the back buffer and returns its 640-pixel-stride image and its
 // segment/palette record, or NULL while the boot pattern is still shown.
 // Call only when no frame is pending. Called on core 1.
-uint8_t *dvi_display_direct_acquire(dvi_indexed_frame_t **record);
+// *prev: the buffer's last finished record (its rows can be copied when
+// unchanged); *buffer: the buffer (0 or 1).
+uint8_t *dvi_display_direct_acquire(dvi_indexed_frame_t **record,
+                                    dvi_indexed_frame_t **prev, int *buffer);
 // Queues the acquired frame; `border` is COLOR00 (0x0RGB) at frame end.
 void dvi_display_direct_publish(uint16_t border);
 // Interlaced frames: `field` 0 (short frame) or 1 (long) is drawn straight
 // into its own buffer, and scanout weaves the two once both exist (NULL
 // while the boot pattern shows). Publish ends the field;
 // dvi_display_weave_stop() returns to double-buffered progressive frames.
-uint8_t *dvi_display_field_acquire(int field, dvi_indexed_frame_t **record);
+uint8_t *dvi_display_field_acquire(int field, dvi_indexed_frame_t **record,
+                                   dvi_indexed_frame_t **prev);
 void dvi_display_field_publish(uint16_t border);
 void dvi_display_weave_stop(void);
 

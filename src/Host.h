@@ -91,9 +91,10 @@ void hostDirectLores(int row, int x, uint16_t p1, uint16_t p2, uint16_t p3,
 // current beam position: pixels from that position on show it, even
 // within a block already drawn or in the border.
 void hostDirectColour(int reg, uint16_t old, uint16_t value);
-// End of image row `row` (`drawn`: it had bitplane blocks): a row without
-// blocks shows COLOR00 as it is now (Copper colour changes outside the
-// display window).
+// End of a line (`row`: its image row, or -1 outside the image; `drawn`:
+// it had bitplane blocks): its messages go to core 1, or MSG_ROW_SAME if
+// the row is unchanged, and a row without blocks shows COLOR00 as it is
+// now (Copper colour changes outside the display window).
 void hostDirectRowEnd(int row, int drawn);
 #else
 static inline void hostDirectColour(int reg, uint16_t old, uint16_t value) {
