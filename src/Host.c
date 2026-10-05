@@ -265,9 +265,12 @@ static void hostDirectBegin(void) {
     int height = dvi_display_direct_height();
     if (height > DIRECT_MAX_ROWS)
         height = DIRECT_MAX_ROWS;
+    // Interlace (BPLCON0 LACE): which field this frame is (LOF: long).
+    const uint32_t lace = (chipset.bplcon0 & 0x4) != 0;
     const uint32_t msg[3] = {
         MSG_HEADER(MSG_BEGIN, 0, 0, 0),
-        (uint16_t)first_row | (uint32_t)step << 16 | (uint32_t)narrow << 24,
+        (uint16_t)first_row | (uint32_t)step << 16 | (uint32_t)narrow << 24 |
+            lace << 25 | (uint32_t)(internal.LOF & 1u) << 26,
         (uint32_t)rotation | (uint32_t)height << 16,
     };
     ringPush(msg, count_of(msg));
@@ -374,6 +377,7 @@ static int c1_step;                // raster rows per image row
 static int c1_rotation;            // DDF row rotation in raster columns
 static bool c1_narrow;             // narrow fetch layout
 static int c1_height;              // image rows
+static int c1_field;               // interlace field buffer, or -1
 static int c1_mark_row;            // last row with a row-end message
 static uint16_t c1_mark_pos;       // its palette-log position
 // Core 1's loops must not become libc memset/memcpy calls (flash code).
@@ -549,7 +553,9 @@ static void C1_FUNC(c1Place)(int row, int x,
     if (first > width)
         first = width;
     c1Copy(line, pixels, y, image_x, first);
-    if (first < width) // the block wraps around the rotated row
+    // The block wraps around a rotated row; elsewhere it is clipped at the
+    // right edge (fine scroll pushes the last block past it).
+    if (first < width && c1_rotation)
         c1Copy(line, pixels + first, y, 0, width - first);
 }
 
@@ -612,18 +618,30 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size) {
     c1_narrow = (layout >> 24) & 1u;
     c1_rotation = (int)(size & 0xffffu);
     c1_height = (int)(size >> 16);
-    // The previous frame may still wait for the next DVI frame boundary
-    // (at most one display frame). Wait for the swap while core 0 keeps
-    // queueing; if the ring gets close to full first, skip this frame so
-    // the emulator never stalls. A finished frame is never discarded.
-    while (dvi_display_frame_pending() &&
-           ringFill(ring_head, ring_tail) < OMEGA_RING_SKIP_WORDS)
-        AUDIO_SERVICE();
-    // hostCaptureHold (set over SWD) freezes the displayed frame so it can
-    // be dumped consistently; emulation keeps running.
-    c1_image = dvi_display_frame_pending() || hostCaptureHold
-             ? NULL
-             : dvi_display_direct_acquire(&c1_record); // NULL: boot pattern
+    // Field buffer: 0 for the short field (even output lines), 1 for the
+    // long one (odd lines). The other way round, diagonal strokes in
+    // Agony's interlaced intro zigzagged by a pixel.
+    c1_field = (layout >> 25) & 1u ? (int)((layout >> 26) & 1u) : -1;
+    if (c1_field >= 0) {
+        // Interlace: draw the field over its own buffer, no swap to wait
+        // for (scanout weaves both buffers).
+        c1_image = hostCaptureHold ? NULL
+                 : dvi_display_field_acquire(c1_field, &c1_record);
+    } else {
+        dvi_display_weave_stop();
+        // The previous frame may still wait for the next DVI frame boundary
+        // (at most one display frame). Wait for the swap while core 0 keeps
+        // queueing; if the ring gets close to full first, skip this frame so
+        // the emulator never stalls. A finished frame is never discarded.
+        while (dvi_display_frame_pending() &&
+               ringFill(ring_head, ring_tail) < OMEGA_RING_SKIP_WORDS)
+            AUDIO_SERVICE();
+        // hostCaptureHold (set over SWD) freezes the displayed frame so it can
+        // be dumped consistently; emulation keeps running.
+        c1_image = dvi_display_frame_pending() || hostCaptureHold
+                 ? NULL
+                 : dvi_display_direct_acquire(&c1_record); // NULL: boot pattern
+    }
     if (!c1_image)
         return;
     dvi_indexed_frame_t *rec = c1_record;
@@ -663,7 +681,10 @@ static void C1_FUNC(c1End)(uint16_t border) {
         rec->row_segment[++c1_open_row] = rec->segments_used;
     while (++c1_mark_row < c1_height)
         rec->row_log[c1_mark_row] = c1_mark_pos;
-    dvi_display_direct_publish(border);
+    if (c1_field >= 0)
+        dvi_display_field_publish(border);
+    else
+        dvi_display_direct_publish(border);
     c1_image = NULL;
 }
 

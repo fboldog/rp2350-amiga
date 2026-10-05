@@ -63,8 +63,8 @@ the same memory). Offsets are defined in `src/board_config.h`
 | `0x11680000` | 1 MB | Presented framebuffer, 640×400 ARGB32 (same fallback path) | cached |
 | `0x11780000` | 32 KB | free | |
 | `0x11788000` | 128 KB | 68000 opcode table scratch: the flat handler index, built at boot and then compressed into SRAM | boot only |
-| `0x117A8000` | 128 KB | HDMI frame records: palette log and pixel runs of the two indexed frames (`dvi_indexed_frame_t` ×2) | cached |
-| `0x117C8000` | ~220 KB | free | |
+| `0x117A8000` | 144 KB | HDMI frame records: palette log and pixel runs of the two indexed frames (`dvi_indexed_frame_t` ×2) | cached |
+| `0x117CC000` | ~204 KB | free | |
 | `0x117FF000` | 12 bytes | DF0 disk rotation state (kept through resets, lost on power-off) | uncached |
 
 The HDMI scanout frames themselves are in internal SRAM, not PSRAM.
@@ -267,7 +267,7 @@ per frame (`dvi_indexed_frame_t`): the palette at frame begin, a log of every
 colour change (up to 4095), and for each row the runs of pixels it drew with
 the log position before them (up to 4096: the Amiga Test Kit's RGB palette
 test needs ~1,600). The records live in PSRAM at
-0x7A8000 (128 KB reserved), read and written through the XIP cache that both
+0x7A8000 (144 KB reserved: two more for interlaced fields), read and written through the XIP cache that both
 cores share, which keeps ~9.6 KB of SRAM free for the ring at ~1 % speed. Scanout replays the log in drawing
 order and expands each row to RGB888 with the 12-bit colours doubled to 8 bits
 (0xF → 0xFF), so Copper palette changes (the Kickstart 2.04 rainbow, border
@@ -566,7 +566,36 @@ An early fetch starts left of column 0 (the overscan beyond the
 640-column image is cut at its edges), LORES 0x3C 16 columns right of
 0x38, and sprites on LORES rows use that same origin, so a sprite keeps
 its place across rows of either resolution (Workbench's HIRES screen
-ends in LORES 0x3C lines; the pointer used to jump 16 columns there).
+ends in LORES 0x3C lines; the pointer used to jump 16 columns there). An early HIRES fetch (DDFSTRT below 0x38; 0x38 is the
+rotated layout) is placed the same way against HIRES 0x3C, 4 columns a
+slot (Agony's interlaced intro fetches from 0x30).
+
+## Interlace and fine scroll
+
+Interlaced screens (BPLCON0 LACE) alternate long and short fields: LOF
+(VPOSR bit 15) toggles every frame and the short field is one line
+shorter (312/262 lines); without LACE every frame is long. Programs read
+LOF to pick a field's bitplanes. On HDMI, core 1 draws each field into
+its own scanout buffer (short field: 0, long: 1) instead of
+double-buffering, and the scanout weaves them once both exist: even
+output lines come from the short field, odd lines from the long one
+(the other way round, diagonal strokes zigzagged). Every line is then
+expanded separately, from its own frame's palette state, into a third
+line buffer (line L uses buffer L % 3); this doubles the expansion work
+while interlace is on. Each field has two frame records (four in all,
+PSRAM 0x7A8000, 144 KB): core 1 writes one while the scanout replays the
+other, switched at line 0 (with one, rows core 1 had not reached yet
+pointed at runs it was overwriting, and a black line ran down the
+screen). A field drawn while shown can tear inside itself;
+still screens (Agony's intro) come out as the full 512-line picture.
+The third line buffer and the second palette state cost ~3 KB of SRAM,
+taken from the core-1 ring (PAL with HDMI audio: 40 KB; D-Mob shows
+33 instead of ~35.5 frames/s there).
+
+BPLCON1 fine scroll delays a row's bitplanes by PF1H lores pixels (2
+columns each, in LORES and HIRES) on HDMI; different PF2H values
+(dual-playfield parallax) are not split yet. A block pushed past the
+right edge is clipped there.
 
 ## Sprites
 

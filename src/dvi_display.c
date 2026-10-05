@@ -94,8 +94,16 @@ static bool frame_indexed[2];
 // sequentially, so scanout mostly hits the cache.
 #define frame_records ((dvi_indexed_frame_t *)(BOARD_PSRAM_BASE + \
                                               BOARD_MAP_DVI_RECORDS_OFFSET))
-_Static_assert(2u * sizeof(dvi_indexed_frame_t) <= BOARD_MAP_DVI_RECORDS_SIZE,
+_Static_assert(4u * sizeof(dvi_indexed_frame_t) <= BOARD_MAP_DVI_RECORDS_SIZE,
                "frame records overrun their PSRAM area");
+// Record each frame buffer is shown with (scanout, set at line 0):
+// progressive frames use records 0 and 1; an interlaced field f
+// alternates between records f and f + 2, so core 1 writes the next
+// field's record while the scanout still replays the last one. (Sharing
+// one record, rows core 1 had not reached yet pointed at runs it was
+// overwriting: a black line ran down the screen behind its drawing.)
+volatile uint8_t frame_rec[2] = { 0, 1 };
+static volatile uint8_t field_rec_ready[2] = { 0, 1 };
 // Frame handshake, one atomic word: bit 0 is the displayed buffer, bit 1 set
 // means the other buffer holds a finished frame waiting for the next DVI
 // frame boundary (the scanout interrupt swaps at line 0). A finished frame
@@ -200,6 +208,49 @@ static void __not_in_flash_func(dvi_publish_frame)(int target) {
 }
 
 static int direct_target = -1;
+
+// Interlaced frames (BPLCON0 LACE): core 1 draws each field into the
+// buffer of its parity (short field: 0, long: 1) and the scanout weaves
+// the two (see hstx_next_hblank()). weave_ready: fields drawn so far.
+static volatile bool weave_wanted, weave_active, weave_new_field;
+static volatile uint32_t weave_ready;
+static volatile int weave_last;
+static int field_target = -1;
+static int field_rec_target;
+
+uint8_t *__not_in_flash_func(dvi_display_field_acquire)(
+    int field, dvi_indexed_frame_t **record) {
+    if (boot_pattern_showing())
+        return NULL;
+    weave_wanted = true;
+    field_target = field;
+    source_frame_has_emulator[field] = true;
+    // The record the scanout is not replaying for this field.
+    field_rec_target = field_rec_ready[field] == field ? field + 2 : field;
+    *record = &frame_records[field_rec_target];
+    return source_frames[field];
+}
+
+void __not_in_flash_func(dvi_display_field_publish)(uint16_t border) {
+    if (field_target < 0)
+        return;
+    frame_indexed[field_target] = true;
+    frame_border[field_target] = ocs_rgb888(border);
+    field_rec_ready[field_target] = (uint8_t)field_rec_target;
+    weave_last = field_target;
+    weave_ready |= 1u << field_target;
+    weave_new_field = true;
+    field_target = -1;
+}
+
+void __not_in_flash_func(dvi_display_weave_stop)(void) {
+    if (!weave_wanted)
+        return;
+    weave_wanted = false;
+    weave_ready = 0;
+    // The last field is the displayed frame; the other buffer is free.
+    __atomic_store_n(&frame_state, (uint32_t)weave_last, __ATOMIC_RELEASE);
+}
 
 uint32_t dvi_display_bit_clock_khz(void) {
     return MODE_BIT_CLK_KHZ;
@@ -382,25 +433,35 @@ enum {
     IMAGE_LINE_RIGHT = IMAGE_LINE_PIXELS + IMAGE_PIXEL_WORDS,
     IMAGE_LINE_WORDS = IMAGE_LINE_RIGHT + 2,
 };
-static uint32_t image_lines[2][IMAGE_LINE_WORDS] __attribute__((aligned(4)));
+// Interlace weaving expands every line separately (even lines from one
+// field, odd ones from the other) and needs a third buffer: line L uses
+// buffer L % 3, which line L - 3 has finished with.
+#define IMAGE_LINE_BUFFERS 3u
+static uint32_t image_lines[IMAGE_LINE_BUFFERS][IMAGE_LINE_WORDS]
+    __attribute__((aligned(4)));
 
-// Scanout state of the displayed indexed frame: the palette after
-// scan_applied log entries, as RGB888 (32..63 extra half-brite).
-static uint32_t scan_palette[64];
-static uint32_t scan_applied;
+// Scanout state of each indexed frame: its palette after `applied` log
+// entries, as RGB888 (32..63 extra half-brite), and the HAM colour-load
+// table. One per frame buffer: weaving interlaced fields expands rows of
+// both frames alternately.
+typedef struct {
+    uint32_t palette[64];
+    uint32_t ham_set[64];
+    uint32_t applied;
+} scan_state_t;
+static scan_state_t scan_states[2];
 // Branchless HAM:
-//   next = (previous & scan_ham_keep[code >> 4]) | scan_ham_set[code].
+//   next = (previous & scan_ham_keep[code >> 4]) | ham_set[code].
 // Codes 0x00..0x0f load a colour register (keep nothing), 0x10/0x20/0x30
 // replace blue/red/green.
 static uint32_t scan_ham_keep[4] = { 0u, 0xffff00u, 0x00ffffu, 0xff00ffu };
-static uint32_t scan_ham_set[64];
 
 static void dvi_init_ham_tables(void) {
     static const uint8_t shift[4] = { 0, 0, 16, 8 };
-    for (uint code = 0; code < 64u; ++code) {
-        if (code >= 16u)
-            scan_ham_set[code] = (code & 0xfu) * 0x11u << shift[code >> 4];
-    }
+    for (uint f = 0; f < 2u; ++f)
+        for (uint code = 16u; code < 64u; ++code)
+            scan_states[f].ham_set[code] =
+                (code & 0xfu) * 0x11u << shift[code >> 4];
 }
 
 // Loops here must not become libc calls (flash code) inside the interrupt.
@@ -408,28 +469,31 @@ static void dvi_init_ham_tables(void) {
     __attribute__((optimize("no-tree-loop-distribute-patterns"))) \
     __not_in_flash_func(name)
 
-static inline void scan_set_register(uint32_t reg, uint32_t colour) {
+static inline void scan_set_register(scan_state_t *st, uint32_t reg,
+                                     uint32_t colour) {
     const uint32_t rgb = ocs_rgb888(colour);
-    scan_palette[reg] = rgb;
-    scan_palette[reg + 32u] = ocs_rgb888((colour >> 1) & 0x777u);
+    st->palette[reg] = rgb;
+    st->palette[reg + 32u] = ocs_rgb888((colour >> 1) & 0x777u);
     if (reg < 16u)
-        scan_ham_set[reg] = rgb;
+        st->ham_set[reg] = rgb;
 }
 
 static void SCAN_FUNC(scan_begin_frame)(int frame) {
     if (!frame_indexed[frame])
         return;
-    const dvi_indexed_frame_t *rec = &frame_records[frame];
+    scan_state_t *st = &scan_states[frame];
+    const dvi_indexed_frame_t *rec = &frame_records[frame_rec[frame]];
     for (uint32_t i = 0; i < 32u; ++i)
-        scan_set_register(i, rec->initial_palette[i]);
-    scan_applied = 0;
+        scan_set_register(st, i, rec->initial_palette[i]);
+    st->applied = 0;
 }
 
-static inline void scan_apply_log(const dvi_indexed_frame_t *rec,
+static inline void scan_apply_log(scan_state_t *st,
+                                  const dvi_indexed_frame_t *rec,
                                   uint32_t pos) {
-    while (scan_applied < pos) {
-        const uint32_t entry = rec->palette_log[scan_applied++];
-        scan_set_register(entry >> 12, entry & 0xfffu);
+    while (st->applied < pos) {
+        const uint32_t entry = rec->palette_log[st->applied++];
+        scan_set_register(st, entry >> 12, entry & 0xfffu);
     }
 }
 
@@ -439,9 +503,9 @@ static inline void scan_fill(uint32_t *out, uint32_t x0, uint32_t x1,
         out[x] = colour;
 }
 
-static void SCAN_FUNC(scan_indexed)(uint32_t *out, const uint8_t *row,
-                                    uint32_t x0, uint32_t x1) {
-    const uint32_t *palette = scan_palette;
+static void SCAN_FUNC(scan_indexed)(const uint32_t *palette, uint32_t *out,
+                                    const uint8_t *row, uint32_t x0,
+                                    uint32_t x1) {
     uint32_t x = x0;
     for (; x < x1 && (x & 3u); ++x)
         out[x] = palette[row[x] & 63u];
@@ -461,23 +525,25 @@ static void SCAN_FUNC(scan_indexed)(uint32_t *out, const uint8_t *row,
 // decode each pair once. Odd bounds fall back to single pixels. A sprite
 // pixel (0x40 | register) shows that colour register and leaves the held
 // colour alone, as on real hardware.
-static inline uint32_t scan_ham_pixel(uint32_t code, uint32_t *hold) {
+static inline uint32_t scan_ham_pixel(const scan_state_t *st, uint32_t code,
+                                      uint32_t *hold) {
     if (code & 0x40u)
-        return scan_palette[code & 0x1fu];
+        return st->palette[code & 0x1fu];
     code &= 63u;
-    *hold = (*hold & scan_ham_keep[code >> 4]) | scan_ham_set[code];
+    *hold = (*hold & scan_ham_keep[code >> 4]) | st->ham_set[code];
     return *hold;
 }
 
-static uint32_t SCAN_FUNC(scan_ham)(uint32_t *out, const uint8_t *row,
-                                    uint32_t x0, uint32_t x1, uint32_t hold) {
+static uint32_t SCAN_FUNC(scan_ham)(const scan_state_t *st, uint32_t *out,
+                                    const uint8_t *row, uint32_t x0,
+                                    uint32_t x1, uint32_t hold) {
     if ((x0 | x1) & 1u) {
         for (uint32_t x = x0; x < x1; ++x)
-            out[x] = scan_ham_pixel(row[x], &hold);
+            out[x] = scan_ham_pixel(st, row[x], &hold);
         return hold;
     }
     for (uint32_t x = x0; x < x1; x += 2u) {
-        const uint32_t pixel = scan_ham_pixel(row[x], &hold);
+        const uint32_t pixel = scan_ham_pixel(st, row[x], &hold);
         out[x] = pixel;
         out[x + 1u] = pixel;
     }
@@ -497,27 +563,28 @@ static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
         scan_right_border = frame_border[frame];
         return frame_border[frame];
     }
-    const dvi_indexed_frame_t *rec = &frame_records[frame];
+    scan_state_t *st = &scan_states[frame];
+    const dvi_indexed_frame_t *rec = &frame_records[frame_rec[frame]];
     const uint32_t first = rec->row_segment[y];
     const uint32_t last = rec->row_segment[y + 1u];
     if (first == last) {
         if (rec->segment_overflow && first == rec->segments_used) {
-            scan_indexed(out, row, 0, AMIGA_SOURCE_WIDTH);
+            scan_indexed(st->palette, out, row, 0, AMIGA_SOURCE_WIDTH);
         } else {
             // COLOR00 as the row's line ended (a stale position from an
             // earlier frame is clamped to this frame's log).
             uint32_t pos = rec->row_log[y];
             if (pos > rec->log_used)
                 pos = rec->log_used;
-            scan_apply_log(rec, pos);
-            scan_fill(out, 0, AMIGA_SOURCE_WIDTH, scan_palette[0]);
+            scan_apply_log(st, rec, pos);
+            scan_fill(out, 0, AMIGA_SOURCE_WIDTH, st->palette[0]);
         }
-        scan_right_border = scan_palette[0];
-        return scan_palette[0];
+        scan_right_border = st->palette[0];
+        return st->palette[0];
     }
     // Columns outside the drawn runs show COLOR00 as the row began.
-    scan_apply_log(rec, DVI_SEGMENT_POS(rec->segment[first]));
-    const uint32_t border = scan_palette[0];
+    scan_apply_log(st, rec, DVI_SEGMENT_POS(rec->segment[first]));
+    const uint32_t border = st->palette[0];
     uint32_t min = AMIGA_SOURCE_WIDTH, max = 0;
     for (uint32_t i = first; i < last; ++i) {
         const uint32_t seg = rec->segment[i];
@@ -530,16 +597,17 @@ static uint32_t SCAN_FUNC(scan_expand_row)(int frame, uint y, uint32_t *out) {
     uint32_t hold = border;
     for (uint32_t i = first; i < last; ++i) {
         const uint32_t seg = rec->segment[i];
-        scan_apply_log(rec, DVI_SEGMENT_POS(seg));
+        scan_apply_log(st, rec, DVI_SEGMENT_POS(seg));
         if (DVI_SEGMENT_HAM(seg))
-            hold = scan_ham(out, row, DVI_SEGMENT_X0(seg),
+            hold = scan_ham(st, out, row, DVI_SEGMENT_X0(seg),
                             DVI_SEGMENT_X1(seg), hold);
         else
-            scan_indexed(out, row, DVI_SEGMENT_X0(seg), DVI_SEGMENT_X1(seg));
+            scan_indexed(st->palette, out, row, DVI_SEGMENT_X0(seg),
+                         DVI_SEGMENT_X1(seg));
     }
     // Right of the runs: COLOR00 as they end (ATK's colour bars end black
     // after starting white; the start colour showed a white right border).
-    scan_right_border = scan_palette[0];
+    scan_right_border = st->palette[0];
     scan_fill(out, max, AMIGA_SOURCE_WIDTH, scan_right_border);
     return border;
 }
@@ -548,7 +616,7 @@ static uint hstx_dma[4];
 static int hstx_active_frame;
 
 static void hstx_init_line_buffers(void) {
-    for (uint i = 0; i < 2; ++i) {
+    for (uint i = 0; i < IMAGE_LINE_BUFFERS; ++i) {
         uint32_t *line = image_lines[i];
         // 640-wide modes have no side border: NOPs instead.
         const uint32_t border_cmd = DVI_IMAGE_X0
@@ -563,9 +631,10 @@ static void hstx_init_line_buffers(void) {
 
 // Channels: hstx_dma[0..1] blanking, [2..3] active, index = line parity.
 static uint hstx_hblank_line[2];   // line each blanking channel sends next
-// Row expansion request for the expansion interrupt (-1: none).
-static volatile int expand_y = -1;
-static volatile int expand_frame;
+// Row expansion requests for the expansion interrupt, per line buffer:
+// image row (-1: none) and the frame it comes from.
+static volatile int expand_y[IMAGE_LINE_BUFFERS] = { -1, -1, -1 };
+static volatile int expand_frame[IMAGE_LINE_BUFFERS];
 static uint expand_irq;
 static uint hstx_active_line[2];   // line each active channel sends next
 
@@ -708,6 +777,33 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
 
     if (line == 0u) {
         dvi_refreshes++;
+        // Interlace: once both fields are drawn, weave them (buffer 0, the
+        // short field, on even lines; buffer 1, the long one, on odd
+        // lines); core 1 draws each new field over its own buffer.
+        if (weave_wanted && weave_ready == 3u) {
+            weave_active = true;
+            if (weave_new_field) {
+                weave_new_field = false;
+                dvi_frames_shown++;
+            }
+            border_active[BORDER_LINE_COLOUR_WORD] = frame_border[weave_last];
+            frame_rec[0] = field_rec_ready[0];
+            frame_rec[1] = field_rec_ready[1];
+            scan_begin_frame(0);
+            scan_begin_frame(1);
+            goto line0_done;
+        }
+        if (weave_active) {
+            // Back to progressive frames: show the last field until the
+            // next frame is published.
+            weave_active = false;
+            frame_rec[0] = 0;
+            frame_rec[1] = 1;
+            field_rec_ready[0] = 0;
+            field_rec_ready[1] = 1;
+            hstx_active_frame = (int)(__atomic_load_n(&frame_state,
+                                                       __ATOMIC_ACQUIRE) & 1u);
+        }
         // Switch to the pending frame unless core 0 just took it back.
         uint32_t state = __atomic_load_n(&frame_state, __ATOMIC_ACQUIRE);
         if ((state & FRAME_PENDING) &&
@@ -720,6 +816,7 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
         border_active[BORDER_LINE_COLOUR_WORD] = frame_border[hstx_active_frame];
         scan_begin_frame(hstx_active_frame);
     }
+line0_done:;
 
     dma_channel_hw_t *ch = &dma_hw->ch[hstx_dma[p]];
     ch->read_addr = (uintptr_t)hblank_buf[p];
@@ -785,13 +882,22 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
 
     // The first line of each image row has it expanded, into the row
     // buffer that the previous row's two lines are not using, by the
-    // low-priority expansion interrupt.
-    if (line < MODE_V_ACTIVE_LINES && !(line & 1u)) {
+    // low-priority expansion interrupt. Weaving expands every line: the
+    // short field's row on even lines, the long field's on odd ones.
+    if (line < MODE_V_ACTIVE_LINES) {
         const uint image_y = line / 2u - DVI_IMAGE_Y0;
         if (image_y < AMIGA_SOURCE_HEIGHT) {
-            expand_frame = hstx_active_frame;
-            expand_y = (int)image_y;
-            irq_set_pending(expand_irq);
+            if (weave_active) {
+                const uint b = line % IMAGE_LINE_BUFFERS;
+                expand_frame[b] = (int)(line & 1u);
+                expand_y[b] = (int)image_y;
+                irq_set_pending(expand_irq);
+            } else if (!(line & 1u)) {
+                const uint b = image_y & 1u;
+                expand_frame[b] = hstx_active_frame;
+                expand_y[b] = (int)image_y;
+                irq_set_pending(expand_irq);
+            }
         }
     }
 }
@@ -801,15 +907,22 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
 // palette changes) can at worst arrive late and tear, never desynchronise
 // the four channels. It loops while the DMA interrupt queued another row.
 static void __not_in_flash_func(hstx_expand_irq)(void) {
-    int y;
-    while ((y = expand_y) >= 0) {
-        expand_y = -1;
-        uint32_t *out = image_lines[y & 1];
-        const uint32_t border = scan_expand_row(expand_frame, (uint)y,
-                                                out + IMAGE_LINE_PIXELS);
-        if (DVI_IMAGE_X0) {
-            out[IMAGE_LINE_LEFT + 1] = border;
-            out[IMAGE_LINE_RIGHT + 1] = scan_right_border;
+    bool again = true;
+    while (again) {
+        again = false;
+        for (uint b = 0; b < IMAGE_LINE_BUFFERS; ++b) {
+            const int y = expand_y[b];
+            if (y < 0)
+                continue;
+            expand_y[b] = -1;
+            again = true;
+            uint32_t *out = image_lines[b];
+            const uint32_t border = scan_expand_row(expand_frame[b], (uint)y,
+                                                    out + IMAGE_LINE_PIXELS);
+            if (DVI_IMAGE_X0) {
+                out[IMAGE_LINE_LEFT + 1] = border;
+                out[IMAGE_LINE_RIGHT + 1] = scan_right_border;
+            }
         }
     }
 }
@@ -823,7 +936,8 @@ static void __not_in_flash_func(hstx_next_active)(uint p) {
     if (line < MODE_V_ACTIVE_LINES) {
         const uint image_y = line / 2u - DVI_IMAGE_Y0;
         if (image_y < AMIGA_SOURCE_HEIGHT) {
-            list = image_lines[image_y & 1u];
+            list = weave_active ? image_lines[line % IMAGE_LINE_BUFFERS]
+                                : image_lines[image_y & 1u];
             count = IMAGE_LINE_WORDS;
         } else {
             list = border_active;

@@ -76,6 +76,13 @@ bool dvi_display_frame_pending(void);
 uint8_t *dvi_display_direct_acquire(dvi_indexed_frame_t **record);
 // Queues the acquired frame; `border` is COLOR00 (0x0RGB) at frame end.
 void dvi_display_direct_publish(uint16_t border);
+// Interlaced frames: `field` 0 (short frame) or 1 (long) is drawn straight
+// into its own buffer, and scanout weaves the two once both exist (NULL
+// while the boot pattern shows). Publish ends the field;
+// dvi_display_weave_stop() returns to double-buffered progressive frames.
+uint8_t *dvi_display_field_acquire(int field, dvi_indexed_frame_t **record);
+void dvi_display_field_publish(uint16_t border);
+void dvi_display_weave_stop(void);
 
 static inline uint8_t dvi_rgb332(uint32_t argb) {
     return (uint8_t)(((argb >> 16) & 0xe0u) |

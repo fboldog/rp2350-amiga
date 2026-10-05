@@ -182,6 +182,17 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       71,264); PAL frame rate and Paula pitch were 0.4 % off. Speed
       unchanged (one slot-skip table for both lengths: rebuilding it per
       NTSC line had cost a third). NTSC frames stay 263 lines.
+- [x] **Interlace and fine scroll (2026-10-05)**: LOF toggles with LACE
+      (fields 313/312, 263/262 lines; VPOSR bit 15; VPOSW sets it); HDMI
+      weaves the two fields (one buffer each, per-line expansion, third
+      line buffer, per-frame scanout palette state). Agony's interlaced
+      intro no longer vibrates. BPLCON1 PF1H fine scroll on HDMI. An early
+      HIRES fetch (DDFSTRT < 0x38) is placed by beam position (the intro,
+      fetched from 0x30, sat 48 columns right).
+      Open: PF2H different from PF1H (dual-playfield parallax); the
+      native runner has neither; PAL ring down to 40 KB (D-Mob shown
+      35.5 -> 33.3 frames/s; core 0's stack peaks at ~1 KB, too close to
+      give SCRATCH_Y's spare to the line buffer).
 - [x] **LORES rows by beam position (2026-10-05)**: every row's first
       fetched pixel sat at image column 0, so LORES 0x3C rows (below
       Workbench's HIRES 0x3C screen) were 16 columns left of where the

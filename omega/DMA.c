@@ -764,6 +764,14 @@ static int earlyTableKey = -1;
 // standard 320-pixel area keeps its columns and sprites their offset.
 static int lineRasterDdf = 0x38;
 
+// BPLCON1 fine scroll (HDMI direct frames): the playfield is delayed by
+// PF1H lores pixels, 2 image columns each in LORES and HIRES alike. Both
+// playfields use PF1H (different PF2H values, dual-playfield parallax, are
+// not split yet).
+static inline int bplScrollColumns(void) {
+    return 2 * (chipset.bplcon1 & 0xf);
+}
+
 int dmaBeamColumn(void) {
     const int hires = (chipset.bplcon0 & 0x8000) != 0;
     const int first = 2 * lineRasterDdf +
@@ -940,8 +948,11 @@ static void dmaUpdateLineState(void) {
         // start), so sprites keep their place across rows of either
         // resolution: Workbench's hires screen ends in LORES 0x3C lines,
         // where the pointer was drawn 16 columns left.
-        lineRasterDdf = !hires && omegaDdfIsFullWidth(chipset.ddfstrt)
-                      ? 0x38 : chipset.ddfstrt;
+        // An early HIRES fetch (DDFSTRT < 0x38; 0x38 itself is the
+        // rotated layout) is placed the same way, against HIRES 0x3C.
+        lineRasterDdf = !hires && omegaDdfIsFullWidth(chipset.ddfstrt) ? 0x38
+                      : hires && chipset.ddfstrt < 0x38 ? 0x3C
+                      : chipset.ddfstrt;
     }
     // Disabled planes' slots may be skipped (see slotIsActive()); clear their
     // data latches here, as those slots would.
@@ -991,8 +1002,13 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
     dmaLineStateDirty = 1;  // new line: masks cleared, vPos changed
 
     //VBL Time
-    if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES){
+    // Interlace (BPLCON0 LACE): fields alternate between long frames (LOF
+    // set: 313 lines PAL, 263 NTSC) and short ones (one line fewer), and
+    // programs read LOF from VPOSR to pick the field's bitplanes. Without
+    // LACE every frame is long.
+    if(internal.vPos >= OMEGA_VIDEO_FRAME_LINES - (internal.LOF ? 0 : 1)){
         internal.vPos = 0;
+        internal.LOF = (chipset.bplcon0 & 0x4) ? !internal.LOF : 1;
         copperWaitPosition = 0;
         spriteFrameStart();
 
@@ -1056,7 +1072,8 @@ void dma_run(int slots){
     while (slots-- > 0) {
         // VPOSR only changes with the line.
         if (internal.hPos == 0)
-            chipset.vposr = OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
+            chipset.vposr = (uint16_t)(internal.LOF << 15) |
+                            OMEGA_VIDEO_VPOSR_ID | (internal.vPos >> 8);
         if (dmaLineStateDirty)
             dmaUpdateLineState();
 
@@ -1618,7 +1635,7 @@ static inline void loresPlane1Fetch(void){
                                : (chipset.ddfstrt - 0x38) * 4;
     if (bitplaneLine.loresWords++ == 0 && hostDirectActive) {
         host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
-        host.rasterX = raster_x0;
+        host.rasterX = raster_x0 + bplScrollColumns();
         loresRowsFromDiw = 1;   // rows are beam lines: no first-line skip
     } else if (bitplaneLine.loresWords == 1) {
         int full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
@@ -1656,8 +1673,11 @@ static inline void loresPlane1Fetch(void){
         freeCycle();
         return;
     }
+    // HDMI clips a block at the right edge (core 1); the ARGB raster takes
+    // whole blocks only.
     if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
-        host.rasterX < 0 || host.rasterX + 31 >= HOST_RASTER_W) {
+        host.rasterX < 0 || host.rasterX >= HOST_RASTER_W ||
+        (!hostDirectActive && host.rasterX + 31 >= HOST_RASTER_W)) {
         host.rasterX += 32;   // words outside the image keep their place
         return;
     }
@@ -1772,8 +1792,12 @@ static inline void hiresPlane1Fetch(void){
     // that upper overscan so all 200 useful rows fit in the host framebuffer.
     if (hostDirectActive) {
         if (bitplaneLine.hiresWords == 1) {
+            // An early fetch (Agony's intro: DDFSTRT 0x30) starts left of
+            // column 0 by its beam distance from 0x3C, 4 columns a slot.
             host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
-            host.rasterX = 0;
+            host.rasterX = (chipset.ddfstrt < 0x38
+                            ? ((chipset.ddfstrt & ~3) - 0x3C) * 4 : 0) +
+                           bplScrollColumns();
         }
     } else if (lineFullWidth) {
         int display_line = internal.vPos - lineHiresDisplayTop;
@@ -1793,8 +1817,11 @@ static inline void hiresPlane1Fetch(void){
         return;
     }
     if (host.rasterRow < 0 || host.rasterRow >= HOST_RASTER_H ||
-        host.rasterX < 0 || host.rasterX + 15 >= HOST_RASTER_W)
+        host.rasterX < 0 || host.rasterX >= HOST_RASTER_W ||
+        (!hostDirectActive && host.rasterX + 15 >= HOST_RASTER_W)) {
+        host.rasterX += 16;   // words outside the image keep their place
         return;
+    }
 
     int raster_row = host.rasterRow;
     int row_rotation = lineRowRotation;

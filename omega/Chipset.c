@@ -48,7 +48,7 @@ int planeMask[]={
 
 void ChipsetInit(){
     
-    internal.LOF = 0;
+    internal.LOF = 1;   // long frames unless interlaced
     internal.chipramW = (uint16_t*)CHIPRAM_BASE_PTR;
     chipset.deniseid = 15; //set DeniseID to OCS
     chipset.dmaconr = 0;
@@ -109,7 +109,7 @@ void dskpthL(uint32_t value){   //
 }
 
 void vposwL(uint32_t value){    //
-    internal.LOF = value >> 16;
+    internal.LOF = (value >> 31) & 1;   // VPOSW bit 15
 }
 
 void bltafwmL(uint32_t value){  //
@@ -330,7 +330,7 @@ void dskdat(uint16_t value){
 }
 
 void vposw(uint16_t value){
-    internal.LOF = value;
+    internal.LOF = (value >> 15) & 1;
 }
 
 void vhposw(uint16_t value){
