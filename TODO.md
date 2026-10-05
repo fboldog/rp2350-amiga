@@ -220,7 +220,10 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       0.18's host driver panics on a USB data sequence error (seen with the
       wireless receivers on the hub; "Data Seq Error" in hcd_rp2040.c).
       The interrupt is masked now; `usb_seq_errors` counts them. Likely the
-      Workbench boot stall seen during the PAL audio benchmarks.
+      Workbench boot stall seen during the PAL audio benchmarks. The
+      endpoint that saw the error then never completed again (the mouse
+      froze, 2026-10-05): the host is restarted after one now (keys and
+      buttons released, devices enumerate again in ~1 s).
 - [ ] The core-1 fault record from that time (IRQ 51, a user IRQ, jumped
       to 0) is still unexplained; watch the boot log for "Previous
       HARDFAULT".

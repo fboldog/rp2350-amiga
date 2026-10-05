@@ -700,9 +700,13 @@ hub; Workbench pointer, both buttons and the arrow keys in RemGame work.
 TinyUSB 0.18 (Pico SDK 2.3.1) panics in its host interrupt on a USB data
 sequence error (a packet with the wrong DATA0/1 toggle), which stopped
 core 0 now and then with the wireless receivers on the hub while the
-display kept running. `usb_input_init()` masks that interrupt; the
-controller drops the packet, and `usb_input_frame()` clears and counts the
-error (`usb_seq_errors`, readable over SWD).
+display kept running. `usb_input_init()` masks that interrupt. The
+endpoint that saw the error never completes its transfer again (the mouse
+froze while the keyboard worked), so `usb_input_frame()` clears and counts
+the error (`usb_seq_errors`, readable over SWD) and restarts the host:
+held keys and buttons are released, and the hub and receivers enumerate
+again within about a second. Writing 1 to `usb_restart_request` over SWD
+does the same (tests).
 
 ## Code map
 

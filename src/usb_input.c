@@ -193,25 +193,43 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
 }
 
 // ── Emulator side ─────────────────────────────────────────────────────────
+// TinyUSB 0.18's RP2040/RP2350 host driver panics on a data sequence error
+// (a packet with the wrong DATA0/1 toggle), which stopped the emulator now
+// and then with the wireless receivers on the hub. Masking the interrupt
+// kept it running, but the endpoint that saw the error never completed its
+// transfer again (the mouse froze, the keyboard kept working), so
+// usb_input_frame() restarts the host instead: the hub and the receivers
+// enumerate again within about a second.
+static void usb_host_start(void) {
+    tuh_init(BOARD_TUH_RHPORT);
+    hw_clear_bits(&usb_hw->inte, USB_INTE_ERROR_DATA_SEQ_BITS);
+}
+
+static void usb_host_restart(void) {
+    // Release whatever was held: the devices report afresh.
+    static const hid_keyboard_report_t none;
+    keyboard_report(&none);
+    mouse_buttons = 0;
+    mouse_dx = mouse_dy = 0;
+    tuh_deinit(BOARD_TUH_RHPORT);
+    usb_host_start();
+    printf("USB: data sequence error, host restarted\n");
+}
+
 void usb_input_init(void) {
     // Released buttons read high: POTINP DATLY (bit 10, right) and DATLX
     // (bit 8, middle) of both ports.
     chipset.potinp |= 0x5500;
     // Boot protocol: fixed report layouts for mice and keyboards.
     tuh_hid_set_default_protocol(HID_PROTOCOL_BOOT);
-    tuh_init(BOARD_TUH_RHPORT);
-    // TinyUSB 0.18's RP2040/RP2350 host driver panics on a data sequence
-    // error (a packet with the wrong DATA0/1 toggle), which stopped the
-    // emulator now and then with the wireless receivers on the hub. The
-    // controller drops such a packet; a HID report can afford that. Mask
-    // the interrupt so the driver never sees it; usb_input_frame() clears
-    // and counts the error instead.
-    hw_clear_bits(&usb_hw->inte, USB_INTE_ERROR_DATA_SEQ_BITS);
+    usb_host_start();
     printf("USB: host on the native port (hub, HID mouse/keyboard)\n");
 }
 
-// Data sequence errors so far (readable over SWD).
+// Data sequence errors so far (readable over SWD); setting
+// usb_restart_request over SWD restarts the host the same way (tests).
 volatile uint32_t usb_seq_errors;
+volatile uint32_t usb_restart_request;
 
 void usb_input_task(void) {
     if (tuh_task_event_ready())
@@ -223,9 +241,12 @@ static int clamp_delta(int d) {
 }
 
 void usb_input_frame(void) {
-    if (usb_hw->sie_status & USB_SIE_STATUS_DATA_SEQ_ERROR_BITS) {
+    if ((usb_hw->sie_status & USB_SIE_STATUS_DATA_SEQ_ERROR_BITS) ||
+        usb_restart_request) {
         usb_hw->sie_status = USB_SIE_STATUS_DATA_SEQ_ERROR_BITS;  // write-1-to-clear
         ++usb_seq_errors;
+        usb_restart_request = 0;
+        usb_host_restart();
     }
     const int dx = clamp_delta(mouse_dx);
     const int dy = clamp_delta(mouse_dy);
