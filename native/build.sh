@@ -63,6 +63,7 @@ fi
 # trips -Werror-ish format warnings under GCC 14).
 OMEGA_SRC=(
   omega/Audio.c
+  omega/AudioMix.c
   omega/Blitter.c
   omega/Chipset.c
   omega/CIA.c

@@ -2020,7 +2020,7 @@ static M68KI_HANDLER_TABLE_CONST opcode_handler_struct m68k_opcode_handler_table
 #define M68KI_ILLEGAL_INDEX (M68KI_HANDLER_COUNT - 1)
 void (*m68ki_handler_ptrs[M68KI_HANDLER_COUNT])(void);
 /* Per-handler 68000 cycles; replaces the 64 KiB per-opcode cycle table. */
-unsigned short m68ki_handler_cycles[M68KI_HANDLER_COUNT];
+unsigned char m68ki_handler_cycles[M68KI_HANDLER_COUNT];
 #define M68KI_SET_HANDLER(op, os) \
 	(m68ki_instruction_index[op] = \
 		(unsigned short)((os) - m68k_opcode_handler_table))

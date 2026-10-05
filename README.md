@@ -88,9 +88,9 @@ differ.
 | Vector table | 272 B | RAM copy of the vector table |
 | `.data` | ~58 KB | Code and tables copied to RAM: core 1's conversion loop and HSTX interrupt (anything core 1 runs must not fetch from flash), the chipset register dispatch tables, `DMALores`/`DMAHires` slot tables, with `OMEGA_HOT_CODE_IN_RAM` (default) all code of `DMA.c`, `CIA.c`, `Blitter.c`, `Floppy.c`, `m68kcpu.c`, `Memory.c` and `Host.c` (~28.7 KB), and with `OMEGA_HOT_OPCODES_IN_RAM` (default) the 75 hottest opcode handlers, their fetch helpers and the main loop (~12 KB) |
 | `sram_frames` | 320 KB / 300 KB | Two scanout frames, 640×256 (PAL) / 640×240 (NTSC), one byte per pixel (Amiga colour number or HAM code; RGB332 on the fallback path) |
-| `ring` | 64 KB (PAL with HDMI audio: ~45 KB) | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
+| `ring` | 64 KB (with HDMI audio: PAL 40 KB, NTSC 60.5 KB) | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
 | `m68ki_opcode_blocks` + `m68ki_opcode_block` | 32 KB + 1 KB | Two-level 68000 opcode → handler index: room for 256 shared blocks of 64 entries (~245 used), one byte per block of opcodes |
-| `m68ki_handler_ptrs` + `m68ki_handler_cycles` | 7.7 KB + 3.8 KB | Handler function pointers and 68000 cycle counts, one per handler |
+| `m68ki_handler_ptrs` + `m68ki_handler_cycles` | 7.7 KB + 1.9 KB | Handler function pointers and 68000 cycle counts (one byte: all even, so bit 0 marks immediate-count shifts), one per handler |
 | `image_lines` | 5.1 KB | Two RGB888 row buffers with HSTX commands, expanded by the scanout interrupt |
 | `c2p_spread` | 2 KB | Planar-to-chunky lookup table (core 1) |
 | `rgb332_rgb888` | 1 KB | RGB332 → RGB888 table (boot pattern, fallback frames) |
@@ -98,7 +98,7 @@ differ.
 | `hostRasterRowMin/Max` | 1.6 KB | Written column range per raster row (ARGB fallback path) |
 | Other `.bss` | ~2.5 KB | Chipset and CPU state, scanout palette, HAM tables, SDK state |
 | Heap | 256 B | Minimum SDK heap (nothing calls `malloc`) |
-| **Free** | **~1.4 KB / ~2.3 KB** | Between the heap and the end of main SRAM; HDMI audio takes ~20 KB (input ring 8 KB, encoder tables and code; PAL gives up ~19 KB of the core-1 ring for it), USB host ~6 KB (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
+| **Free** | **~1.4 KB / ~2.3 KB** | Between the heap and the end of main SRAM; HDMI audio takes ~23 KB (input ring 8 KB, Paula's line records 1 KB, mixer, encoder tables and code; PAL gives up ~19 KB of the core-1 ring for it), USB host ~6 KB (+15 KB with `-DOMEGA_HOT_OPCODES_IN_RAM=OFF`, +28.7 KB more with `-DOMEGA_HOT_CODE_IN_RAM=OFF`) |
 | `SCRATCH_X` | 4 KB | Core 1 stack (2 KB) and, with HDMI audio, the stretcher's 2 KB output ring |
 | `SCRATCH_Y` | 4 KB | Core 0 stack |
 
@@ -208,7 +208,7 @@ The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
 each fetched bitplane block, palette changes and frame begin/end into a
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`). The ring is 64 KB (`RING_WORDS`, set by CMake: ~45 KB on PAL
+`src/Host.c`). The ring is 64 KB (`RING_WORDS`, set by CMake: 40 KB on PAL
 with HDMI audio, where it still shows every idle Workbench frame; any size
 works, positions run over twice the ring size), which holds a whole frame's
 messages across the wait for the display swap: on idle Workbench every
@@ -653,9 +653,16 @@ reload and the audio interrupts (raised when a block starts, so software can
 queue the next), CPU-written `AUDxDAT` playback (each word plays once, the
 interrupt asks for the next), periods (0 counts as 65536; DMA periods below
 124 are clamped) and volume. Channels run in emulated colour clocks and are
-advanced once per raster line from `dmaEndOfLine()`; the line's 48 kHz
-stereo samples (channels 0+3 left, 1+2 right) go to `hostAudioOut()` in one
-call, or as a sample count when every channel is off. Attach modes (ADKCON)
+advanced once per raster line from `dmaEndOfLine()`. Each line ends in a
+line record (`omega/Audio.h`): the colour clock and value of every sample
+change, the four volumes and the LED filter state, passed to
+`hostAudioLine()`. `omega/AudioMix.c` turns the records into the line's
+48 kHz stereo samples (channels 0+3 left, 1+2 right) for `hostAudioOut()`,
+or a sample count when every channel is off. On the RP2350 the records go
+through a 1 KB ring to core 1, which mixes them before running the HDMI
+audio stretcher: core 0 keeps only the channel emulation (RemGame +2.4 %,
+D-Mob with music +3 %, PAL). The native runner mixes them at once; its
+output is bit-identical to the single-core mixer's. Attach modes (ADKCON)
 are not emulated.
 
 The native runner writes the output with `OMEGA_PCM=<file>` (48 kHz signed
@@ -674,7 +681,7 @@ and the "LED" filter, a second-order Butterworth at ~3.3 kHz, while CIA-A's
 `OMEGA_HDMI_AUDIO` (default ON, NTSC and PAL) sends the audio in HDMI data
 islands; no extra hardware is needed. OFF gives plain DVI, and Paula is then
 emulated (its interrupts) but not mixed. On PAL the core-1 ring shrinks to
-~45 KB to make room.
+40 KB to make room.
 
 - Every line's horizontal blanking carries a data island from pixel 4:
   packet 1 and either an Audio Clock Regeneration packet (N = 6144, CTS =
@@ -698,7 +705,7 @@ emulated (its interrupts) but not mixed. On PAL the core-1 ring shrinks to
   straight through, bit-exact, with no search. Below a quarter of real time
   it fades to silence. The line interrupt takes the stretched samples from
   a 512-frame (~10 ms) output ring.
-- Silence: when Paula is idle core 0 queues silence without samples; after
+- Silence: when Paula is idle the mixer queues silence without samples; after
   a second of it the stretcher stops and the interrupt sends pre-encoded
   silent packets (three variants: IEC 60958 block start, the channel status
   bit, other), so an idle machine costs core 1 almost nothing. Sound starts
@@ -789,7 +796,7 @@ deadline.
 | `HostRing.h` | Core 0 → core 1 message format and the inline fast path for appending a bitplane block to the current run (used by `DMA.c`) |
 | `dvi_display.c` / `dvi_display.h` | HDMI over HSTX: video modes, double-buffered SRAM frames, frame handshake, four-channel line DMA (blanking + active per line), row expansion to RGB888 in a low-priority interrupt (exact 12-bit colours, HAM), boot colour bars, ARGB/RGB332 submit for the fallback path |
 | `hdmi_island.c` / `.h` | HDMI data islands: packets (audio samples, clock regeneration, InfoFrames), BCH ECC, TERC4 encoding into raw HSTX words |
-| `hdmi_audio.c` / `.h` | HDMI audio path: Paula's samples from core 0, WSOLA time-stretching to real time on core 1, output ring for the line interrupt |
+| `hdmi_audio.c` / `.h` | HDMI audio path: Paula's samples from the mixer, WSOLA time-stretching to real time on core 1, output ring for the line interrupt |
 | `Planar.c` | Planar-to-chunky ARGB conversion (HIRES, LORES, HAM) for the fallback raster and the native build |
 | `Presentation.c` / `.h` | ARGB fallback presentation: maps the DMA raster to a 640×400 frame, rebuilds wrapped-fetch rows |
 | `sd_card.c` / `sd_card.h`, `sd_diskio.c` | SD card over SPI (FatFs disk driver) and Kickstart loading from SD (SD-card builds only) |
@@ -803,7 +810,8 @@ deadline.
 | `Chipset.c` / `Chipset.h` | Custom-chip registers: read/write dispatch tables (16- and 32-bit), colour registers (palette, EHB, palette log for HDMI), DMACON/INTENA/INTREQ, sprite and bitplane pointers, 32-bit writes split into two 16-bit ones |
 | `Blitter.c` / `Blitter.h` | Blitter: area copy with minterms, shifts and masks, line drawing, area fill |
 | `CIA.c` / `CIA.h` | The two 8520 CIAs: timers, TOD counters, interrupts, keyboard serial port, disk control lines |
-| `Audio.c` / `Audio.h` | Paula audio: four DMA channels (block reload, audio interrupts, CPU-written AUDxDAT), periods and volume, mixed to 48 kHz stereo once per raster line (`hostAudioOut()`) |
+| `Audio.c` / `Audio.h` | Paula audio: four DMA channels (block reload, audio interrupts, CPU-written AUDxDAT), periods and volume; one line record per raster line (`hostAudioLine()`) |
+| `AudioMix.c` | Paula's line records mixed to 48 kHz stereo, box filter and A500 output filters (`hostAudioOut()`; core 1 on the RP2350) |
 | `Floppy.c` / `Floppy.h` | DF0 drive: motor/step/side, disk change, MFM encoding of the active track from the flash ADF (into PSRAM on the board), the data stream read by disk DMA |
 | `CPU.c` / `CPU.h` | Glue to Musashi: memory callbacks, interrupt levels from INTENA/INTREQ, reset |
 | `m68k*.c`, `m68k*.h` | Musashi 68000 core. On the RP2350 the opcode table is two-level (`m68kops.c`) and cycle counts are per handler; `m68kdasm.c` is the disassembler (debug only) |

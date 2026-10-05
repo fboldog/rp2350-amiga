@@ -203,6 +203,19 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       - DMA prefetch of bitplane data into SRAM: reading bitplanes from
         SRAM instead of PSRAM made RemGame (unlimited, PAL) 24.8 -> 25.0
         frames/s, so cache misses on bitplanes cost <1 %.
+- [x] **Paula mixing on core 1 (2026-10-05)**: core 0 only steps the
+      channels (DMA, periods, interrupts) and sends a line record (sample
+      changes with their colour clock, volumes, LED) through a 1 KB ring;
+      core 1 mixes and filters (`omega/AudioMix.c`, in SRAM) before the
+      stretcher. Native PCM bit-identical to before. PAL RemGame 24.8 ->
+      25.4 emulated (24.8 -> 24.7 shown), D-Mob with music 38.3 -> 39.5;
+      NTSC RemGame 30.6, D-Mob with music 46.8. No records dropped. SRAM:
+      the 68000 cycle table went to one byte per handler (counts are even,
+      bit 0 flags immediate-count shifts; -1.9 KB); rings PAL 10304, NTSC
+      15488 words. Core 1's stack peaks at 1368 of 2 KB. Not moved: USB
+      (TinyUSB runs from flash), CIA-B TOD and the drive LED (negligible).
+      Open: the PAL native wb13 regression baseline is stale (HEAD
+      differs too).
 - [x] **Interlace and fine scroll (2026-10-05)**: LOF toggles with LACE
       (fields 313/312, 263/262 lines; VPOSR bit 15; VPOSW sets it); HDMI
       weaves the two fields (one buffer each, per-line expansion, third

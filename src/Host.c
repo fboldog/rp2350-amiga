@@ -9,7 +9,9 @@
 #include "HostRing.h"
 #if OMEGA_HDMI_AUDIO
 #include "hdmi_audio.h"
-#define AUDIO_SERVICE() hdmi_audio_service()
+#include "../omega/Audio.h"
+static void hostAudioService(void);
+#define AUDIO_SERVICE() hostAudioService()
 #else
 #define AUDIO_SERVICE() ((void)0)
 #endif
@@ -1057,7 +1059,50 @@ void releaseKey(uint16_t keyCode) {
 
 int hostResetRequested;
 
-// Paula's 48 kHz stereo output (omega/Audio.c), sent over HDMI.
+#if OMEGA_HDMI_AUDIO
+// Paula's line records (omega/Audio.h) go from core 0 to core 1, which
+// mixes them (omega/AudioMix.c) where it services the HDMI audio: the
+// mixing and the output filters cost core 0 ~2-3 % (RemGame, D-Mob). A
+// record is 2 words per line, plus one per sample change (~2-8 while music
+// plays): 256 words last 2-8 ms; core 1 drains them between messages.
+#define AUDIO_RING_WORDS 256u
+static uint32_t audio_ring[AUDIO_RING_WORDS];
+static volatile uint32_t audio_head, audio_tail;  // free running
+volatile uint32_t hostAudioDrops;  // records dropped for lack of room (SWD)
+
+int hostAudioLine(const uint32_t *words, int count) {
+    const uint32_t head = audio_head;
+    if (head - __atomic_load_n(&audio_tail, __ATOMIC_ACQUIRE) + (uint32_t)count >
+        AUDIO_RING_WORDS) {
+        ++hostAudioDrops;
+        return 0;
+    }
+    for (int i = 0; i < count; ++i)
+        audio_ring[(head + (uint32_t)i) & (AUDIO_RING_WORDS - 1u)] = words[i];
+    __atomic_store_n(&audio_head, head + (uint32_t)count, __ATOMIC_RELEASE);
+    return 1;
+}
+
+// Core 1: mixes the queued records, then runs the HDMI audio stretcher.
+static void C1_FUNC(hostAudioService)(void) {
+    uint32_t tail = audio_tail;
+    const uint32_t head = __atomic_load_n(&audio_head, __ATOMIC_ACQUIRE);
+    while (tail != head) {
+        // Records are published whole: one runs to the next header.
+        uint32_t words[AUDIO_LINE_MAX_WORDS];
+        int count = 0;
+        do
+            words[count++] = audio_ring[tail++ & (AUDIO_RING_WORDS - 1u)];
+        while (tail != head && count < AUDIO_LINE_MAX_WORDS &&
+               !(audio_ring[tail & (AUDIO_RING_WORDS - 1u)] & AUDIO_LINE_HEADER));
+        __atomic_store_n(&audio_tail, tail, __ATOMIC_RELEASE);
+        audioMixLine(words, count);
+    }
+    hdmi_audio_service();
+}
+#endif
+
+// Paula's 48 kHz stereo output (omega/AudioMix.c on core 1), sent over HDMI.
 void hostAudioOut(const int16_t *samples, int frames) {
 #if OMEGA_HDMI_AUDIO
     hdmi_audio_put(samples, frames);

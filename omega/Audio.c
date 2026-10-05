@@ -1,6 +1,6 @@
 //
 //  Audio.c
-//  Paula audio: four DMA channels, mixed to 48 kHz stereo.
+//  Paula audio: four DMA channels (the emulation side; AudioMix.c mixes).
 //
 //  Each channel plays signed 8-bit samples, high byte of each word first,
 //  one sample every AUDxPER colour clocks (DMA slots in this emulator), at
@@ -11,20 +11,22 @@
 //  DMA off, a CPU write to AUDxDAT plays that word, and the interrupt asks
 //  for the next one. Attach modes (ADKCON) are not emulated.
 //
-//  The channels run in emulated time and are advanced once per raster line;
-//  output samples fall at 48 kHz of emulated time, so the pitch is exact
-//  relative to the emulated machine whatever the emulation speed.
+//  The channels run in emulated time and are advanced once per raster line.
+//  Each line's sample changes (with their colour clock), volumes and LED
+//  filter state go to the host as a line record (Audio.h); AudioMix.c makes
+//  the 48 kHz output from it, so the pitch is exact relative to the
+//  emulated machine whatever the emulation speed. On the RP2350 the mixing
+//  runs on core 1, off the emulator's core.
 //
 
 #include "Audio.h"
 #include "Chipset.h"
 #include "VideoStandard.h"
 #include "CIA.h"
-#include <math.h>
 
-// Mixing, filtering and hostAudioOut() only when something plays the
-// output (RP2350: HDMI audio builds; the native runner always). Without
-// it Paula still runs (DMA, interrupts), unmixed.
+// Line records only when something plays the output (RP2350: HDMI audio
+// builds; the native runner always). Without it Paula still runs (DMA,
+// interrupts), unmixed.
 #ifndef OMEGA_AUDIO_OUTPUT
 #define OMEGA_AUDIO_OUTPUT 1
 #endif
@@ -37,26 +39,20 @@ typedef struct {
     uint32_t len;       // words left in the current block
     uint16_t word;      // word being played
     int lowNext;        // its low byte is the next sample
-    int64_t counter;    // colour clocks left of the current sample (16.16)
+    int32_t counter;    // colour clocks left of the current sample
     int8_t sample;      // current output sample
     int datPending;     // CPU wrote AUDxDAT since the last word was taken
 } AudioChannel;
 
 static AudioChannel ch[4];
-// Sum of sample x colour clocks (16.16) of each channel over the current
-// output interval: each output sample is the average over its interval (a
-// box filter), not a point sample, which keeps aliasing down.
-static int32_t accum[4];
 static int active;      // channels with mode != 0 (bit per channel)
-// Colour clocks per output sample and until the next one (16.16).
-static const uint32_t outStep = (uint32_t)(
-    ((uint64_t)OMEGA_VIDEO_LINE_CCK2 * OMEGA_VIDEO_FRAME_LINES *
-     OMEGA_VIDEO_RATE_NUMERATOR << 16) /
-    ((uint64_t)2 * OMEGA_VIDEO_RATE_DENOMINATOR * AUDIO_RATE));
-static int32_t outNext;
-// accum (sample x clocks in 16.12) x volume -> fraction of full scale for
-// one output interval; two channels per side, so each counts half.
-static float outScale;
+// The sample each channel last had in a line record (SENT_UNKNOWN:
+// unknown, restated in the next record).
+static int sent[4];
+#define SENT_UNKNOWN 0x100  // outside the sample range
+// The line record being built (Audio.h).
+static uint32_t record[AUDIO_LINE_MAX_WORDS];
+static int recordWords;
 
 static inline uint32_t regLc(int c) {
     return c == 0 ? chipset.aud0lc : c == 1 ? chipset.aud1lc :
@@ -93,31 +89,6 @@ static int dmaOn(int c) {
     return (chipset.dmaconr & (0x200u | (1u << c))) == (0x200u | (1u << c));
 }
 
-// The Amiga's analogue output stage, per side: a fixed first-order low-pass
-// (~4.9 kHz on the A500) and the "LED" filter, a second-order Butterworth
-// low-pass at ~3.3 kHz switched on while CIA-A's /LED output (PRA bit 1)
-// is low.
-typedef struct { float y; } OnePole;
-typedef struct { float x1, x2, y1, y2; } Biquad;
-static float fixedA;                              // one-pole coefficient
-static float ledB0, ledB1, ledB2, ledA1, ledA2;   // biquad coefficients
-static OnePole fixedL, fixedR;
-static Biquad ledL, ledR;
-
-static void filtersInit(void) {
-    const float pi = 3.14159265f;
-    fixedA = 1.0f - expf(-2.0f * pi * 4900.0f / AUDIO_RATE);
-    // RBJ cookbook low-pass, Q = 1/sqrt(2).
-    const float w = 2.0f * pi * 3275.0f / AUDIO_RATE;
-    const float alpha = sinf(w) / (2.0f * 0.70710678f);
-    const float c = cosf(w), a0 = 1.0f + alpha;
-    ledB0 = (1.0f - c) / 2.0f / a0;
-    ledB1 = (1.0f - c) / a0;
-    ledB2 = ledB0;
-    ledA1 = -2.0f * c / a0;
-    ledA2 = (1.0f - alpha) / a0;
-}
-
 static void setMode(int c, int mode) {
     ch[c].mode = mode;
     if (mode)
@@ -127,18 +98,16 @@ static void setMode(int c, int mode) {
 }
 
 void audioReset(void) {
-    if (outScale == 0.0f) {
-        outScale = 1.0f / ((float)(outStep >> 4) * 128.0f * 64.0f) * 0.5f;
-        filtersInit();
+    static int mixReady;
+    if (!mixReady) {
+        mixReady = 1;
+        audioMixInit();
     }
-    fixedL.y = fixedR.y = 0.0f;
-    ledL = ledR = (Biquad){0};
-    for (int c = 0; c < 4; ++c)
-        accum[c] = 0;
-    for (int c = 0; c < 4; ++c)
+    for (int c = 0; c < 4; ++c) {
         ch[c] = (AudioChannel){0};
+        sent[c] = SENT_UNKNOWN;
+    }
     active = 0;
-    outNext = 0;
 }
 
 void audioDmaconChanged(uint16_t old) {
@@ -199,103 +168,75 @@ static void nextSample(int c) {
     a->lowNext = 1;
 }
 
-static void advance(int c, int32_t clocks) {
+// Records channel c's sample when it differs from the last one recorded.
+static void recordSample(int c, int clock) {
+    const int sample = ch[c].sample;
+    if (sample == sent[c])
+        return;
+    if (recordWords == AUDIO_LINE_MAX_WORDS)
+        return;  // restated next line (sent[c] still differs)
+    record[recordWords++] = AUDIO_EVENT(c, clock, sample);
+    sent[c] = sample;
+}
+
+// Advances channel c over a line of `slots` colour clocks.
+static void advance(int c, int32_t slots) {
     AudioChannel *a = &ch[c];
+    int32_t clocks = slots;
     while (clocks > 0 && a->mode != 0) {
-        const int32_t seg = a->counter < clocks ? (int32_t)a->counter : clocks;
-        accum[c] += a->sample * (seg >> 4);   // 16.12: fits in 32 bits
+        const int32_t seg = a->counter < clocks ? a->counter : clocks;
         a->counter -= seg;
         clocks -= seg;
         if (a->counter <= 0) {
             nextSample(c);
+#if OMEGA_AUDIO_OUTPUT
+            recordSample(c, slots - clocks);
+#endif
             uint32_t per = regPer(c);
             if (per == 0)
                 per = 0x10000;  // the period counter wraps: 0 is the longest
             if (a->mode == 1 && per < MIN_DMA_PERIOD)
                 per = MIN_DMA_PERIOD;
-            a->counter += (int64_t)per << 16;
+            a->counter += (int32_t)per;
         }
     }
 }
-
-// Channel c's average over the output interval, times its volume, as a
-// fraction of full scale (+-1 for sample +-128 at volume 64).
-static float channelOut(int c) {
-    const int32_t sum = accum[c];
-    accum[c] = 0;
-    uint32_t vol = regVol(c) & 0x7F;
-    if (vol > 64)
-        vol = 64;
-    return (float)sum * (float)vol * outScale;
-}
-
-static float filter(float x, OnePole *f, Biquad *b, int led) {
-    f->y += (x - f->y) * fixedA;
-    x = f->y;
-    if (!led)
-        return x;
-    const float y = ledB0 * x + ledB1 * b->x1 + ledB2 * b->x2 -
-                    ledA1 * b->y1 - ledA2 * b->y2;
-    b->x2 = b->x1; b->x1 = x;
-    b->y2 = b->y1; b->y1 = y;
-    return y;
-}
-
-static int16_t toS16(float v) {
-    const float s = v * 32767.0f;
-    return (int16_t)(s > 32767.0f ? 32767 : s < -32768.0f ? -32768 : (int)s);
-}
-
 
 // Called at the end of each line of `slots` colour clocks (227 or 228).
 void audioLine(int slots) {
-    const int32_t lineClocks = slots << 16;
 #if !OMEGA_AUDIO_OUTPUT
     // No output: advance the channels (DMA fetches, interrupts) only.
     if (active)
-        for (int c = 0; c < 4; ++c) {
-            advance(c, lineClocks);
-            accum[c] = 0;
-        }
-    return;
-#endif
-    if (!active && fixedL.y == 0.0f && fixedR.y == 0.0f) {
-        // All channels off and the filters settled (most of the time): only
-        // count the samples.
-        int frames = 0;
-        while (outNext < lineClocks) {
-            ++frames;
-            outNext += (int32_t)outStep;
-        }
-        outNext -= lineClocks;
-        hostAudioOut(0, frames);
-        return;
-    }
-    int16_t out[2 * 4];  // a line holds at most 4 output samples
-    const int led = !(CIAA.pra & 0x02);
-    int frames = 0;
-    int32_t pos = 0;
-    while (outNext < lineClocks) {
-        const int32_t d = outNext - pos;
         for (int c = 0; c < 4; ++c)
-            advance(c, d);
-        pos = outNext;
-        const float l = channelOut(0) + channelOut(3);
-        const float r = channelOut(1) + channelOut(2);
-        float fl = filter(l, &fixedL, &ledL, led);
-        float fr = filter(r, &fixedR, &ledR, led);
-        // Let a decayed filter reach exact silence (enables the fast path).
-        if (!active && fabsf(fixedL.y) < 1e-5f && fabsf(fixedR.y) < 1e-5f) {
-            fixedL.y = fixedR.y = 0.0f;
-            fl = fr = 0.0f;
-        }
-        out[2 * frames] = toS16(fl);
-        out[2 * frames + 1] = toS16(fr);
-        ++frames;
-        outNext += (int32_t)outStep;
+            advance(c, slots);
+    return;
+#else
+    uint32_t flags = AUDIO_LINE_HEADER;
+    if (slots > 227)
+        flags |= AUDIO_LINE_LONG;
+    if (!(CIAA.pra & 0x02))
+        flags |= AUDIO_LINE_LED;
+    if (active)
+        flags |= AUDIO_LINE_ACTIVE;
+    uint32_t volumes = 0;
+    for (int c = 0; c < 4; ++c) {
+        uint32_t vol = regVol(c) & 0x7F;
+        volumes |= (vol > 64 ? 64 : vol) << (8 * c);
     }
+    record[1] = volumes;
+    recordWords = 2;
+    // Changes since the last line (DMA switched off, a record dropped)
+    // take effect from its start.
     for (int c = 0; c < 4; ++c)
-        advance(c, lineClocks - pos);
-    outNext -= lineClocks;
-    hostAudioOut(out, frames);
+        recordSample(c, 0);
+    if (active)
+        for (int c = 0; c < 4; ++c)
+            advance(c, slots);
+    if (active)
+        flags |= AUDIO_LINE_ACTIVE_END;
+    record[0] = flags;
+    if (!hostAudioLine(record, recordWords))
+        for (int c = 0; c < 4; ++c)
+            sent[c] = SENT_UNKNOWN;
+#endif
 }

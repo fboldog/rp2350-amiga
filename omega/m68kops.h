@@ -1989,9 +1989,10 @@ extern unsigned short m68ki_opcode_blocks[M68KI_MAX_BLOCKS][M68KI_BLOCK_SIZE];
 	m68ki_opcode_blocks[m68ki_opcode_block[(ir) >> M68KI_BLOCK_BITS]] \
 	                   [(ir) & (M68KI_BLOCK_SIZE - 1)]
 extern void (*m68ki_handler_ptrs[])(void);
-/* Per-handler cycles; this flag marks register shifts by an immediate count. */
-#define M68KI_CYCLES_IMMEDIATE_SHIFT 0x100
-extern unsigned short m68ki_handler_cycles[];
+/* Per-handler cycles (all even on the 68000, at most 170); bit 0 marks
+   register shifts by an immediate count. One byte each: 2 KB less SRAM. */
+#define M68KI_CYCLES_IMMEDIATE_SHIFT 1
+extern unsigned char m68ki_handler_cycles[];
 #define m68ki_call_instruction(ir) \
 	m68ki_handler_ptrs[m68ki_handler_index(ir)]()
 #else

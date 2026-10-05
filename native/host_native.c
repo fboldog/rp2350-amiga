@@ -35,6 +35,12 @@ void toggleLEDs(void)             { }
 // ── Audio: OMEGA_PCM=<file> writes 48 kHz signed 16-bit stereo PCM ───────
 // (play or convert with e.g. ffmpeg -f s16le -ar 48000 -ac 2 -i <file> ...)
 #include "Audio.h"
+// Paula's line records are mixed straight away (the RP2350 does it on core 1).
+int hostAudioLine(const uint32_t *words, int count) {
+    audioMixLine(words, count);
+    return 1;
+}
+
 void hostAudioOut(const int16_t *samples, int frames) {
     static FILE *pcm;
     static int opened;

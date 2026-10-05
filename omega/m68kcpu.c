@@ -698,7 +698,7 @@ static int __attribute__((noinline)) m68k_execute_running(int num_cycles)
 				const uint index = m68ki_handler_index(ir);
 				uint cycles = m68ki_handler_cycles[index];
 				if(cycles & M68KI_CYCLES_IMMEDIATE_SHIFT)
-					cycles = (cycles & 0xff) + (((((ir >> 9) - 1) & 7) + 1) << 1);
+					cycles = (cycles - 1) + (((((ir >> 9) - 1) & 7) + 1) << 1);
 				m68ki_handler_ptrs[index]();
 				USE_CYCLES(cycles);
 			}

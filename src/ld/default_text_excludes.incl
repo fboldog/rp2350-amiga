@@ -9,6 +9,7 @@
                *omega/CIA.c.o *omega/CIA.c.obj
                *omega/Blitter.c.o *omega/Blitter.c.obj
                *omega/Floppy.c.o *omega/Floppy.c.obj
+               *omega/AudioMix.c.o *omega/AudioMix.c.obj
                *omega/m68kcpu.c.o *omega/m68kcpu.c.obj
                *src/Memory.c.o *src/Memory.c.obj
                *src/Host.c.o *src/Host.c.obj) .text*)
