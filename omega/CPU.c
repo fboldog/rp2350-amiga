@@ -30,6 +30,16 @@ unsigned char* _emulatorMemory;
 //#define CHIPTOP  0xFFFFF // for 1Meg
 //#define CHIPTOP 0x1FFFFF // for 2Meg
 
+/* Where the 68000 starts after a reset: the initial PC it reads from address
+   4, which the ROM overlay maps to ROM offset 4. Kickstart puts its entry
+   there and a JMP to the same address at offset 2 (Omega's historical start,
+   ROM + 2); DiagROM keeps its "DG" marker at offset 2, so only the vector
+   works for every ROM. */
+static uint32_t cpu_reset_pc(void){
+    const uint32_t pc = m68k_read_memory_32(0xF80004) & 0xFFFFFFu;
+    return pc >= 0xF80000u ? pc : 0xF80002u;
+}
+
 /* Called when the CPU pulses the RESET line */
 void cpu_pulse_reset(void){
     uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
@@ -49,7 +59,7 @@ void cpu_pulse_reset(void){
     }
 #endif
     ChipsetInit();
-    m68k_set_reg(M68K_REG_PC, 0xF80002); //start executing at the ROM + 2
+    m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
     
 }
 
@@ -59,8 +69,8 @@ void cpu_pulse_reset(void){
    the 68000 itself is reset: STOP cleared, supervisor mode, interrupts
    masked. Then both CIAs, the custom chips and Paula's interrupt
    registers are re-initialised and the
-   CPU starts at the Kickstart entry, as at power-on (no ROM overlay is
-   emulated, so the reset vectors are not read from address 0). Chip RAM is
+   CPU starts at the ROM's reset vector, as at power-on (no ROM overlay is
+   emulated, so the vector is read from the ROM itself). Chip RAM is
    kept: a warm reset. Call it between emulation slices, never from inside
    dma_run(). */
 void cpu_keyboard_reset(void){
@@ -75,7 +85,7 @@ void cpu_keyboard_reset(void){
     chipset.intreqr = 0;
     m68k_set_irq(0);
     m68k_set_reg(M68K_REG_SR, 0x2700);
-    m68k_set_reg(M68K_REG_PC, 0xF80002); //start executing at the ROM + 2
+    m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
 }
 
 void cpu_init(){
@@ -87,7 +97,7 @@ void cpu_init(){
     m68k_init();
     m68k_set_cpu_type(M68K_CPU_TYPE_68000); //Pretend to be an A500 for now...
     m68k_set_reg(M68K_REG_SR, 0x2700); // Reset enters supervisor mode, IRQs masked
-    m68k_set_reg(M68K_REG_PC, 0xF80002); //start executing at the ROM + 2
+    m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
 
 }
 

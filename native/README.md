@@ -95,9 +95,10 @@ needed by the standalone switcher firmware.
 
 ### DiagROM
 
-The native runner recognizes the DiagROM header marker (`DG`) and starts at the
-explicit entry address stored immediately after it instead of assuming the
-normal Kickstart `JMP` instruction at `0xF80002`:
+The CPU starts at the ROM's reset vector (offset 4, `omega/CPU.c`), as the
+68000 does through the ROM overlay, rather than at the Kickstart `JMP` at
+`0xF80002`, where DiagROM keeps its `DG` marker. This applies to the RP2350
+build as well:
 
 ```sh
 VIDEO=PAL ./native/build.sh

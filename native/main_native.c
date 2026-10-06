@@ -187,16 +187,6 @@ int main(int argc, char **argv) {
     // ── Bring up the emulator ───────────────────────────────────────────
     hostInit();
     cpu_init();
-    /* Normal Kickstarts place an absolute JMP opcode at ROM offset 2, which
-     * is Omega's historical reset entry.  DiagROM uses "DG" there and stores
-     * its explicit startup address in the following longword instead. */
-    if (low16Meg[0xF80002] == 'D' && low16Meg[0xF80003] == 'G') {
-        uint32_t diag_entry = native_read_u32(0xF80004);
-        if (diag_entry >= 0xF80000u && diag_entry < 0x1000000u) {
-            m68k_set_reg(M68K_REG_PC, diag_entry);
-            printf("  ROM: DiagROM entry %08x\n", diag_entry);
-        }
-    }
     const char *cpuType = getenv("OMEGA_CPU");
     if (cpuType && strcmp(cpuType, "68020") == 0) {
         m68k_set_cpu_type(M68K_CPU_TYPE_68020);
