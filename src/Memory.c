@@ -264,8 +264,14 @@ unsigned int chipReadLong(unsigned int address) {
 void chipWriteByte(unsigned int address, unsigned int value) {
     if (address <= CHIPTOP) { chip_ram[address] = (uint8_t)value; return; }
     if (address >= 0xF80000u) return;  // ROM: no-op
-    // Custom chipset (byte writes uncommon, ignore)
-    if (address > 0xDFEFFFu) return;
+    // Custom chipset: the 68000 drives a byte on both halves of the data
+    // bus and the custom chips latch the whole word, so a byte write sets
+    // the register to the byte twice (DiagROM's raster test writes COLOR00's
+    // low byte: 0x47 -> 0x4747, colour 0x747).
+    if (address > 0xDFEFFFu) {
+        chipWriteWord(address & ~1u, (value & 0xFFu) * 0x0101u);
+        return;
+    }
     // Gayle/IDE
     if (address > 0xD9FFFFu) { writeGayleB(address, value); return; }
     // Custom register mirror (no slow RAM)

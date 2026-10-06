@@ -472,11 +472,16 @@ void blitter_execute(Chipset_t* chipset){
             //All operations start with a Zero Flag
             chipset->dmaconr = chipset->dmaconr | 0x2000;   //set zero flag
             
+            // The shifters' previous A and B words carry over from one line
+            // to the next (only a new blit starts them at zero): bits shifted
+            // out at the end of a line enter the next line's first word.
+            // DiagROM's scroll test relies on it to wrap its band around.
+            uint16_t previousA = 0;
+            uint16_t previousB = 0;
+
             for(int y=0;y<sizev;++y){
 
                 int carry = fci;
-                uint16_t previousA = 0;
-                uint16_t previousB = 0;
                 
                 
                 for(int x=0;x<sizeh;++x){

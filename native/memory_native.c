@@ -315,10 +315,10 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
 #endif
     
     //Chipregs
+    // The 68000 drives a byte on both halves of the data bus and the custom
+    // chips latch the whole word: the register gets the byte twice.
     if(address>0xDFEFFF){
-        address = (address - 0xDFF000) >> 1;
-        debugChipAddress = address;
-        //ChipsetWrite(&chipset, address,value); // Does any software byte write to the custom chips?
+        chipWriteWord(address & ~1u, (value & 0xFFu) * 0x0101u);
         return;
     }
     

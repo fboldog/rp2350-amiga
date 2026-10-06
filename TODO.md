@@ -203,6 +203,17 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       - DMA prefetch of bitplane data into SRAM: reading bitplanes from
         SRAM instead of PSRAM made RemGame (unlimited, PAL) 24.8 -> 25.0
         frames/s, so cache misses on bitplanes cost <1 %.
+- [x] **DiagROM V2.1 beta fixes (2026-10-06)**: the CPU starts at the
+      ROM's reset vector (DiagROM has "DG" where Kickstart has its JMP);
+      DMA pointers keep only chip RAM address bits (2 MB: A1-A20), as
+      Agnus does; COP2LCH kept COP1LC's low word; the blitter's shifters
+      carry the previous A/B word from one line into the next (scroll
+      test wrap); a byte write to a custom register writes the byte to
+      both halves (raster test: move.b to COLOR00's low byte). The beta's
+      scroll test points its screen at ROM (menu table address in d0), so
+      its yellow line grows upward on real hardware too. PAL ring 10240
+      words (Memory.c, in SRAM, grew). Native runner: OMEGA_KEYS types
+      Amiga keys at given frames.
 - [x] **Paula mixing on core 1 (2026-10-05)**: core 0 only steps the
       channels (DMA, periods, interrupts) and sends a line record (sample
       changes with their colour clock, volumes, LED) through a 1 KB ring;

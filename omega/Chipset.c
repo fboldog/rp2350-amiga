@@ -22,6 +22,14 @@
 #include "Host.h"
 #include "debug.h"
 
+// DMA pointers reach chip RAM only: Agnus keeps as many address bits as
+// its chip RAM range (2 MB: A1-A20) and ignores the rest of the high word.
+// DiagROM's scroll test points its bitplanes at 0xFC6DFC for a picture it
+// put at 0x1C6DFC; unmasked, the fetch read past chip RAM.
+#define CHIP_ADDR_MASK 0x1FFFFEu
+#define CHIP_PTH_BYTE(v) (((uint32_t)(v) & 0x1Fu) << 16)  // byte address
+#define CHIP_PTH_WORD(v) (((uint32_t)(v) & 0x1Fu) << 15)  // word address
+
 // Register-stub diagnostics are useful in the desktop debugger, but a ROM can
 // hit them continuously.  Printing every access over Pico USB stdio slows the
 // emulated CPU dramatically and obscures the boot/fault messages we need.
@@ -105,7 +113,7 @@ uint16_t noRead(void){
 //*******************************************
 
 void dskpthL(uint32_t value){   //
-    chipset.dskpt = value;
+    chipset.dskpt = value & CHIP_ADDR_MASK;
 }
 
 void vposwL(uint32_t value){    //
@@ -123,19 +131,19 @@ void bltcon0L(uint32_t value){  //
 }
 
 void bltcpthL(uint32_t value){  //
-    chipset.bltcpt = value;
+    chipset.bltcpt = value & CHIP_ADDR_MASK;
 }
 
 void bltbpthL(uint32_t value){  //
-    chipset.bltbpt = value;
+    chipset.bltbpt = value & CHIP_ADDR_MASK;
 }
 
 void bltapthL(uint32_t value){  //
-    chipset.bltapt = value;
+    chipset.bltapt = value & CHIP_ADDR_MASK;
 }
 
 void bltdpthL(uint32_t value){  //
-    chipset.bltdpt = value;
+    chipset.bltdpt = value & CHIP_ADDR_MASK;
 }
 
 void bltcmodL(uint32_t value){
@@ -159,7 +167,7 @@ void bltbdatL(uint32_t value){  //
 }
 
 void cop1lchL(uint32_t value){
-    chipset.cop1lc = value >> 1;
+    chipset.cop1lc = (value & CHIP_ADDR_MASK) >> 1;
 }
 
 void cop2lchL(uint32_t value){  //
@@ -168,24 +176,24 @@ void cop2lchL(uint32_t value){  //
         return;
     }
     
-    chipset.cop2lc = value >> 1;
+    chipset.cop2lc = (value & CHIP_ADDR_MASK) >> 1;
     //printf("(32bit)Copper 2: %0x\n",chipset.cop2lc);
 }
 
 void aud0lcL(uint32_t value){
-    chipset.aud0lc = value >> 1;    //word aligned
+    chipset.aud0lc = (value & CHIP_ADDR_MASK) >> 1;    //word aligned
 }
 
 void aud1lcL(uint32_t value){
-    chipset.aud1lc = value >> 1;    //word aligned
+    chipset.aud1lc = (value & CHIP_ADDR_MASK) >> 1;    //word aligned
 }
 
 void aud2lcL(uint32_t value){
-    chipset.aud2lc = value >> 1;    //word aligned
+    chipset.aud2lc = (value & CHIP_ADDR_MASK) >> 1;    //word aligned
 }
 
 void aud3lcL(uint32_t value){
-    chipset.aud3lc = value >> 1;    //word aligned
+    chipset.aud3lc = (value & CHIP_ADDR_MASK) >> 1;    //word aligned
 }
 
 void aud0perL(uint32_t value){  //
@@ -298,7 +306,7 @@ void wordIllegalWrite(uint16_t value){
 }
 
 void dskpth(uint16_t value){
-    chipset.dskpt  = (value << 16) | (chipset.dskpt & 0x0000FFFF); //using the new 32bit register
+    chipset.dskpt  = CHIP_PTH_BYTE(value) | (chipset.dskpt & 0x0000FFFF); //using the new 32bit register
 }
 
 void dskptl(uint16_t value){
@@ -378,25 +386,25 @@ void bltalwm(uint16_t value){
 }
 
 void bltcpth(uint16_t value){
-    chipset.bltcpt = (value << 16) | (chipset.bltcpt & 0x0000FFFF); //using the new 32bit register
+    chipset.bltcpt = CHIP_PTH_BYTE(value) | (chipset.bltcpt & 0x0000FFFF); //using the new 32bit register
 }
 void bltcptl(uint16_t value){
     chipset.bltcpt =  value        | (chipset.bltcpt & 0xFFFF0000); //using the new 32bit register
 }
 void bltbpth(uint16_t value){
-    chipset.bltbpt = (value << 16) | (chipset.bltbpt & 0x0000FFFF); //using the new 32bit register
+    chipset.bltbpt = CHIP_PTH_BYTE(value) | (chipset.bltbpt & 0x0000FFFF); //using the new 32bit register
 }
 void bltbptl(uint16_t value){
     chipset.bltbpt =  value        | (chipset.bltbpt & 0xFFFF0000); //using the new 32bit register
 }
 void bltapth(uint16_t value){
-    chipset.bltapt = (value << 16) | (chipset.bltapt & 0x0000FFFF); //using the new 32bit register
+    chipset.bltapt = CHIP_PTH_BYTE(value) | (chipset.bltapt & 0x0000FFFF); //using the new 32bit register
 }
 void bltaptl(uint16_t value){
     chipset.bltapt =  value        | (chipset.bltapt & 0xFFFF0000); //using the new 32bit register
 }
 void bltdpth(uint16_t value){
-    chipset.bltdpt = (value << 16) | (chipset.bltdpt & 0x0000FFFF); //using the new 32bit register
+    chipset.bltdpt = CHIP_PTH_BYTE(value) | (chipset.bltdpt & 0x0000FFFF); //using the new 32bit register
 }
 void bltdptl(uint16_t value){
     chipset.bltdpt =  value        | (chipset.bltdpt & 0xFFFF0000); //using the new 32bit register
@@ -462,13 +470,13 @@ void dsksync(uint16_t value){
 }
 
 void cop1lch(uint16_t value){
-      chipset.cop1lc = (value << 15) | (chipset.cop1lc & 0x00007FFF);
+      chipset.cop1lc = CHIP_PTH_WORD(value) | (chipset.cop1lc & 0x00007FFF);
 }
 void cop1lcl(uint16_t value){
         chipset.cop1lc = (value >> 1)  | (chipset.cop1lc & 0xFFFF8000);
 }
 void cop2lch(uint16_t value){
-      chipset.cop2lc = (value << 15) | (chipset.cop1lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
+      chipset.cop2lc = CHIP_PTH_WORD(value) | (chipset.cop2lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
 }
 void cop2lcl(uint16_t value){
 //    printf("(16bit)Copper 2: %0x\n",chipset.cop2lc);
@@ -560,7 +568,7 @@ void adkcon(uint16_t value){
 }
 
 void aud0lch(uint16_t value){
-    chipset.aud0lc = (value << 15) | (chipset.aud0lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
+    chipset.aud0lc = CHIP_PTH_WORD(value) | (chipset.aud0lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
 }
 
 void aud0lcl(uint16_t value){
@@ -585,7 +593,7 @@ void aud0dat(uint16_t value){
 }
 
 void aud1lch(uint16_t value){
-    chipset.aud1lc = (value << 15) | (chipset.aud1lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
+    chipset.aud1lc = CHIP_PTH_WORD(value) | (chipset.aud1lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
 }
 
 void aud1lcl(uint16_t value){
@@ -610,7 +618,7 @@ void aud1dat(uint16_t value){
 }
 
 void aud2lch(uint16_t value){
-    chipset.aud2lc = (value << 15) | (chipset.aud2lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
+    chipset.aud2lc = CHIP_PTH_WORD(value) | (chipset.aud2lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
 }
 
 void aud2lcl(uint16_t value){
@@ -635,7 +643,7 @@ void aud2dat(uint16_t value){
 }
 
 void aud3lch(uint16_t value){
-    chipset.aud3lc = (value << 15) | (chipset.aud3lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
+    chipset.aud3lc = CHIP_PTH_WORD(value) | (chipset.aud3lc & 0x00007FFF); //this is only shifted by 15 because all addresses are word aligend
 }
 
 void aud3lcl(uint16_t value){
@@ -661,7 +669,7 @@ void aud3dat(uint16_t value){
 
 
 void bpl1pth(uint16_t value){
-    chipset.bpl1pt = (value << 15) | (chipset.bpl1pt & 0x00007FFF); //this is only shifted by 15 because all bitplane addresses are word aligend
+    chipset.bpl1pt = CHIP_PTH_WORD(value) | (chipset.bpl1pt & 0x00007FFF); //this is only shifted by 15 because all bitplane addresses are word aligend
     dmaBitplanePointerWrite(1, 1);
 }
 void bpl1ptl(uint16_t value){
@@ -670,7 +678,7 @@ void bpl1ptl(uint16_t value){
 }
 
 void bpl2pth(uint16_t value){
-    chipset.bpl2pt = (value << 15) | (chipset.bpl2pt & 0x00007FFF);
+    chipset.bpl2pt = CHIP_PTH_WORD(value) | (chipset.bpl2pt & 0x00007FFF);
     dmaBitplanePointerWrite(2, 1);
 }
 void bpl2ptl(uint16_t value){
@@ -679,7 +687,7 @@ void bpl2ptl(uint16_t value){
 }
 
 void bpl3pth(uint16_t value){
-    chipset.bpl3pt = (value << 15) | (chipset.bpl3pt & 0x00007FFF);
+    chipset.bpl3pt = CHIP_PTH_WORD(value) | (chipset.bpl3pt & 0x00007FFF);
     dmaBitplanePointerWrite(3, 1);
 }
 void bpl3ptl(uint16_t value){
@@ -688,7 +696,7 @@ void bpl3ptl(uint16_t value){
 }
 
 void bpl4pth(uint16_t value){
-    chipset.bpl4pt = (value << 15) | (chipset.bpl4pt & 0x00007FFF);
+    chipset.bpl4pt = CHIP_PTH_WORD(value) | (chipset.bpl4pt & 0x00007FFF);
     dmaBitplanePointerWrite(4, 1);
 }
 void bpl4ptl(uint16_t value){
@@ -697,7 +705,7 @@ void bpl4ptl(uint16_t value){
 }
 
 void bpl5pth(uint16_t value){
-    chipset.bpl5pt = (value << 15) | (chipset.bpl5pt & 0x00007FFF);
+    chipset.bpl5pt = CHIP_PTH_WORD(value) | (chipset.bpl5pt & 0x00007FFF);
     dmaBitplanePointerWrite(5, 1);
 }
 void bpl5ptl(uint16_t value){
@@ -706,7 +714,7 @@ void bpl5ptl(uint16_t value){
 }
 
 void bpl6pth(uint16_t value){
-    chipset.bpl6pt = (value << 15) | (chipset.bpl6pt & 0x00007FFF);
+    chipset.bpl6pt = CHIP_PTH_WORD(value) | (chipset.bpl6pt & 0x00007FFF);
     dmaBitplanePointerWrite(6, 1);
 }
 void bpl6ptl(uint16_t value){
@@ -715,7 +723,7 @@ void bpl6ptl(uint16_t value){
 }
 
 void bpl7pth(uint16_t value){
-    chipset.bpl7pt = (value << 15) | (chipset.bpl7pt & 0x00007FFF);
+    chipset.bpl7pt = CHIP_PTH_WORD(value) | (chipset.bpl7pt & 0x00007FFF);
     dmaBitplanePointerWrite(7, 1);
 }
 void bpl7ptl(uint16_t value){
@@ -724,7 +732,7 @@ void bpl7ptl(uint16_t value){
 }
 
 void bpl8pth(uint16_t value){
-    chipset.bpl8pt = (value << 15) | (chipset.bpl8pt & 0x00007FFF);
+    chipset.bpl8pt = CHIP_PTH_WORD(value) | (chipset.bpl8pt & 0x00007FFF);
     dmaBitplanePointerWrite(8, 1);
 }
 void bpl8ptl(uint16_t value){
@@ -790,49 +798,49 @@ void bpl8dat(uint16_t value){
 }
 
 void spr0pth(uint16_t value){
-    chipset.spr0pt = (value << 15) | (chipset.spr0pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr0pt = CHIP_PTH_WORD(value) | (chipset.spr0pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr0ptl(uint16_t value){
     chipset.spr0pt = (value>>1)    | (chipset.spr0pt & 0xFFFF8000);
 }
 void spr1pth(uint16_t value){
-    chipset.spr1pt = (value << 15) | (chipset.spr1pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr1pt = CHIP_PTH_WORD(value) | (chipset.spr1pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr1ptl(uint16_t value){
     chipset.spr1pt = (value>>1)    | (chipset.spr1pt & 0xFFFF8000);
 }
 void spr2pth(uint16_t value){
-    chipset.spr2pt = (value << 15) | (chipset.spr2pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr2pt = CHIP_PTH_WORD(value) | (chipset.spr2pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr2ptl(uint16_t value){
     chipset.spr2pt = (value>>1)    | (chipset.spr2pt & 0xFFFF8000);
 }
 void spr3pth(uint16_t value){
-    chipset.spr3pt = (value << 15) | (chipset.spr3pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr3pt = CHIP_PTH_WORD(value) | (chipset.spr3pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr3ptl(uint16_t value){
     chipset.spr3pt = (value>>1)    | (chipset.spr3pt & 0xFFFF8000);
 }
 void spr4pth(uint16_t value){
-    chipset.spr4pt = (value << 15) | (chipset.spr4pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr4pt = CHIP_PTH_WORD(value) | (chipset.spr4pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr4ptl(uint16_t value){
     chipset.spr4pt = (value>>1)    | (chipset.spr4pt & 0xFFFF8000);
 }
 void spr5pth(uint16_t value){
-    chipset.spr5pt = (value << 15) | (chipset.spr5pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr5pt = CHIP_PTH_WORD(value) | (chipset.spr5pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr5ptl(uint16_t value){
     chipset.spr5pt = (value>>1)    | (chipset.spr5pt & 0xFFFF8000);
 }
 void spr6pth(uint16_t value){
-    chipset.spr6pt = (value << 15) | (chipset.spr6pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr6pt = CHIP_PTH_WORD(value) | (chipset.spr6pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr6ptl(uint16_t value){
     chipset.spr6pt = (value>>1)    | (chipset.spr6pt & 0xFFFF8000);
 }
 void spr7pth(uint16_t value){
-    chipset.spr7pt = (value << 15) | (chipset.spr7pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
+    chipset.spr7pt = CHIP_PTH_WORD(value) | (chipset.spr7pt & 0x00007FFF);  //this is only shifted by 15 becuase all addresses are word aligend
 }
 void spr7ptl(uint16_t value){
     chipset.spr7pt = (value>>1)    | (chipset.spr7pt & 0xFFFF8000);

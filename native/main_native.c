@@ -19,6 +19,9 @@
 //   OMEGA_DISASM=1     turn on the Musashi disassembler (to UART/stdout) -
 //                      useful for seeing where a ROM's early init diverges.
 //   OMEGA_CPU=68020     use Musashi's 68020 core instead of the default 68000.
+//   OMEGA_KEYS=<list>   type Amiga raw keys: "frame:code,..." (hex code),
+//                       e.g. "200:04,260:02" presses and releases key 4 at
+//                       frame 200, then key 2 at frame 260.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -221,6 +224,33 @@ int main(int argc, char **argv) {
             cpu_execute();
         }
 #endif
+
+        // OMEGA_KEYS: press each listed key at its frame, release it the
+        // next frame (as the keyboard's serial line would deliver it).
+        static const char *keys;
+        static int keysRead, keyReleaseFrame = -1;
+        static uint8_t keyHeld;
+        if (!keysRead) {
+            keysRead = 1;
+            keys = getenv("OMEGA_KEYS");
+        }
+        if (keyReleaseFrame >= 0 &&
+            native_frame_counter >= (unsigned long)keyReleaseFrame) {
+            CIAWrite(&CIAA, 0xC, (uint8_t)~((keyHeld << 1) | 1));
+            keyboardInt();
+            keyReleaseFrame = -1;
+        } else if (keyReleaseFrame < 0 && keys && *keys) {
+            char *next;
+            const unsigned long frame = strtoul(keys, &next, 10);
+            if (native_frame_counter >= frame && *next == ':') {
+                keyHeld = (uint8_t)strtoul(next + 1, &next, 16);
+                keys = *next == ',' ? next + 1 : next;
+                CIAWrite(&CIAA, 0xC, (uint8_t)~(keyHeld << 1));
+                keyboardInt();
+                keyReleaseFrame = (int)native_frame_counter + 1;
+                printf("  vbl=%lu key %02x\n", native_frame_counter, keyHeld);
+            }
+        }
 
         // Kickstart only accepts a disk-change once the drive has finished
         // ID mode (df[0].idMode == 0).  Keep trying from insertAt onward
