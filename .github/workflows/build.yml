@@ -1,0 +1,89 @@
+# Builds the RP2350 HDMI firmware (NTSC and PAL) and the native runner
+# (NTSC and PAL) on every push and pull request. The firmware is configured
+# as in README.md ("HDMI, DF0 from flash, disk inserted at boot"); the Pico
+# SDK is downloaded by pico_sdk_import.cmake at its pinned release.
+# No Kickstart ROM or ADF is included: combine them with tools/combine_uf2.py.
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: Firmware (${{ matrix.video }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        video: [NTSC, PAL]
+    steps:
+      - uses: actions/checkout@v7
+
+      # Arm's own release: SRAM is nearly full, and this is the toolchain the
+      # firmware was checked with (Ubuntu's GCC 13 was not).
+      - name: Install Arm GNU Toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '14.3.Rel1'
+
+      # Host tools: picotool is built from source by the Pico SDK.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake build-essential libusb-1.0-0-dev pkg-config
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DOMEGA_VIDEO_MODE=${{ matrix.video }} \
+            -DOMEGA_ENABLE_HDMI=ON \
+            -DOMEGA_ENABLE_FLASH_FLOPPY=ON \
+            -DOMEGA_DF0_INSERT_AT_BOOT=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Collect
+        run: |
+          mkdir -p out
+          for ext in uf2 elf bin; do
+            cp build/omega-amiga.$ext out/omega-amiga-${{ matrix.video }}.$ext
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.video }}
+          path: out/
+          if-no-files-found: error
+
+  native:
+    name: Native runner (${{ matrix.video }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        video: [NTSC, PAL]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install SDL2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsdl2-dev
+
+      - name: Build (SDL2 window)
+        run: VIDEO=${{ matrix.video }} ./native/build.sh
+
+      - name: Collect
+        run: |
+          mkdir -p out
+          cp native/omega-native out/omega-native-${{ matrix.video }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-linux-x64-${{ matrix.video }}
+          path: out/
+          if-no-files-found: error
