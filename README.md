@@ -88,7 +88,7 @@ differ.
 | Vector table | 272 B | RAM copy of the vector table |
 | `.data` | ~58 KB | Code and tables copied to RAM: core 1's conversion loop and HSTX interrupt (anything core 1 runs must not fetch from flash), the chipset register dispatch tables, `DMALores`/`DMAHires` slot tables, with `OMEGA_HOT_CODE_IN_RAM` (default) all code of `DMA.c`, `CIA.c`, `Blitter.c`, `Floppy.c`, `m68kcpu.c`, `Memory.c` and `Host.c` (~28.7 KB), and with `OMEGA_HOT_OPCODES_IN_RAM` (default) the 75 hottest opcode handlers, their fetch helpers and the main loop (~12 KB) |
 | `sram_frames` | 320 KB / 300 KB | Two scanout frames, 640×256 (PAL) / 640×240 (NTSC), one byte per pixel (Amiga colour number or HAM code; RGB332 on the fallback path) |
-| `ring` | 64 KB (with HDMI audio: PAL 40 KB, NTSC 60.5 KB) | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
+| `ring` | 64 KB (with HDMI audio: PAL 40 KB, NTSC 60 KB) | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
 | `m68ki_opcode_blocks` + `m68ki_opcode_block` | 32 KB + 1 KB | Two-level 68000 opcode → handler index: room for 256 shared blocks of 64 entries (~245 used), one byte per block of opcodes |
 | `m68ki_handler_ptrs` + `m68ki_handler_cycles` | 7.7 KB + 1.9 KB | Handler function pointers and 68000 cycle counts (one byte: all even, so bit 0 marks immediate-count shifts), one per handler |
 | `image_lines` | 5.1 KB | Two RGB888 row buffers with HSTX commands, expanded by the scanout interrupt |
@@ -153,6 +153,12 @@ cmake -S . -B build-weact-hdmi-pal -G Ninja -DOMEGA_VIDEO_MODE=PAL \
   -DOMEGA_DF0_INSERT_AT_BOOT=ON
 cmake --build build-weact-hdmi-pal -j
 ```
+
+GitHub Actions (`.github/workflows/build.yml`) builds the HDMI firmware for
+NTSC and PAL with these settings, using Arm GNU Toolchain 14.3.Rel1, and the
+native runner for both, on every push and pull request. The `.uf2`, `.elf`
+and `.bin` files and the native binaries are uploaded as artifacts; combine a
+firmware UF2 with a Kickstart ROM and ADFs using `tools/combine_uf2.py`.
 
 `PICO_BOARD` defaults to `weact_studio_rp2350b_core`, the only supported
 board. HDMI, SD-card reading and flash-backed ADF loading are `OFF` by
