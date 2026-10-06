@@ -213,7 +213,11 @@ audio over the existing cable, no extra hardware; PWM/I2S stay as fallbacks.
       scroll test points its screen at ROM (menu table address in d0), so
       its yellow line grows upward on real hardware too. PAL ring 10240
       words (Memory.c, in SRAM, grew). Native runner: OMEGA_KEYS types
-      Amiga keys at given frames.
+      Amiga keys at given frames. CIA interrupts are levels: clearing
+      INTREQ keeps PORTS/EXTER set while a CIA's ICR has IR set (the
+      CIA-B alarm test cleared INTREQ with a timer interrupt pending and
+      failed on the board). Seen once after flashing: a core-0 hard fault
+      at 0x1013BEE6 (not code); not reproduced in four runs.
 - [x] **Paula mixing on core 1 (2026-10-05)**: core 0 only steps the
       channels (DMA, periods, interrupts) and sends a line record (sample
       changes with their colour clock, volumes, LED) through a 1 KB ring;

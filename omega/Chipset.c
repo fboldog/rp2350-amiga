@@ -551,6 +551,15 @@ void intena(uint16_t value){
 void intreq(uint16_t value){
     if( (value & 32768) ==0){
         chipset.intreqr = chipset.intreqr ^ (chipset.intreqr & value);
+        // The CIAs' interrupt lines are levels: while a CIA's ICR has its
+        // IR bit set, Paula's PORTS (CIA-A) or EXTER (CIA-B) bit cannot be
+        // cleared, only the ICR read releases it. DiagROM's CIA-B alarm
+        // test clears INTREQ with a timer interrupt still pending in ICR;
+        // dropping it left the alarm without an interrupt.
+        if (CIAA.icr & 0x80)
+            chipset.intreqr |= CIAA.chipInt & 0x7FFF;
+        if (CIAB.icr & 0x80)
+            chipset.intreqr |= CIAB.chipInt & 0x7FFF;
     }else{
         chipset.intreqr = chipset.intreqr | (value  & 32767);
     }

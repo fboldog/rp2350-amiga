@@ -33,7 +33,9 @@ def render(b):
     init=u16(off['initial_palette'],32); rows=u16(off['row_segment'],257); rlog=u16(off['row_log'],256); used,logn=u16(off['segments_used'],2)
     segs=u32(off['segment'],used); log=u32(off['palette_log'],min(logn,4095))
     pal=[0]*64
-    def setr(r,c): pal[r]=c8(c); pal[r+32]=c8((c>>1)&0x777)
+    def setr(r,c):
+        if r>31: print("bad log entry reg",r,hex(c)); return
+        pal[r]=c8(c); pal[r+32]=c8((c>>1)&0x777)
     for i in range(32): setr(i,init[i])
     applied=[0]; img=Image.new('RGB',(640,H)); px=img.load(); sprites=0
     def apply(p):
