@@ -37,11 +37,20 @@ require_file() {
 }
 
 for asset in "$ROM_DIR/kick13.rom" "$ROM_DIR/kick204.rom" \
-             "$ROM_DIR/kick314.rom" \
+             "$ROM_DIR/kick205.rom" "$ROM_DIR/kick314.rom" \
              "$ADF_DIR/amiga-os-134-workbench.adf" \
              "$ADF_DIR/amiga-os-204-workbench.adf" \
+             "$ADF_DIR/amiga-os-205-workbench.adf" \
+             "$ADF_DIR/amiga-os-314-workbench.adf" \
+             "$ADF_DIR/amiga-os-314-modules-a500.adf" \
              "$ADF_DIR/Install3.2.adf"; do
     require_file "$asset"
+done
+for tool in rdbtool xdftool; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "missing $tool (amitools): needed for the hard-disk images" >&2
+        exit 2
+    fi
 done
 
 REGRESSION=1 VIDEO="$VIDEO_NAME" ./native/build.sh
@@ -55,8 +64,9 @@ run_case() {
     adf=$3
     iterations=$4
     insert_at=$5
+    hdf=${6:-}
     echo "[$VIDEO_NAME] $name"
-    OMEGA_ROM="$PWD/$rom" ./native/omega-native "$adf" \
+    OMEGA_HDF="$hdf" OMEGA_ROM="$PWD/$rom" ./native/omega-native "$adf" \
         "$iterations" 0 "$insert_at" >"$OUTPUT_DIR/$name.log" 2>&1
     cp frame_final.ppm "$OUTPUT_DIR/$name.ppm"
     checksum=$(hash_file "$OUTPUT_DIR/$name.ppm")
@@ -72,6 +82,16 @@ run_case wb204 "$ROM_DIR/kick204.rom" \
     "$PWD/$ADF_DIR/amiga-os-204-workbench.adf" 500000 3000
 run_case wb314 "$ROM_DIR/kick314.rom" \
     "$PWD/$ADF_DIR/Install3.2.adf" 500000 3000
+
+# Booting from the emulated A600 IDE drive (no floppy): fresh images, as
+# the boot writes to them.
+./native/make_hdf.sh "$OUTPUT_DIR/hdf314.hdf" System ffs+intl \
+    "$ADF_DIR/amiga-os-314-workbench.adf" \
+    "$ADF_DIR/amiga-os-314-modules-a500.adf" >/dev/null
+./native/make_hdf.sh "$OUTPUT_DIR/hdf205.hdf" System ffs \
+    "$ADF_DIR/amiga-os-205-workbench.adf" >/dev/null
+run_case hdf314 "$ROM_DIR/kick314.rom" "" 500000 3000 "$OUTPUT_DIR/hdf314.hdf"
+run_case hdf205 "$ROM_DIR/kick205.rom" "" 500000 3000 "$OUTPUT_DIR/hdf205.hdf"
 
 if [ "${UPDATE_BASELINES:-0}" = "1" ]; then
     UPDATED="$OUTPUT_DIR/updated.sha256"
@@ -96,6 +116,9 @@ if [ ! -s "$EXPECTED" ]; then
     exit 2
 fi
 
+# Cases run in script order; compare by name.
+sort -k2 -o "$EXPECTED" "$EXPECTED"
+sort -k2 -o "$RESULTS" "$RESULTS"
 if diff -u "$EXPECTED" "$RESULTS"; then
     echo "all $VIDEO_NAME framebuffer regressions passed"
 else

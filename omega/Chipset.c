@@ -21,6 +21,7 @@
 #include "DMA.h"
 #include "Host.h"
 #include "debug.h"
+#include "Gayle.h"
 
 // DMA pointers reach chip RAM only: Agnus keeps as many address bits as
 // its chip RAM range (2 MB: A1-A20) and ignores the rest of the high word.
@@ -560,6 +561,9 @@ void intreq(uint16_t value){
             chipset.intreqr |= CIAA.chipInt & 0x7FFF;
         if (CIAB.icr & 0x80)
             chipset.intreqr |= CIAB.chipInt & 0x7FFF;
+        // Gayle's IDE interrupt is a level on INT2 as well.
+        if (gayleInterruptPending())
+            chipset.intreqr |= 0x0008;
     }else{
         chipset.intreqr = chipset.intreqr | (value  & 32767);
     }

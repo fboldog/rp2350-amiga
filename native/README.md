@@ -115,6 +115,58 @@ the version heading and bottom hardware-status line. DiagROM changes display
 mode near the PAL vertical-comparator boundary, so the Copper terminator must
 remain stopped after line 255 rather than running into adjacent list data.
 
+### IDE hard disk (A600 Gayle)
+
+`omega/Gayle.c` emulates the A600's Gayle with one IDE drive. Kickstart 2.05
+(A600HD 37.350) and 3.1.4 find it with their own `scsi.device` and boot from
+it; 1.3 and 2.04 have no IDE driver. `OMEGA_HDF` names the drive's image, a
+raw RDB hard-disk image (`hdf_native.c`, opened read-write: boots write to
+it). Without `OMEGA_HDF` there is no drive and no Gayle, as before.
+
+`make_hdf.sh` builds a bootable image from a Workbench ADF with amitools
+(`rdbtool`, `xdftool`), as an installer would: one FFS partition `DH0`, 63 MB
+(`CYLINDERS`, default 130) × 16 heads × 63 sectors, the geometry the drive
+reports. For 3.1.4 the Modules disk's libraries go to `Libs`:
+
+```sh
+native/make_hdf.sh dh0.hdf System ffs+intl \
+    sd_card/adf/amiga-os-314-workbench.adf \
+    sd_card/adf/amiga-os-314-modules-a500.adf
+OMEGA_HDF="$PWD/dh0.hdf" OMEGA_ROM="$PWD/sd_card/rom/kick314.rom" \
+    ./native/omega-native "" 500000
+
+native/make_hdf.sh dh0.hdf System ffs sd_card/adf/amiga-os-205-workbench.adf
+OMEGA_HDF="$PWD/dh0.hdf" OMEGA_ROM="$PWD/sd_card/rom/kick205.rom" \
+    ./native/omega-native "" 500000
+```
+
+Both boot to Workbench from `System` with no floppy (with no disk at all,
+3.1.4 stops at its insert-disk screen). What the two drivers do:
+
+- Both check Gayle's ID at 0xDE1000: a write, then eight reads of bit 7,
+  0xD0 for an A600. An access at 0xDE109A comes first, so only 0xDE1000 itself
+  is the ID register.
+- Both probe for the second drive (absent: its registers read 0), IDENTIFY
+  the first, and set multiple mode to 16 sectors.
+- 3.1.4 addresses sectors by LBA (READ SECTORS, READ MULTIPLE); 2.05 by
+  cylinder, head and sector, after INITIALIZE DEVICE PARAMETERS with 16
+  heads and 63 sectors, so images must use that geometry.
+
+A boot only reads. To test writes, give the image an `S/User-Startup` that
+writes, boot it, and read the results back:
+
+```sh
+printf 'Echo >SYS:hello.txt "written by Omega"\nCopy C:Dir TO SYS:DirCopy\n' \
+    > User-Startup
+xdftool dh0.hdf open part=DH0 + write User-Startup S
+OMEGA_HDF="$PWD/dh0.hdf" OMEGA_ROM="$PWD/sd_card/rom/kick314.rom" \
+    ./native/omega-native "" 500000
+xdftool dh0.hdf open part=DH0 + read hello.txt hello.txt
+xdftool dh0.hdf open part=DH0 + unpack check/   # reads every file
+```
+
+Both Kickstarts pass this (also with `MakeDir` and `Copy C: ALL`).
+
 ### Screenshot regression suite
 
 `REGRESSION=1` is a native compile-time build mode. It forces a headless build
@@ -125,15 +177,19 @@ are deterministic and concise:
 REGRESSION=1 VIDEO=PAL ./native/build.sh
 ```
 
-The regression runner builds in that mode, boots the three ROM-only screens and
-the three Workbench/installer cases, then compares exact final-frame PPM hashes:
+The regression runner builds in that mode, boots the three ROM-only screens,
+the three Workbench/installer cases and Kickstart 3.1.4 and 2.05 from fresh
+hard-disk images (`hdf314`, `hdf205`), then compares exact final-frame PPM
+hashes, sorted by case name:
 
 ```sh
 VIDEO=PAL  ./native/regression.sh
 VIDEO=NTSC ./native/regression.sh
 ```
 
-It requires the locally supplied ROM and ADF files named in the examples above.
+It requires the locally supplied ROM and ADF files named in the examples above
+(including `kick205.rom` and the 3.1.4 Workbench and A500 Modules and 2.05
+Workbench ADFs) and amitools for the hard-disk images.
 Each run prints a unique temporary directory containing its PPMs and logs for
 manual review. If an intentional rendering change has been reviewed in both
 modes, update one baseline set at a time with:
@@ -465,6 +521,8 @@ operation entirely segment-based. All presentation paths also use one shared
 | `../src/Planar.c` | shared HIRES, LORES, and HAM planar-to-chunky conversion |
 | `../src/Presentation.c` | shared raster clipping, repair, scaling, and framebuffer presentation |
 | `memory_native.c` | upstream Omega `Memory.c` verbatim (`low16Meg`, `chipRead*/Write*`) |
+| `hdf_native.c`    | the IDE drive's image (`OMEGA_HDF`) for `omega/Gayle.c` |
+| `make_hdf.sh`     | bootable RDB image from a Workbench ADF (amitools) |
 | `display_sdl.c`   | SDL2 window: open / push (30 fps cap) / poll / close |
 | `display_sdl.h`   | public API for `display_sdl.c` |
 | `sdl_shim.h`      | no-op `SDL_AtomicGet/Set` so `waitFreeSlot()` links without SDL |

@@ -97,8 +97,8 @@ Decisions (2026-10-22):
   directly, so the FAT and directory are never written (power loss can
   hurt the Amiga filesystem inside the image, as on a real drive, but not
   the card's FAT). Start with a small image (~256–500 MB): 2.05's
-  `scsi.device` may only address the disk by cylinder/head/sector (to be
-  checked), where ~504 MB is the safe limit.
+  `scsi.device` addresses the disk by cylinder/head/sector (checked on the
+  native runner), where ~504 MB is the safe limit.
 
 Steps:
 - [x] Add a read-only FatFs + SD-SPI driver; default pins in
@@ -118,23 +118,29 @@ Steps:
 - [ ] **HDF lookup:** find `/hdf/dh0.hdf`, check that its cluster chain is
       contiguous, keep its first card sector and size; refuse (and say so on
       the console) a fragmented image.
-- [ ] **Gayle** (`omega/Gayle.c`, already routed from 0xDA0000–0xDFEFFF by
-      `src/Memory.c`): the ID register at 0xDE1000 (how `scsi.device`
-      detects an A600), status, interrupt request and enable registers,
-      and the IDE interrupt as INT2 (PORTS), as CIA-A raises it in
-      `omega/Chipset.c`. No PCMCIA card.
-- [ ] **ATA drive:** the A600 task-file registers from 0xDA2000; IDENTIFY
-      DEVICE (geometry from the image size, LBA), READ/WRITE SECTOR(S),
-      READ/WRITE MULTIPLE, SET MULTIPLE MODE, INITIALIZE DEVICE
-      PARAMETERS, and status-only answers for the rest. One 512-byte sector
-      buffer: the 68000 moves it a word at a time through the data
-      register, and the next sector is read from the card when it runs out.
-      A blocking sector read stalls core 0 ~0.2–0.4 ms: fine to start with.
-- [ ] **Native runner first:** the same Gayle and ATA code with a host HDF
-      file instead of the card. Regression cases: Kickstart 3.1.4 and 2.05
-      each booting a prepared HDF to Workbench (images made with
-      `rdbtool`/`xdftool`). Most `scsi.device` behaviour (interrupts or
-      polling, which commands) is found here, without the board.
+- [x] **Gayle** (`omega/Gayle.c`, routed from 0xDA0000–0xDFEFFF by both
+      memory maps): the ID register at 0xDE1000 (0xD0, A600; 0xDE109A is
+      accessed first and is not it), status, interrupt request and enable
+      registers, and the IDE interrupt held on INT2 (PORTS) like CIA-A's in
+      `intreq()`. No PCMCIA card. Without a disk image there is no Gayle, as
+      before. `OMEGA_ENABLE_IDE`: on in the native runner, off on the board.
+- [x] **ATA drive:** the A600 task-file registers from 0xDA2000; IDENTIFY
+      DEVICE (16 heads × 63 sectors, LBA), READ/WRITE SECTOR(S), READ/WRITE
+      MULTIPLE, SET MULTIPLE MODE, INITIALIZE DEVICE PARAMETERS, and
+      status-only answers for the rest. One 512-byte sector buffer moved a
+      word at a time through the data register.
+- [x] **Native runner:** `OMEGA_HDF` (`native/hdf_native.c`) and
+      `native/make_hdf.sh` (bootable image from a Workbench ADF). Regression
+      cases `hdf314` and `hdf205` boot Kickstart 3.1.4 (LBA) and 2.05
+      (cylinder/head/sector) from fresh images to Workbench with no floppy.
+- [x] **Writes:** a plain boot only reads, so a test image's
+      `S/User-Startup` writes at boot (`Echo` to a file, `Copy C:Dir`,
+      `MakeDir` and `Copy C: ALL`). On 3.1.4 and 2.05 the file reads back, the
+      copies are byte-identical and the whole partition unpacks without
+      errors with `xdftool` (see `native/README.md`).
+- [ ] **On the board:** `OMEGA_ENABLE_IDE` with the SD backend
+      (`gayleDiskSectors/Read/Write`); the drive state and its 512-byte
+      buffer must not grow SRAM (PSRAM, or the ring gives way).
 - [ ] **Board boot:** mount the card, Kickstart from SD (else flash), HDF if
       present. DF0 boots ahead of the hard disk, so a hard-disk boot needs
       DF0 empty: a build option or an empty slot in the disk rotation (the

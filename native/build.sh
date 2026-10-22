@@ -105,7 +105,8 @@ $CC -O2 -g -std=gnu11 \
     -Wno-incompatible-pointer-types \
     $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
     -o "$OUT" \
-    native/main_native.c native/host_native.c native/memory_native.c $KICKSMASH_SRC \
+    native/main_native.c native/host_native.c native/memory_native.c \
+    native/hdf_native.c $KICKSMASH_SRC \
     src/Planar.c src/Presentation.c \
     $SDL_OBJ \
     "${OMEGA_SRC[@]}" \

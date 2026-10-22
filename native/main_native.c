@@ -19,6 +19,8 @@
 //   OMEGA_DISASM=1     turn on the Musashi disassembler (to UART/stdout) -
 //                      useful for seeing where a ROM's early init diverges.
 //   OMEGA_CPU=68020     use Musashi's 68020 core instead of the default 68000.
+//   OMEGA_HDF=<file>    attach this RDB hard-disk image as the A600 IDE
+//                       drive (omega/Gayle.c; see make_hdf.sh)
 //   OMEGA_KEYS=<list>   type Amiga raw keys: "frame:code,..." (hex code),
 //                       e.g. "200:04,260:02" presses and releases key 4 at
 //                       frame 200, then key 2 at frame 260.
