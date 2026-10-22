@@ -434,6 +434,16 @@ How to measure (no halt, firmware keeps running):
       idle 28.0 -> 27.2 frames/s, RemGame 10.5 -> 9.6 (PAL).
 - [ ] **Sprite collisions (CLXDAT/CLXCON)** and **dual playfield** (full
       BPLCON2 priorities) are not emulated.
+- [x] **Kickstart 3.1.4 pointer and right edge.** On the rotated HIRES
+      layout (DDF 0x38-0xD8) the pointer was drawn 64 columns left of the
+      mouse position (Intuition 249, drawn at 182), so clicks missed. Fixed
+      that, then what it exposed in the right 80 columns on the board:
+      sprite pixels there were overwritten by the late bitplane words
+      (torn pointer), an unchanged next line dropped the row's right edge
+      (striped scroll bar), and the last row's right edge was never
+      fetched (Copper turns the planes off). See README "Rotated HIRES
+      layout". PAL ring 10240 -> 10048 words, NTSC 15424 -> 15232 for the
+      SRAM code. Board-checked on 1.3, 2.04 and 3.1.4 Workbench.
 - [x] **RemGame item colours: CPU:beam ratio.** The emulated 68000 got 16
       cycles per DMA slot (Omega's value) where an A500 gets 2 (7.09 MHz CPU,
       3.55 MHz colour clock), so it ran ~8x fast against the beam, and the

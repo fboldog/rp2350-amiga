@@ -142,16 +142,16 @@ if(OMEGA_ENABLE_HDMI AND OMEGA_HDMI_AUDIO)
     target_sources(omega-amiga PRIVATE src/hdmi_island.c src/hdmi_audio.c)
 endif()
 # Core-1 message ring (32-bit words): the SRAM the frames and the rest leave.
-# PAL frames are larger, so PAL with HDMI audio gets 40 KB instead of 61 KB
+# PAL frames are larger, so PAL with HDMI audio gets 39 KB instead of 61 KB
 # (all that fits); HDMI audio also needs 3 KB for Paula's line records
 # and their mixer (core 1 code in SRAM).
 set(OMEGA_RING_WORDS "" CACHE STRING "Core-1 ring size in words (empty: automatic)")
 if(OMEGA_RING_WORDS)
     set(OMEGA_RING_WORDS_VALUE ${OMEGA_RING_WORDS})
 elseif(OMEGA_HDMI_AUDIO_ACTIVE AND OMEGA_VIDEO_MODE STREQUAL "PAL")
-    set(OMEGA_RING_WORDS_VALUE 10240)
+    set(OMEGA_RING_WORDS_VALUE 10048)
 elseif(OMEGA_HDMI_AUDIO_ACTIVE)
-    set(OMEGA_RING_WORDS_VALUE 15424)
+    set(OMEGA_RING_WORDS_VALUE 15232)
 else()
     set(OMEGA_RING_WORDS_VALUE 15616)
 endif()

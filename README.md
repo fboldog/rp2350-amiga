@@ -88,7 +88,7 @@ differ.
 | Vector table | 272 B | RAM copy of the vector table |
 | `.data` | ~58 KB | Code and tables copied to RAM: core 1's conversion loop and HSTX interrupt (anything core 1 runs must not fetch from flash), the chipset register dispatch tables, `DMALores`/`DMAHires` slot tables, with `OMEGA_HOT_CODE_IN_RAM` (default) all code of `DMA.c`, `CIA.c`, `Blitter.c`, `Floppy.c`, `m68kcpu.c`, `Memory.c` and `Host.c` (~28.7 KB), and with `OMEGA_HOT_OPCODES_IN_RAM` (default) the 75 hottest opcode handlers, their fetch helpers and the main loop (~12 KB) |
 | `sram_frames` | 320 KB / 300 KB | Two scanout frames, 640×256 (PAL) / 640×240 (NTSC), one byte per pixel (Amiga colour number or HAM code; RGB332 on the fallback path) |
-| `ring` | 64 KB (with HDMI audio: PAL 40 KB, NTSC 60 KB) | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
+| `ring` | 64 KB (with HDMI audio: PAL 39 KB, NTSC 60 KB) | Core 0 → core 1 message ring (bitplane blocks, palette changes, sprites) |
 | `m68ki_opcode_blocks` + `m68ki_opcode_block` | 32 KB + 1 KB | Two-level 68000 opcode → handler index: room for 256 shared blocks of 64 entries (~245 used), one byte per block of opcodes |
 | `m68ki_handler_ptrs` + `m68ki_handler_cycles` | 7.7 KB + 1.9 KB | Handler function pointers and 68000 cycle counts (one byte: all even, so bit 0 marks immediate-count shifts), one per handler |
 | `image_lines` | 5.1 KB | Two RGB888 row buffers with HSTX commands, expanded by the scanout interrupt |
@@ -214,7 +214,7 @@ The pixel conversion runs on core 1. Core 0 (the emulator) only enqueues
 each fetched bitplane block, palette changes and frame begin/end into a
 single-producer/single-consumer ring of 32-bit words; core 1 converts them
 into the frame between its line interrupts (`hostCore1Loop()` in
-`src/Host.c`). The ring is 64 KB (`RING_WORDS`, set by CMake: 40 KB on PAL
+`src/Host.c`). The ring is 64 KB (`RING_WORDS`, set by CMake: 39 KB on PAL
 with HDMI audio, where it still shows every idle Workbench frame; any size
 works, positions run over twice the ring size), which holds a whole frame's
 messages across the wait for the display swap: on idle Workbench every
@@ -576,6 +576,30 @@ ends in LORES 0x3C lines; the pointer used to jump 16 columns there). An early H
 rotated layout) is placed the same way against HIRES 0x3C, 4 columns a
 slot (Agony's interlaced intro fetches from 0x30).
 
+## Rotated HIRES layout (Kickstart 3.1.4)
+
+Kickstart 3.1.4's Workbench screen fetches HIRES from DDFSTRT 0x38 to
+DDFSTOP 0xD8. In the emulator's raster the last 80 columns of such a row
+arrive with the next line's first words, so the row is shown rotated by
+`OMEGA_DDF_ROTATED_PIXELS` (`omegaDdfRowRotation()`): image column c is
+raster column c + 80, and the right edge comes from columns 0-79, which
+`DMA.c` files under the previous row. Three things follow from it:
+
+- Sprites are placed by their OCS column (first fetched pixel at lores
+  2 × DDFSTRT + 9), where the display window's first pixel is column 16;
+  the bitplanes put it at raster column 80, so sprites move 64 columns
+  right with them. They were drawn 64 columns left of the mouse position,
+  and clicks landed right of the pointer.
+- On the board a row's sprites are sent before its right edge. Core 1
+  keeps sprite pixels for those 80 columns (`c1_tail`) and draws them when
+  it leaves the row; drawn at once, the late bitplane words overwrote them.
+- The Copper turns the planes off on the line after the screen, so the
+  last row's right edge would never be fetched: at the end of that line
+  `rotatedTailEndOfLine()` reads the words it would have fetched first,
+  without moving the pointers.
+
+Kickstart 1.3 and 2.04 do not use this layout.
+
 ## Unchanged rows
 
 Core 1 used to convert every row of every frame, even on a still screen:
@@ -589,7 +613,8 @@ scanout buffers already hold (core 1 publishes the oldest,
 `MSG_ROW_SAME`; core 1 copies that row's runs from the buffer's last
 record at the current colour-log position (each buffer alternates two
 records). A row with colour changes inside it is always sent; a new
-layout resets all rows. The per-row hashes and frame numbers (2 KB) are
+layout resets all rows. In the rotated layout a line also carries the
+right edge of the row above, so it is sent whenever that row was. The per-row hashes and frame numbers (2 KB) are
 in SCRATCH_Y, below core 0's stack (which peaks at ~1 KB). Hashing costs
 core 0 ~1 %: NTSC xSysinfo 60/60 shown (was 49), PAL D-Mob 36.9 shown
 (was 33-35); PAL xSysinfo, at core 0's limit, emulates 49.5 instead of
@@ -614,7 +639,7 @@ pointed at runs it was overwriting, and a black line ran down the
 screen). A field drawn while shown can tear inside itself;
 still screens (Agony's intro) come out as the full 512-line picture.
 The third line buffer and the second palette state cost ~3 KB of SRAM,
-taken from the core-1 ring (PAL with HDMI audio: 40 KB; D-Mob shows
+taken from the core-1 ring (PAL with HDMI audio: 39 KB; D-Mob shows
 33 instead of ~35.5 frames/s there).
 
 BPLCON1 fine scroll delays a row's bitplanes by PF1H lores pixels (2
@@ -687,7 +712,7 @@ and the "LED" filter, a second-order Butterworth at ~3.3 kHz, while CIA-A's
 `OMEGA_HDMI_AUDIO` (default ON, NTSC and PAL) sends the audio in HDMI data
 islands; no extra hardware is needed. OFF gives plain DVI, and Paula is then
 emulated (its interrupts) but not mixed. On PAL the core-1 ring shrinks to
-40 KB to make room.
+39 KB to make room.
 
 - Every line's horizontal blanking carries a data island from pixel 4:
   packet 1 and either an Audio Clock Regeneration packet (N = 6144, CTS =

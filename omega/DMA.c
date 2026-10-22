@@ -700,6 +700,18 @@ static int displayWindowContainsLine(int vpos) {
     return vpos >= start && vpos < stop;
 }
 
+// Draws one HIRES word read for display only (no pointer moved).
+static void __attribute__((noinline)) hiresPeekedWord(int row, int x,
+                                                      uint16_t p1, uint16_t p2,
+                                                      uint16_t p3, uint16_t p4) {
+    if (hostDirectActive) {
+        hostDirectHires(row, x, p1, p2, p3, p4);
+    } else {
+        hiresPlanar2Chunky(hostRasterPixels(row, x), p1, p2, p3, p4);
+        hostRasterWritten(row, x, 16);
+    }
+}
+
 static void hiresDisplayPrefetch(void) {
     if (!bitplaneLine.fetchWindowComplete ||
         (chipset.bplcon0 & 0x8000) == 0 ||
@@ -721,13 +733,7 @@ static void hiresDisplayPrefetch(void) {
     if (internal.bitplaneMask & 0x08)
         p4 = internal.chipramW[bitplaneLine.pointerAtFetchCompletion[3]];
 
-    if (hostDirectActive) {
-        hostDirectHires(host.rasterRow, host.rasterX, p1, p2, p3, p4);
-    } else {
-        hiresPlanar2Chunky(hostRasterPixels(host.rasterRow, host.rasterX),
-                           p1, p2, p3, p4);
-        hostRasterWritten(host.rasterRow, host.rasterX, 16);
-    }
+    hiresPeekedWord(host.rasterRow, host.rasterX, p1, p2, p3, p4);
     host.rasterX += 16;
 }
 
@@ -973,6 +979,39 @@ static void spriteRenderLine(void);
 // Raster row of this line's bitplane blocks, or -1 (no block this line).
 static int spriteLineRow = -1;
 
+// The rotated layout shows a row's last OMEGA_DDF_ROTATED_PIXELS columns
+// from the next line's first words. When that line fetches nothing (Kickstart
+// 3.1.4's Copper turns the planes off on the line after its screen), those
+// words are read here without moving the pointers.
+static int tailRow = -1;          // last line's raster row, if rotated
+static unsigned tailPlanes;       // and its bitplane mask
+static int tailScroll;            // and its first column
+
+static void rotatedTailEndOfLine(void) {
+    const int row = tailRow;
+    tailRow = -1;
+    if (lineRowRotation && bitplaneLine.hiresWords && internal.bitplaneMask) {
+        tailRow = host.rasterRow;
+        tailPlanes = internal.bitplaneMask;
+        tailScroll = bplScrollColumns();
+        return;
+    }
+    // This line drew no rotated HIRES words (its planes are off: it still
+    // counts LORES slots), so the last row's right edge is drawn here.
+    if (row < 0 || row >= HOST_RASTER_H || host.pixels == NULL)
+        return;
+    const uint32_t pt[4] = { chipset.bpl1pt, chipset.bpl2pt,
+                             chipset.bpl3pt, chipset.bpl4pt };
+    for (int i = 0, x = tailScroll; x < OMEGA_DDF_ROTATED_PIXELS;
+         ++i, x += 16) {
+        uint16_t p[4] = { 0, 0, 0, 0 };
+        for (int n = 0; n < 4; ++n)
+            if (tailPlanes & (1u << n))
+                p[n] = internal.chipramW[pt[n] + (uint32_t)i];
+        hiresPeekedWord(row, x, p[0], p[1], p[2], p[3]);
+    }
+}
+
 // End of a line (rare): kept out of the per-slot path so dma_run() stays
 // small and saves few registers.
 static void __attribute__((noinline)) dmaEndOfLine(void) {
@@ -980,6 +1019,7 @@ static void __attribute__((noinline)) dmaEndOfLine(void) {
     // though Agnus does not consume it as part of the line stride. Peek
     // at it for display only; do not advance any bitplane pointer.
     hiresDisplayPrefetch();
+    rotatedTailEndOfLine();
 
     audioLine(lineLast + 1);
     if (hostDirectActive) {
@@ -1460,7 +1500,11 @@ static void spriteDrawArgb(int row, int x, int colour_base, int attached,
             continue;
         const uint32_t colour = internal.palette[colour_base + v];
         for (int j = 0; j < 2; ++j) {
-            const int px = x + 2 * i + j;
+            int px = x + 2 * i + j;
+            // Rotated rows show raster columns 0..rotation-1 at their right
+            // edge.
+            if (lineRowRotation && px >= HOST_RASTER_W)
+                px -= HOST_RASTER_W;
             if (px < 0 || px >= HOST_RASTER_W)
                 continue;
             uint32_t *p = hostRasterPixels(row, px);
@@ -1485,6 +1529,11 @@ static void spriteRenderLine(void) {
     const int first = 2 * lineRasterDdf +
                       (hires ? OMEGA_SPRITE_HIRES_OFFSET
                              : OMEGA_SPRITE_LORES_OFFSET);
+    // The rotated layout (Kickstart 3.1.4's desktop) keeps the bitplanes'
+    // OCS column 16, the display window's first pixel at DIWSTRT 0x81, at
+    // raster column OMEGA_DDF_ROTATED_PIXELS; sprites follow them there
+    // (they were drawn 64 columns left of the mouse position).
+    const int shift = lineRowRotation ? lineRowRotation - 16 : 0;
     const unsigned front_pairs = (chipset.bplcon2 >> 3) & 7u;
     // Sprites show only inside the display window: DIWSTRT/DIWSTOP low
     // bytes in lores beam positions (OCS: HSTOP8 is fixed at 1).
@@ -1512,7 +1561,7 @@ static void spriteRenderLine(void) {
                 continue;               // drawn with the even half
             const uint16_t *rn = is_odd ? ro : re;
             const int hstart = is_odd ? hs_odd : hs_even;
-            const int x = 2 * (hstart - first);
+            const int x = 2 * (hstart - first) + shift;
             // Clip to the display window: bit 15 is at hstart.
             uint32_t mask = 0xffffu;
             if (hstart < diw_start)

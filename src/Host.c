@@ -271,6 +271,8 @@ static uint32_t __scratch_y("row_hash") row_hash[DIRECT_MAX_ROWS];
 static uint32_t __scratch_y("row_hash") row_since[DIRECT_MAX_ROWS];
 static uint32_t row_layout[2];
 static uint32_t direct_frame_no;
+// The previous row's messages went to core 1 (it was drawn afresh).
+static bool prev_row_sent;
 // Oldest frame either scanout buffer holds (core 1, 0: unknown).
 static volatile uint32_t c1_oldest_frame;
 
@@ -314,6 +316,7 @@ static void hostDirectBegin(void) {
     ringPush(msg, count_of(msg));
     ringPublish();
     row_start = ring_wr;
+    prev_row_sent = false;
 }
 
 // A colour change goes to core 1 with its beam row and raster column, so it
@@ -351,24 +354,32 @@ uint32_t host_row_hash = 0x811c9dc5u;
 
 void hostDirectRowEnd(int row, int drawn) {
     runFlush();
+    bool sent = false;
     if (row >= 0 && row < DIRECT_MAX_ROWS && row_has_blocks) {
         const uint32_t h = row_colours_changed ? 0u : host_row_hash | 1u;
+        sent = true;
         if (h && h == row_hash[row]) {
             // Unchanged since row_since[row]: if every buffer core 1 may
             // draw into holds that frame or a later one, it already has the
             // row; take its messages back and let core 1 copy the row.
+            // A rotated line's first words are the right edge of the row
+            // above: they go again when that row was drawn afresh.
             const uint32_t oldest =
                 __atomic_load_n(&c1_oldest_frame, __ATOMIC_ACQUIRE);
-            if (oldest && (int32_t)(oldest - row_since[row]) >= 0) {
+            const bool rotated = (row_layout[1] & 0xffffu) != 0;
+            if (oldest && (int32_t)(oldest - row_since[row]) >= 0 &&
+                !(rotated && prev_row_sent)) {
                 ring_wr = row_start;
                 runStart(MSG_HEADER(MSG_ROW_SAME, row, 0, 0)); // one word
                 runFlush();
+                sent = false;
             }
         } else {
             row_hash[row] = h;
             row_since[row] = direct_frame_no;
         }
     }
+    prev_row_sent = sent;
     row_has_blocks = false;
     row_colours_changed = false;
     host_row_hash = 0x811c9dc5u;
@@ -487,11 +498,79 @@ static void hostInitPlanarTables(void) {
 
 static void C1_FUNC(c1Record)(int y, int x0, int x1);
 
+// Sprite pixels for the right edge of a rotated row: those columns come
+// from the next beam line's first fetch, after the row's sprites, so the
+// pixels wait here (colour, 0x80: behind) until the row is left.
+static uint8_t c1_tail[OMEGA_DDF_ROTATED_PIXELS];
+static bool c1_tail_pending;
+
+// The columns already drawn on the open row y.
+static void __attribute__((noinline)) C1_FUNC(c1DrawnRange)(int y, int *min, int *max) {
+    const dvi_indexed_frame_t *rec = c1_record;
+    const uint32_t used = rec->segments_used;
+    *min = DVI_DIRECT_IMAGE_WIDTH;
+    *max = 0;
+    for (uint32_t i = rec->row_segment[y]; i < used; ++i) {
+        const int x0 = (int)DVI_SEGMENT_X0(rec->segment[i]);
+        const int x1 = (int)DVI_SEGMENT_X1(rec->segment[i]);
+        if (x0 < *min) *min = x0;
+        if (x1 > *max) *max = x1;
+    }
+    if (*min > *max)
+        *min = *max = 0;  // nothing drawn on this row yet
+}
+
+// Puts one sprite pixel on the open row y. Columns the bitplanes did not
+// draw get colour 0 first and are recorded as drawn.
+static void __attribute__((noinline)) C1_FUNC(c1SpritePixel)(int y, int ix, uint8_t colour,
+                                   bool behind, int *min, int *max) {
+    uint8_t *line = c1_image + y * DVI_DIRECT_IMAGE_WIDTH;
+    if (ix < *min || ix >= *max) {
+        // Outside the drawn columns: extend the row's drawn range with
+        // colour 0 up to this pixel, keeping it contiguous.
+        int x0, x1;
+        if (*min == *max) { x0 = ix; x1 = ix + 1; }
+        else if (ix < *min) { x0 = ix; x1 = *min; }
+        else { x0 = *max; x1 = ix + 1; }
+        for (int k = x0; k < x1; ++k)
+            line[k] = 0;
+        const bool ham = c1_ham;
+        c1_ham = false;
+        c1Record(y, x0, x1);
+        c1_ham = ham;
+        if (*min == *max) { *min = x0; *max = x1; }
+        else if (x0 < *min) *min = x0;
+        else *max = x1;
+    }
+    // Behind the playfield: only over colour 0 (or other sprites).
+    if (behind && line[ix] != 0 && !(line[ix] & 0x40u))
+        return;
+    line[ix] = colour;
+}
+
+// Draws the open row's waiting right-edge sprite pixels; called before
+// the open row advances.
+static void C1_FUNC(c1SpriteTailFlush)(void) {
+    c1_tail_pending = false;
+    const int y = c1_open_row;
+    const bool on_row = c1_image && y >= 0 && y < c1_height;
+    const int x0 = DVI_DIRECT_IMAGE_WIDTH - OMEGA_DDF_ROTATED_PIXELS;
+    int min = 0, max = 0;
+    if (on_row)
+        c1DrawnRange(y, &min, &max);
+    for (int k = 0; k < OMEGA_DDF_ROTATED_PIXELS; ++k) {
+        const uint8_t v = c1_tail[k];
+        if (!v)
+            continue;
+        c1_tail[k] = 0;
+        if (on_row)
+            c1SpritePixel(y, x0 + k, v & 0x7fu, (v & 0x80u) != 0, &min, &max);
+    }
+}
+
 // Overlays a sprite on image row y (core 0 has clipped it to the display
-// window). Columns the bitplanes did not draw on this row get colour 0
-// first and are recorded as drawn. Sprite pixels carry 0x40: scanout shows
-// them as colour registers even on HAM rows, where they must not change the
-// held colour.
+// window). Sprite pixels carry 0x40: scanout shows them as colour
+// registers even on HAM rows, where they must not change the held colour.
 static void C1_FUNC(c1Sprite)(int row, int x, uint32_t extra, uint32_t ab,
                               uint32_t cd) {
     if (!c1_image || row % c1_step)
@@ -499,19 +578,9 @@ static void C1_FUNC(c1Sprite)(int row, int x, uint32_t extra, uint32_t ab,
     const int y = c1_first_row + row / c1_step;
     if (y < 0 || y >= c1_height || y != c1_open_row)
         return;
-    const dvi_indexed_frame_t *rec = c1_record;
-    const uint32_t first = rec->row_segment[y];
-    const uint32_t used = rec->segments_used;
-    int min = DVI_DIRECT_IMAGE_WIDTH, max = 0;
-    for (uint32_t i = first; i < used; ++i) {
-        const int x0 = (int)DVI_SEGMENT_X0(rec->segment[i]);
-        const int x1 = (int)DVI_SEGMENT_X1(rec->segment[i]);
-        if (x0 < min) min = x0;
-        if (x1 > max) max = x1;
-    }
-    uint8_t *line = c1_image + y * DVI_DIRECT_IMAGE_WIDTH;
-    if (min > max)
-        min = max = 0;  // nothing drawn on this row yet
+    int min, max;
+    c1DrawnRange(y, &min, &max);
+    const int tail_x0 = DVI_DIRECT_IMAGE_WIDTH - c1_rotation;
     const uint32_t base = extra & 0x1fu;
     const bool attached = (extra >> 5) & 1u;
     const bool behind = (extra >> 6) & 1u;
@@ -528,35 +597,20 @@ static void C1_FUNC(c1Sprite)(int row, int x, uint32_t extra, uint32_t ab,
             if (c1_narrow) {
                 ix -= HOST_FETCH_LEAD;
             } else {
-                if (ix < 0 || ix >= HOST_RASTER_W)
+                // x is a raster column; past HOST_RASTER_W it continues
+                // into the right edge of a rotated row.
+                if (ix < 0 || ix >= HOST_RASTER_W + c1_rotation)
                     continue;
                 ix -= c1_rotation;
-                if (ix < 0)
-                    ix += HOST_RASTER_W;
             }
             if (ix < 0 || ix >= DVI_DIRECT_IMAGE_WIDTH)
                 continue;
-            if (ix < min || ix >= max) {
-                // Outside the drawn columns: extend the row's drawn range
-                // with colour 0 up to this pixel, keeping it contiguous.
-                int x0, x1;
-                if (min == max) { x0 = ix; x1 = ix + 1; }
-                else if (ix < min) { x0 = ix; x1 = min; }
-                else { x0 = max; x1 = ix + 1; }
-                for (int k = x0; k < x1; ++k)
-                    line[k] = 0;
-                const bool ham = c1_ham;
-                c1_ham = false;
-                c1Record(y, x0, x1);
-                c1_ham = ham;
-                if (min == max) { min = x0; max = x1; }
-                else if (x0 < min) min = x0;
-                else max = x1;
-            }
-            // Behind the playfield: only over colour 0 (or other sprites).
-            if (behind && line[ix] != 0 && !(line[ix] & 0x40u))
+            if (c1_rotation && ix >= tail_x0) {
+                c1_tail[ix - tail_x0] = (uint8_t)(colour | (behind ? 0x80u : 0u));
+                c1_tail_pending = true;
                 continue;
-            line[ix] = colour;
+            }
+            c1SpritePixel(y, ix, colour, behind, &min, &max);
         }
     }
 }
@@ -565,6 +619,8 @@ static void C1_FUNC(c1Sprite)(int row, int x, uint32_t extra, uint32_t ab,
 // as logged so far. Runs drawn back to back with no palette change between
 // them merge.
 static void C1_FUNC(c1Record)(int y, int x0, int x1) {
+    if (c1_tail_pending && y > c1_open_row)
+        c1SpriteTailFlush();
     dvi_indexed_frame_t *rec = c1_record;
     const uint32_t used = rec->segments_used;
     // Rows arrive in beam order; a row behind the open one (e.g. after a
@@ -730,6 +786,11 @@ static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size,
     rec->segments_used = 0;
     rec->log_used = 0;
     rec->segment_overflow = false;
+    if (c1_tail_pending) {
+        c1_tail_pending = false;  // left by a frame that was not drawn
+        for (int k = 0; k < OMEGA_DDF_ROTATED_PIXELS; ++k)
+            c1_tail[k] = 0;
+    }
     c1_open_row = -1;
     c1_mark_row = -1;
     c1_mark_pos = 0;
@@ -744,6 +805,8 @@ static void C1_FUNC(c1RowSame)(int row) {
     const int y = c1_first_row + row / c1_step;
     if (y < c1_open_row || y >= c1_height)
         return;
+    if (c1_tail_pending && y > c1_open_row)
+        c1SpriteTailFlush();
     dvi_indexed_frame_t *rec = c1_record;
     const dvi_indexed_frame_t *old = c1_prev_record;
     uint32_t used = rec->segments_used;
@@ -787,6 +850,8 @@ static void C1_FUNC(c1RowEnd)(int row) {
 static void C1_FUNC(c1End)(uint16_t border) {
     if (!c1_image)
         return;
+    if (c1_tail_pending)
+        c1SpriteTailFlush();
     dvi_indexed_frame_t *rec = c1_record;
     while (c1_open_row < DVI_MAX_ROWS)
         rec->row_segment[++c1_open_row] = rec->segments_used;
@@ -856,6 +921,8 @@ static void C1_FUNC(c1Colour)(int row, int x, int reg, uint16_t value) {
         return;
     const int y = row % c1_step ? -1 : c1_first_row + row / c1_step;
     const bool on_row = y >= 0 && y < c1_height && y >= c1_open_row;
+    if (c1_tail_pending && on_row && y > c1_open_row)
+        c1SpriteTailFlush();
     int c = c1ImageX(x);
     if (c < 0)
         c = 0;
