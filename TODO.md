@@ -74,17 +74,85 @@ alternative future backends.
 
 ---
 
-## Phase 2b – microSD (optional, external SPI module)
+## Phase 2b – microSD and HDF hard disk (external SPI module)
 
+Goal: boot an installed system from a hard-disk image on the SD card. This
+comes before RTG.
+
+Decisions (2026-10-22):
+- **Card:** an external SPI microSD module on the WeAct board (3.3 V, short
+  wires, pull-up on MISO). USB mass storage on the hub was considered and
+  skipped: the RP2350's USB is full speed only (~0.6–1 MB/s, shared with
+  the mouse and keyboard), each request takes ~1–3 ms on core 0 in
+  `tuh_task()`, and it needs SRAM the board does not have. SPI reads a
+  sector in ~0.2–0.4 ms, synchronously. A 4-bit PIO SDIO interface can come
+  later on the same card.
+- **Kickstarts:** 3.1.4 (A500 ROM, `scsi.device` 45.7) and 2.05 (A600HD
+  37.350). Both drive the A600's Gayle IDE themselves, so the emulator
+  provides Gayle and an ATA drive, with no expansion board or driver of
+  its own. Hard-disk boot on 1.3 and 2.04 (an autoconfig board with its
+  own boot ROM and device driver) is out of scope.
+- **Image:** an RDB hard-disk image, `/hdf/dh0.hdf`. It must be contiguous
+  on the card: FatFs finds it at boot, then sectors are read and written
+  directly, so the FAT and directory are never written (power loss can
+  hurt the Amiga filesystem inside the image, as on a real drive, but not
+  the card's FAT). Start with a small image (~256–500 MB): 2.05's
+  `scsi.device` may only address the disk by cylinder/head/sector (to be
+  checked), where ~504 MB is the safe limit.
+
+Steps:
 - [x] Add a read-only FatFs + SD-SPI driver; default pins in
       `board_config.h` (SPI1 SCK30/MOSI31/MISO40/CS43), overridable with
       `-DBOARD_SD_*`
 - [~] Load Kickstart ROM from `/rom/kick13.rom`, with flash fallback. The code
       compiles with `-DOMEGA_ENABLE_SDCARD=ON` but needs an SD module wired to
       the WeAct board for validation. The DF0 ADF remains flash-backed.
+- [ ] **Fit the SD build in SRAM.** An HDMI build with
+      `-DOMEGA_ENABLE_SDCARD=ON` is ~1 KB over today: move the FatFs work
+      area and sector buffers to PSRAM (free: 0x200000–0x27FFFF, and the
+      unused SD ROM cache), or shrink the core-1 ring.
+- [ ] **SD layer** (`src/sd_diskio.c`): single and multi-block writes
+      (CMD24/CMD25), multi-block reads (CMD18), a faster SPI clock
+      (25 MHz or more if the wiring allows), then validate on the board with
+      the module's pins in `board_config.h`.
+- [ ] **HDF lookup:** find `/hdf/dh0.hdf`, check that its cluster chain is
+      contiguous, keep its first card sector and size; refuse (and say so on
+      the console) a fragmented image.
+- [ ] **Gayle** (`omega/Gayle.c`, already routed from 0xDA0000–0xDFEFFF by
+      `src/Memory.c`): the ID register at 0xDE1000 (how `scsi.device`
+      detects an A600), status, interrupt request and enable registers,
+      and the IDE interrupt as INT2 (PORTS), as CIA-A raises it in
+      `omega/Chipset.c`. No PCMCIA card.
+- [ ] **ATA drive:** the A600 task-file registers from 0xDA2000; IDENTIFY
+      DEVICE (geometry from the image size, LBA), READ/WRITE SECTOR(S),
+      READ/WRITE MULTIPLE, SET MULTIPLE MODE, INITIALIZE DEVICE
+      PARAMETERS, and status-only answers for the rest. One 512-byte sector
+      buffer: the 68000 moves it a word at a time through the data
+      register, and the next sector is read from the card when it runs out.
+      A blocking sector read stalls core 0 ~0.2–0.4 ms: fine to start with.
+- [ ] **Native runner first:** the same Gayle and ATA code with a host HDF
+      file instead of the card. Regression cases: Kickstart 3.1.4 and 2.05
+      each booting a prepared HDF to Workbench (images made with
+      `rdbtool`/`xdftool`). Most `scsi.device` behaviour (interrupts or
+      polling, which commands) is found here, without the board.
+- [ ] **Board boot:** mount the card, Kickstart from SD (else flash), HDF if
+      present. DF0 boots ahead of the hard disk, so a hard-disk boot needs
+      DF0 empty: a build option or an empty slot in the disk rotation (the
+      KEY button already ejects).
+- [ ] **Install:** boot `Install3_1_4.adf`, partition with HDToolBox, run
+      the installer; for 2.05, its own Workbench disks. Or prepare the
+      image on the PC.
 - [ ] Stream ADF tracks from SD instead of storing a complete MFM image in
-      PSRAM; this is needed for practical disk swapping
+      PSRAM; this is needed for practical disk swapping (reuses the SD
+      layer and the DF0 track buffer)
 - [ ] Optional: a tiny on-screen disk chooser
+- [ ] Later: fast RAM in free PSRAM (an installed 3.1.4 wants it; overlaps
+      with RTG); USB mass storage as a second source behind the same block
+      interface; PIO SDIO for speed; moving card access off core 0 (DMA) if
+      it hurts audio or frame pacing.
+
+Risks: the SD pins have never been tested; SRAM is nearly full, so new data
+goes to PSRAM; card access blocks core 0.
 
 ---
 
