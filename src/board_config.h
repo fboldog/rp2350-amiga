@@ -95,11 +95,12 @@
 //  Amiga memory map inside PSRAM   (emulator layout, not board wiring)
 // ---------------------------------------------------------------------------
 //  0x000000..0x1FFFFF  Chip RAM        (2 MB)      Amiga 0x000000..0x1FFFFF
-//  0x200000..0x27FFFF  Free (was slow RAM; the emulated Amiga has 2 MB chip
-//                       RAM only)
-//  0x280000..0x47FFFF  DF0 MFM buffer  (2 MB; empty-drive image when no ADF
-//                                       is in flash, else the active track,
+//  0x200000..0x3FFFFF  Fast RAM        (2 MB)      Zorro II autoconfig
+//                                                  board, Amiga 0x200000..
+//  0x400000..0x403FFF  DF0 MFM track   (16 KB; the active track of the flash
+//                                       ADF, or the empty drive's track,
 //                                       read uncached; the ADF streams)
+//  0x404000..0x47FFFF  Free
 //  0x480000..0x4FFFFF  SD Kickstart cache (512 KB, SD-card builds)
 //  0x540000..0x639FFF  Video DMA raster scratch (640x400 ARGB32, 1000 KB)
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
@@ -111,7 +112,8 @@
 //  0x7CC000..0x7FEFFF  Reserved
 //  0x7FF000..0x7FF00B  DF0 disk rotation state (survives resets only)
 #define BOARD_MAP_CHIPRAM_OFFSET   0x000000u
-#define BOARD_MAP_DF0_OFFSET       0x280000u
+#define BOARD_MAP_FAST_RAM_OFFSET  0x200000u
+#define BOARD_MAP_DF0_OFFSET       0x400000u
 #define BOARD_MAP_FRAMEBUF_OFFSET  0x680000u
 #define BOARD_MAP_DVI_RECORDS_OFFSET 0x7A8000u
 #define BOARD_MAP_DVI_RECORDS_SIZE 0x024000u
@@ -122,7 +124,12 @@
 #define BOARD_MAP_SD_WORK_OFFSET   0x780000u
 
 #define BOARD_MAP_CHIPRAM_SIZE     0x200000u   // 2 MB
-#define BOARD_MAP_FLOPPY_SIZE      0x200000u   // 2 MB (DF0)
+// Fast RAM: a power of two from 64 KB to 2 MB, or 0 for none
+// (-DBOARD_MAP_FAST_RAM_SIZE=0).
+#ifndef BOARD_MAP_FAST_RAM_SIZE
+#define BOARD_MAP_FAST_RAM_SIZE    0x200000u   // 2 MB
+#endif
+#define BOARD_MAP_FLOPPY_SIZE      0x004000u   // 16 KB (one DF0 MFM track)
 #define BOARD_MAP_SD_ROM_SIZE      0x080000u   // 512 KB maximum
 #define BOARD_MAP_SD_WORK_SIZE     0x001800u   // 6 KB
 
@@ -133,6 +140,10 @@
 // ---------------------------------------------------------------------------
 //  Compile-time sanity checks
 // ---------------------------------------------------------------------------
+_Static_assert(BOARD_MAP_FAST_RAM_OFFSET + BOARD_MAP_FAST_RAM_SIZE <=
+               BOARD_MAP_DF0_OFFSET, "Fast RAM overruns the DF0 track");
+_Static_assert(BOARD_MAP_DF0_OFFSET + BOARD_MAP_FLOPPY_SIZE <=
+               BOARD_MAP_SD_ROM_OFFSET, "DF0 track overruns the SD ROM cache");
 _Static_assert(BOARD_MAP_FRAMEBUF_OFFSET + 640u*400u*4u <= BOARD_PSRAM_SIZE_BYTES,
                "framebuffer overruns fitted PSRAM - shrink the map or fit more PSRAM");
 _Static_assert(BOARD_MAP_VIDEO_RASTER_OFFSET + 640u*400u*4u <= BOARD_MAP_FRAMEBUF_OFFSET,

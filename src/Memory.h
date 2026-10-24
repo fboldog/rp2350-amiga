@@ -81,6 +81,13 @@ static inline unsigned int chipFetchLongInline(unsigned int address) {
 }
 #endif
 
+#ifdef PICO_BUILD
+// Autoconfig space (0xE00000-0xF7FFFF): the Fast RAM board's register
+// byte, else 0; writes configure it (MemoryBoot.c, kept out of SRAM).
+unsigned int memory_expansion_read(unsigned int address);
+void memory_expansion_write(unsigned int address, unsigned int value);
+#endif
+
 void chipWriteByte(unsigned int address, unsigned int value);
 void chipWriteWord(unsigned int address, unsigned int value);
 void chipWriteLong(unsigned int address, unsigned int value);

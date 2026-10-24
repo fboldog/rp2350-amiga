@@ -22,6 +22,7 @@
 #include "Gayle.h"
 #include "../omega/m68k.h"
 #include "KickSmash.h"
+#include "Expansion.h"
 
 unsigned char low16Meg[16777216];
 
@@ -49,9 +50,31 @@ static inline unsigned int customMirror(unsigned int address){
     return 0xDFF000u | (address & 0x1FFu);
 }
 
+// Fast RAM, once autoconfig has placed it (omega/Expansion.c): low16Meg at
+// its own addresses. Elsewhere 0x200000-0x9FFFFF is open bus.
+static unsigned int fastBase, fastSize;
+#define IN_FAST_RAM(a) ((a) - fastBase < fastSize)
+
+void expansionHostMapFastRam(uint32_t base, uint32_t size){
+    if (base < 0x200000u || base + size > 0xA00000u)
+        size = 0;
+    fastBase = base;
+    fastSize = size;
+}
+
+// Autoconfig space: the board's register, else an open bus (reads high;
+// zero would describe a board and make firmware enumerate ghosts).
+static unsigned int expansionRead(unsigned int address){
+    const int value = address < EXPANSION_END && address >= EXPANSION_BASE
+                    ? expansionReadByte(address) : -1;
+    return value < 0 ? 0xFF : (unsigned int)value;
+}
+
 unsigned int chipReadByte(unsigned int address){
     if (address > 0xFFFFFFu)
         return 0xFF;
+    if (IN_FAST_RAM(address))
+        return low16Meg[address];
     //ROM
     if(address>=0xF80000){
         return low16Meg[address];
@@ -59,9 +82,7 @@ unsigned int chipReadByte(unsigned int address){
     
     //Autoconfig space
     if(address>0xDFFFFF){
-        // No expansion board is attached.  An open autoconfig bus reads
-        // high; zero describes a board and makes firmware enumerate ghosts.
-        return 0xFF;
+        return expansionRead(address);
     }
     
 #ifdef THREADED_CPU
@@ -115,10 +136,9 @@ unsigned int chipReadByte(unsigned int address){
         return CIARead(&CIAB,address);
     }
 
-    //24bit fast ram
+    //24bit space without Fast RAM
     if(address>0x1FFFFF){
-        //return 0;
-        return low16Meg[address];
+        return 0;
     }
 
     //RAM
@@ -128,6 +148,8 @@ unsigned int chipReadByte(unsigned int address){
 unsigned int chipReadWord(unsigned int address){
     if (address > 0xFFFFFFu)
         return 0xFFFF;
+    if (IN_FAST_RAM(address))
+        return (unsigned int)low16Meg[address] << 8 | low16Meg[address + 1];
     //ROM
     if(address>0xF7FFFF){
         //return READ_WORD(chipset.rom,address-0xF80000);
@@ -139,7 +161,7 @@ unsigned int chipReadWord(unsigned int address){
     
     //Autoconfig space
     if(address>0xDFFFFF){
-        return 0xFFFF;
+        return expansionRead(address) << 8 | 0xFF;
     }
     
 #ifdef THREADED_CPU
@@ -205,6 +227,10 @@ unsigned int chipReadWord(unsigned int address){
 unsigned int chipReadLong(unsigned int address){
     if (address > 0xFFFFFFu)
         return 0xFFFFFFFFu;
+    if (IN_FAST_RAM(address))
+        return (unsigned int)low16Meg[address] << 24 |
+               (unsigned int)low16Meg[address + 1] << 16 |
+               (unsigned int)low16Meg[address + 2] << 8 | low16Meg[address + 3];
     // KickSmash ROM switcher protocol (omega/KickSmash.c)
     if (address > 0xF7FFFFu && kickSmashWatches(address)) {
         uint32_t value;
@@ -298,13 +324,19 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
             fflush(stdout);
         }
     }
+    if (IN_FAST_RAM(address)) {
+        low16Meg[address] = (uint8_t)value;
+        return;
+    }
     if(address>=0xF80000){
         return;
     }
 
-    // No expansion board is attached; writes to Zorro/autoconfig space are
-    // ignored instead of being decoded as out-of-range custom registers.
+    // Zorro/autoconfig space: the board's registers, never decoded as
+    // out-of-range custom registers.
     if(address>0xDFFFFF){
+        if (address < EXPANSION_END && address >= EXPANSION_BASE)
+            expansionWriteByte(address, (uint8_t)value);
         return;
     }
 
@@ -418,12 +450,20 @@ void chipWriteWord(unsigned int address,unsigned int value){
             }
         }
     }
+    if (IN_FAST_RAM(address)) {
+        low16Meg[address] = (uint8_t)(value >> 8);
+        low16Meg[address + 1] = (uint8_t)value;
+        return;
+    }
     //ROM
     if(address>=0xF80000){
         return;
     }
 
     if(address>0xDFFFFF){
+        // autoconfig: the high byte
+        if (address < EXPANSION_END && address >= EXPANSION_BASE)
+            expansionWriteByte(address, (uint8_t)(value >> 8));
         return;
     }
 
@@ -545,6 +585,13 @@ void chipWriteLong(unsigned int address,unsigned int value){
                address, value, pc, ++rp_hook_count);
         fflush(stdout);
     }
+    if (IN_FAST_RAM(address)) {
+        low16Meg[address] = (uint8_t)(value >> 24);
+        low16Meg[address + 1] = (uint8_t)(value >> 16);
+        low16Meg[address + 2] = (uint8_t)(value >> 8);
+        low16Meg[address + 3] = (uint8_t)value;
+        return;
+    }
     //ROM
     if(address>=0xF80000){
         return;
@@ -603,13 +650,9 @@ void chipWriteLong(unsigned int address,unsigned int value){
         return;
     }
     
-    //24bit fast ram
+    //24bit space without Fast RAM
     if(address>0x1FFFFF){
-        //return;
-        uint32_t* dest = (uint32_t*)&low16Meg[address];
-        value = ((value << 8) & 0xFF00FF00 ) | ((value >> 8) & 0xFF00FF );
-        value = value << 16 | value >> 16;
-        *dest = value; return;
+        return;
     }
     
     //RAM - Incomplete address decding means chip addresses below 2meg wrap around

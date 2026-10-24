@@ -118,6 +118,7 @@ set(OMEGA_SOURCES
     omega/debug.c
     omega/DMA.c
     omega/Floppy.c
+    omega/Expansion.c
     omega/Gayle.c
     omega/KickSmash.c
     omega/m68kcpu.c
@@ -161,11 +162,16 @@ elseif(OMEGA_HDMI_AUDIO_ACTIVE)
 else()
     set(OMEGA_RING_WORDS_VALUE 15616)
 endif()
-# SD-card builds (FatFs, the IDE drive, the KickSmash ROM switcher) need a
-# little of it. The size is a constant in the ring's index arithmetic, and
-# a multiple of 128 words keeps that code short (10016 cost 120 bytes).
-if(NOT OMEGA_RING_WORDS AND OMEGA_ENABLE_SDCARD)
-    math(EXPR OMEGA_RING_WORDS_VALUE "(${OMEGA_RING_WORDS_VALUE} - 32) / 128 * 128")
+# The Fast RAM board's decoding (Memory.c, in SRAM) needs a little of it,
+# SD-card builds (FatFs, the IDE drive, the KickSmash ROM switcher) a little
+# more. The size is a constant in the ring's index arithmetic, and a
+# multiple of 128 words keeps that code short (10016 cost 120 bytes).
+if(NOT OMEGA_RING_WORDS)
+    if(OMEGA_ENABLE_SDCARD)
+        math(EXPR OMEGA_RING_WORDS_VALUE "(${OMEGA_RING_WORDS_VALUE} - 160) / 128 * 128")
+    else()
+        math(EXPR OMEGA_RING_WORDS_VALUE "(${OMEGA_RING_WORDS_VALUE} - 128) / 128 * 128")
+    endif()
 endif()
 
 # USB host is only built with HDMI (which sets up the clocks for it).

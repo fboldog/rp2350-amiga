@@ -185,6 +185,13 @@ xdftool dh0.hdf open part=DH0 + unpack check/   # reads every file
 
 Both Kickstarts pass this (also with `MakeDir` and `Copy C: ALL`).
 
+### Fast RAM
+
+As on the board, a 2 MB Zorro II Fast RAM board answers autoconfig at
+`0xE80000` (`omega/Expansion.c`); Kickstart places it at `0x200000` and the
+runner keeps its memory in `low16Meg` at those addresses.
+`OMEGA_FAST_RAM_KB=<n>` sets its size (a power of two, 64-8192; 0 for none).
+
 ### Screenshot regression suite
 
 `REGRESSION=1` is a native compile-time build mode. It forces a headless build

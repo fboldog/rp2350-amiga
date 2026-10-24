@@ -275,21 +275,16 @@ static void disk_button_poll(void) {
 
 static void prepare_empty_df0(void) {
     // Kickstart still needs a real, empty DF0 device when no ADF is loaded.
-    // Give each track a sync word followed by invalid/zero sector data. This
+    // Every track reads as a sync word followed by invalid/zero sector data
+    // (one track, which floppyDataRead() streams for any cylinder). This
     // lets trackdisk time out with "no sector header" and display the normal
     // insert-disk screen instead of waiting forever for a sync marker.
-    enum { TRACK_BYTES = 12798, CYLINDERS = 80, SIDES = 2 };
     uint8_t *mfm = df[0].mfmData;
     if (!mfm) return;
 
     memset(mfm, 0, PSRAM_FLOPPY_SIZE);
-    for (int cylinder = 0; cylinder < CYLINDERS; ++cylinder) {
-        for (int side = 0; side < SIDES; ++side) {
-            uint32_t offset = (uint32_t)(cylinder * SIDES + side) * TRACK_BYTES;
-            mfm[offset] = 0x44;
-            mfm[offset + 1] = 0x89;
-        }
-    }
+    mfm[0] = 0x44;
+    mfm[1] = 0x89;
 }
 
 #if OMEGA_ENABLE_SDCARD

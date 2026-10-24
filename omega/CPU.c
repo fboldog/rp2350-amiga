@@ -19,6 +19,7 @@
 #include "Memory.h"
 
 #include "CIA.h"
+#include "Expansion.h"
 
 
 unsigned char* _emulatorMemory;
@@ -59,6 +60,7 @@ void cpu_pulse_reset(void){
     }
 #endif
     ChipsetInit();
+    expansionReset();   // the reset line unconfigures the Zorro boards
     m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
     
 }
@@ -79,6 +81,7 @@ void cpu_keyboard_reset(void){
     CIAInit(&CIAA, 32776);
     CIAInit(&CIAB, 40960);
     ChipsetInit();
+    expansionReset();
     // Paula's interrupt enables and requests clear with the reset line, and
     // the 68000's interrupt input drops.
     chipset.intenar = 0;
@@ -112,6 +115,7 @@ void cpu_init(){
     m68k_init();
     m68k_set_cpu_type(cpu_type);
     cpu_ready = 1;
+    expansionReset();
     m68k_set_reg(M68K_REG_SR, 0x2700); // Reset enters supervisor mode, IRQs masked
     m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
 

@@ -190,8 +190,14 @@ Steps:
       EC020, PrismRTG's installer runs). Open: the CPU pacing on a 68020
       (`OMEGA_CPU_CYCLES_PER_SLOT` was tuned on the 68000).
 - [ ] Optional: a tiny on-screen disk chooser
-- [ ] Later: fast RAM in free PSRAM (an installed 3.1.4 wants it; overlaps
-      with RTG); USB mass storage as a second source behind the same block
+- [x] **2 MB Fast RAM** (2026-10-24): a Zorro II autoconfig board
+      (`omega/Expansion.c`) at `0x200000`, PSRAM after chip RAM; the DF0
+      buffer shrank to one track to make room. Verified natively (Kick
+      1.3/2.05/3.1.4, 68000 and 68EC020; `Avail`) and on the board. The
+      SRAM for its decoding came from the core-1 ring (one 128-word step).
+      Later: 4 MB once the ARGB fallback buffers can go (narrow LORES
+      direct), sharing PSRAM with RTG's video memory.
+- [ ] Later: USB mass storage as a second source behind the same block
       interface; PIO SDIO for speed; moving card access off core 0 (DMA) if
       it hurts audio or frame pacing.
 

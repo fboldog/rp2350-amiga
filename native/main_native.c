@@ -22,6 +22,8 @@
 //                       68ec020 for the board's 24-bit 68EC020. A KickSmash
 //                       switch takes the bank's CPU ("cpu <n> 68020" in
 //                       kicksmash.cfg).
+//   OMEGA_FAST_RAM_KB=<n>  Zorro II Fast RAM board size (default 2048,
+//                       as the board; 0 for none; omega/Expansion.c)
 //   OMEGA_HDF=<file>    attach this RDB hard-disk image as the A600 IDE
 //                       drive (omega/Gayle.c; see make_hdf.sh)
 //   OMEGA_KEYS=<list>   type Amiga raw keys: "frame:code,..." (hex code),
@@ -42,6 +44,7 @@
 #include "display_sdl.h"
 #endif
 #include "../omega/CPU.h"
+#include "../omega/Expansion.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
 #include "../omega/DMA.h"
@@ -197,6 +200,10 @@ int main(int argc, char **argv) {
 
     // ── Bring up the emulator ───────────────────────────────────────────
     hostInit();
+    // OMEGA_FAST_RAM_KB: the Zorro II Fast RAM board (default 2048, as the
+    // board; 0 for none).
+    const char *fastKb = getenv("OMEGA_FAST_RAM_KB");
+    expansionFastRamSize = (fastKb ? (uint32_t)atoi(fastKb) : 2048u) << 10;
     cpu_init();
     const char *cpuType = getenv("OMEGA_CPU");
     if (cpuType && strcmp(cpuType, "68020") == 0) {

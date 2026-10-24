@@ -3,6 +3,9 @@
 //
 // Address translation:
 //   Amiga 0x000000–0x1FFFFF → PSRAM[0x000000] (chip RAM, 2 MB)
+//   Amiga 0x200000–0x3FFFFF → PSRAM[0x200000] (Fast RAM, once autoconfig
+//                             has placed the Zorro II board there)
+//   0xE80000–0xE8FFFF       → autoconfig (omega/Expansion.c, MemoryBoot.c)
 //   0xC00000–0xD7FFFF       → custom register mirror (no slow RAM, as an
 //                             A500 without trapdoor RAM)
 //   Amiga 0xF80000–0xFFFFFF → Flash ROM at ROM_FLASH_BASE (read-only)
@@ -24,6 +27,11 @@
 
 // ── PSRAM region base pointers (set up by MemoryBoot.c) ───────────────────
 uint8_t *chip_ram;          // PSRAM + PSRAM_CHIPRAM_OFFSET
+
+// Fast RAM, once autoconfig has placed it at 0x200000 (MemoryBoot.c): it
+// follows chip RAM in PSRAM, so chip_ram[a] is its byte too. 0: none.
+uint32_t fast_ram_size;
+#define IN_FAST_RAM(a) ((a) - 0x200000u < fast_ram_size)
 
 // ── ROM (read-only: flash via XIP, or the SD card's copy in PSRAM) ────────
 const uint8_t *rom_base;
@@ -101,13 +109,14 @@ static inline uint32_t custom_mirror(uint32_t address) {
 unsigned int chipReadByte(unsigned int address) {
     // Chip RAM is by far the most common target; test it first.
     if (address <= CHIPTOP) return chip_ram[address];
+    if (IN_FAST_RAM(address)) return chip_ram[address];
     // ROM
     if (address >= 0xF80000u) {
         if (!rom_base) return 0;
         return rom_ptr(address)[0];
     }
     // Autoconfig / Z2 space above chipset
-    if (address > 0xDFFFFFu) return 0;
+    if (address > 0xDFFFFFu) return memory_expansion_read(address);
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = address - 0xDFF000u;
@@ -132,13 +141,14 @@ unsigned int chipReadByte(unsigned int address) {
 // ── chipReadWord ─────────────────────────────────────────────────────────
 unsigned int chipReadWord(unsigned int address) {
     if (address <= CHIPTOP) return ram_read_word(&chip_ram[address]);
+    if (IN_FAST_RAM(address)) return ram_read_word(&chip_ram[address]);
     // ROM
     if (address > 0xF7FFFFu) {
         if (!rom_base) return 0;
         return ram_read_word(rom_ptr(address));
     }
     // Autoconfig space
-    if (address > 0xDFFFFFu) return 0;
+    if (address > 0xDFFFFFu) return memory_expansion_read(address) << 8;
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
@@ -169,6 +179,7 @@ unsigned int chipReadWord(unsigned int address) {
 // ── chipReadLong ─────────────────────────────────────────────────────────
 unsigned int chipReadLong(unsigned int address) {
     if (address <= CHIPTOP) return ram_read_long(&chip_ram[address]);
+    if (IN_FAST_RAM(address)) return ram_read_long(&chip_ram[address]);
     // ROM (and the KickSmash ROM switcher's messages: omega/KickSmash.c)
     if (address > 0xF7FFFFu) {
         if (__builtin_expect(kickSmashWatches(address), 0)) {
@@ -205,7 +216,12 @@ unsigned int chipReadLong(unsigned int address) {
 // ── chipWriteByte ─────────────────────────────────────────────────────────
 void chipWriteByte(unsigned int address, unsigned int value) {
     if (address <= CHIPTOP) { chip_ram[address] = (uint8_t)value; return; }
+    if (IN_FAST_RAM(address)) { chip_ram[address] = (uint8_t)value; return; }
     if (address >= 0xF80000u) return;  // ROM: no-op
+    if (address > 0xDFFFFFu) {         // autoconfig
+        memory_expansion_write(address, value);
+        return;
+    }
     // Custom chipset: the 68000 drives a byte on both halves of the data
     // bus and the custom chips latch the whole word, so a byte write sets
     // the register to the byte twice (DiagROM's raster test writes COLOR00's
@@ -240,7 +256,15 @@ void chipWriteWord(unsigned int address, unsigned int value) {
         ram_write_word(&chip_ram[address], (uint16_t)value);
         return;
     }
+    if (IN_FAST_RAM(address)) {
+        ram_write_word(&chip_ram[address], (uint16_t)value);
+        return;
+    }
     if (address >= 0xF80000u) return;
+    if (address > 0xDFFFFFu) {         // autoconfig: the high byte
+        memory_expansion_write(address, value >> 8);
+        return;
+    }
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
@@ -276,6 +300,10 @@ void chipWriteLong(unsigned int address, unsigned int value) {
         ram_write_long(&chip_ram[address], value);
         return;
     }
+    if (IN_FAST_RAM(address)) {
+        ram_write_long(&chip_ram[address], value);
+        return;
+    }
     if (address >= 0xF80000u) return;
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
@@ -304,7 +332,7 @@ void chipWriteLong(unsigned int address, unsigned int value) {
 }
 
 // ── Instruction fetch (Musashi prefetch) ─────────────────────────────────
-// Code runs from ROM or chip RAM: one page-table lookup; anything
+// Code runs from ROM, chip or Fast RAM: one page-table lookup; anything
 // else takes the general data path.
 unsigned int chipFetchLong(unsigned int address) {
     const uint8_t *p = fetch_ptr(address);

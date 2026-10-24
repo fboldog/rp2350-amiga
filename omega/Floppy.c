@@ -322,7 +322,7 @@ static uint8_t df0_mfm_image[FLOPPY_MFM_TRACK_SIZE * 82 * 2];
 
 #ifdef PICO_BUILD
 // The flash-backed DF0 path keeps only the selected side as MFM, in the
-// otherwise unused DF0 area of PSRAM. It is accessed through the uncached
+// DF0 track area of PSRAM (an empty drive's track when no ADF is mounted). It is accessed through the uncached
 // XIP alias so disk streaming never evicts emulator code or chip RAM from
 // the shared 16 KB XIP cache; SRAM is left for the core-1 ring.
 #define df0_track_cache ((uint8_t *)(PSRAM_BASE - XIP_BASE + \
@@ -471,7 +471,8 @@ void floppyIndexReset(){
 uint8_t floppyDataRead(){ //this function should be called by the DMA
 
 #ifdef PICO_BUILD
-    int streamed = driveSelected == 0 && df0_adf;
+    // DF0 holds one track: the ADF's current one, or the empty drive's.
+    int streamed = driveSelected == 0;
     if (streamed && df[0].hasDisk && !floppyEnsureTrackCached(0))
         return 0;
     int position = streamed
