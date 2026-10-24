@@ -10,6 +10,7 @@
 
 # native head-less runner artifacts
 /native/omega-native
+/native/*.o
 *.ppm
 *.png
 
