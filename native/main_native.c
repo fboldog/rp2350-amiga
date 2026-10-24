@@ -24,6 +24,8 @@
 //                       kicksmash.cfg).
 //   OMEGA_FAST_RAM_KB=<n>  Zorro II Fast RAM board size (default 2048,
 //                       as the board; 0 for none; omega/Expansion.c)
+//   OMEGA_RTG=0         no Picasso II+ RTG card (omega/Picasso2.c); the
+//                       window shows its picture while its switch is on
 //   OMEGA_HDF=<file>    attach this RDB hard-disk image as the A600 IDE
 //                       drive (omega/Gayle.c; see make_hdf.sh)
 //   OMEGA_KEYS=<list>   type Amiga raw keys: "frame:code,..." (hex code),
@@ -59,6 +61,7 @@
 extern unsigned long native_frame_counter;
 extern unsigned long native_nonblack_pixels(void);
 extern void          native_dump_ppm(const char *path);
+extern void          memoryNativeInit(void);
 
 static uint32_t native_read_u32(uint32_t address) {
     return ((uint32_t)low16Meg[address] << 24) |
@@ -204,6 +207,10 @@ int main(int argc, char **argv) {
     // board; 0 for none).
     const char *fastKb = getenv("OMEGA_FAST_RAM_KB");
     expansionFastRamSize = (fastKb ? (uint32_t)atoi(fastKb) : 2048u) << 10;
+    // OMEGA_RTG=0: no Picasso II+ RTG card (omega/Picasso2.c).
+    const char *rtg = getenv("OMEGA_RTG");
+    expansionPicasso2 = !rtg || atoi(rtg) != 0;
+    memoryNativeInit();
     cpu_init();
     const char *cpuType = getenv("OMEGA_CPU");
     if (cpuType && strcmp(cpuType, "68020") == 0) {

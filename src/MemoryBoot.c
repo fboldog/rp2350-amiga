@@ -86,21 +86,24 @@ void memory_clear_chipram(void) {
     memset(chip_ram + 4, 0, PSRAM_CHIPRAM_SIZE - 4);
 }
 
-// Autoconfig placed the Fast RAM board at base (Expansion.c), or the reset
-// line unmapped it (size 0). Its memory is PSRAM at BOARD_MAP_FAST_RAM_OFFSET,
-// right after chip RAM, so Memory.c reaches it through chip_ram: only the
-// base Kickstart gives the first board, 0x200000, is taken.
+// Autoconfig placed a board at base (Expansion.c), or the reset line
+// unmapped it (base 0). Only the Fast RAM board is fitted here: its memory
+// is PSRAM at BOARD_MAP_FAST_RAM_OFFSET, right after chip RAM, so Memory.c
+// reaches it through chip_ram; only the base Kickstart gives the first
+// board, 0x200000, is taken.
 _Static_assert(BOARD_MAP_FAST_RAM_OFFSET ==
                BOARD_MAP_CHIPRAM_OFFSET + 0x200000u,
                "Memory.c expects Fast RAM right after chip RAM in PSRAM");
-void expansionHostMapFastRam(uint32_t base, uint32_t size) {
-    if (size > BOARD_MAP_FAST_RAM_SIZE || base != 0x200000u) {
-        if (size)
-            printf("Expansion: Fast RAM at 0x%06lx not mapped\n",
-                   (unsigned long)base);
+void expansionHostMap(int board, uint32_t base) {
+    if (board != EXPANSION_FAST_RAM)
+        return;
+    uint32_t size = expansionFastRamSize;
+    if (size > BOARD_MAP_FAST_RAM_SIZE || (base && base != 0x200000u)) {
+        printf("Expansion: Fast RAM at 0x%06lx not mapped\n",
+               (unsigned long)base);
         size = 0;
     }
-    fast_ram_size = size;
+    fast_ram_size = base ? size : 0;
     memory_map_pages();
 }
 

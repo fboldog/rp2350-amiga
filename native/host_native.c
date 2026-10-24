@@ -11,6 +11,7 @@
 #include "../omega/CIA.h"
 #include "../omega/CPU.h"
 #include "../omega/VideoStandard.h"
+#include "../omega/Picasso2.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,9 @@ Host_t host;
 
 static uint32_t *fb;                    // presented SCREEN_W * SCREEN_H image
 static uint32_t *render_fb;             // intermediate DMA beam raster
+// The Picasso II+'s picture, while its monitor switch shows it.
+static uint32_t *rtg_fb;
+static int rtg_w, rtg_h, rtg_shown;
 unsigned long native_frame_counter = 0; // bumped by hostDisplay()
 
 // ── Amiga key-code table (unused head-less, kept for link compatibility) ──
@@ -73,10 +77,27 @@ void hostInit(void) {
 }
 
 void hostDisplay(void) {
-    hostPresentFrame(fb, render_fb);
     native_frame_counter++;
+    rtg_shown = p2Showing();
+    if (rtg_shown) {
+        int w, h;
+        p2Geometry(&w, &h);
+        if (w != rtg_w || h != rtg_h) {
+            free(rtg_fb);
+            rtg_fb = calloc((size_t)w * h, sizeof(uint32_t));
+            rtg_w = w;
+            rtg_h = h;
+        }
+        for (int y = 0; y < h; y++)
+            p2RenderLine(y, rtg_fb + (size_t)y * w);
 #ifdef HAVE_SDL2
-    sdl_display_push(fb);
+        sdl_display_push_size(rtg_fb, w, h);
+#endif
+        return;
+    }
+    hostPresentFrame(fb, render_fb);
+#ifdef HAVE_SDL2
+    sdl_display_push_size(fb, SCREEN_W, SCREEN_H);
 #endif
 }
 
@@ -84,9 +105,12 @@ void hostDisplay(void) {
 void native_dump_ppm(const char *path) {
     FILE *f = fopen(path, "wb");
     if (!f) { perror(path); return; }
-    fprintf(f, "P6\n%d %d\n255\n", SCREEN_W, SCREEN_H);
-    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) {
-        uint32_t p = fb[i];                 // ARGB (0x00RRGGBB from palette)
+    // the RTG card's picture while it is on the monitor
+    const uint32_t *src = rtg_shown ? rtg_fb : fb;
+    const int w = rtg_shown ? rtg_w : SCREEN_W, h = rtg_shown ? rtg_h : SCREEN_H;
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    for (int i = 0; i < w * h; ++i) {
+        uint32_t p = src[i];                // ARGB (0x00RRGGBB from palette)
         unsigned char rgb[3] = {
             (unsigned char)((p >> 16) & 0xFF),
             (unsigned char)((p >>  8) & 0xFF),

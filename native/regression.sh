@@ -43,7 +43,8 @@ for asset in "$ROM_DIR/kick13.rom" "$ROM_DIR/kick204.rom" \
              "$ADF_DIR/amiga-os-205-workbench.adf" \
              "$ADF_DIR/amiga-os-314-workbench.adf" \
              "$ADF_DIR/amiga-os-314-modules-a500.adf" \
-             "$ADF_DIR/Install3.2.adf"; do
+             "$ADF_DIR/Install3.2.adf" \
+             "$ADF_DIR/PrismRTG-1.2.adf"; do
     require_file "$asset"
 done
 for tool in rdbtool xdftool; do
@@ -107,6 +108,28 @@ run_case hdf205 "$ROM_DIR/kick205.rom" "" 500000 3000 "$OUTPUT_DIR/hdf205.hdf"
     "$ADF_DIR/amiga-os-314-modules-a500.adf" >/dev/null
 CPU=68ec020 run_case hdf314-ec020 "$ROM_DIR/kick314.rom" "" 500000 3000 \
     "$OUTPUT_DIR/hdf314-ec020.hdf"
+
+# RTG: the same system with PrismRTG (its PICASSO2 driver on the emulated
+# Picasso II+, omega/Picasso2.c) and Workbench on PRISM:640x480 8-bit. The
+# files go where its installer puts them; PrismSetup sets the Workbench mode
+# (in ENVARC:, for the next boot: it is copied to ENV: for this one).
+rtg_hdf="$OUTPUT_DIR/rtg314.hdf"
+prism="$OUTPUT_DIR/prism"
+./native/make_hdf.sh "$rtg_hdf" System ffs+intl \
+    "$ADF_DIR/amiga-os-314-workbench.adf" \
+    "$ADF_DIR/amiga-os-314-modules-a500.adf" >/dev/null
+mkdir -p "$prism"
+xdftool "$ADF_DIR/PrismRTG-1.2.adf" unpack "$prism" >/dev/null
+xdftool "$rtg_hdf" open part=DH0 + write "$prism/PrismRTG/PrismD" C \
+    + write "$prism/PrismRTG/PrismSetup" C + makedir Libs/Prism \
+    + write "$prism/PrismRTG/Drivers/PICASSO2.driver" Libs/Prism \
+    + write "$prism/PrismRTG/Prism" Devs/Monitors \
+    + read S/Startup-Sequence "$OUTPUT_DIR/rtg314.ss" >/dev/null
+sed -i '/^Assign >NIL: ENV: RAM:ENV$/a C:PrismSetup >NIL: WBID=0001\
+C:Copy >NIL: ENVARC:Sys/screenmode.prefs ENV:Sys/' "$OUTPUT_DIR/rtg314.ss"
+xdftool "$rtg_hdf" open part=DH0 + delete S/Startup-Sequence \
+    + write "$OUTPUT_DIR/rtg314.ss" S/Startup-Sequence >/dev/null
+CPU=68ec020 run_case rtg314 "$ROM_DIR/kick314.rom" "" 600000 3000 "$rtg_hdf"
 
 if [ "${UPDATE_BASELINES:-0}" = "1" ]; then
     UPDATED="$OUTPUT_DIR/updated.sha256"

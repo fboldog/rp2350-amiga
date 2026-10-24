@@ -33,6 +33,22 @@ void sdl_display_open(int w, int h) {
     next_frame_tick = SDL_GetPerformanceCounter();
 }
 
+void sdl_display_push_size(const uint32_t *argb32, int w, int h) {
+    if (!tex) return;
+    if (w != tw || h != th) {
+        SDL_Texture *t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
+                                           SDL_TEXTUREACCESS_STREAMING, w, h);
+        if (!t) return;
+        SDL_DestroyTexture(tex);
+        tex = t;
+        tw = w; th = h;
+        SDL_RenderSetLogicalSize(ren, w, h);
+        SDL_SetWindowSize(win, w * 2 > 1600 ? w : w * 2,
+                          w * 2 > 1600 ? h : h * 2);
+    }
+    sdl_display_push(argb32);
+}
+
 void sdl_display_push(const uint32_t *argb32) {
     if (!tex) return;
 

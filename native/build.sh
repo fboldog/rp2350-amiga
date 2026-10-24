@@ -72,6 +72,7 @@ OMEGA_SRC=(
   omega/Floppy.c
   omega/Expansion.c
   omega/Gayle.c
+  omega/Picasso2.c
   omega/KickSmash.c
   omega/m68kcpu.c
   omega/m68kdasm.c

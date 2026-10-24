@@ -192,6 +192,18 @@ As on the board, a 2 MB Zorro II Fast RAM board answers autoconfig at
 runner keeps its memory in `low16Meg` at those addresses.
 `OMEGA_FAST_RAM_KB=<n>` sets its size (a power of two, 64-8192; 0 for none).
 
+### RTG (Picasso II+)
+
+The runner also has an RTG card: a Picasso II+ (`omega/Picasso2.c`, a
+GD5428 with 2 MB of VRAM), configured after the Fast RAM (VRAM at
+`0x400000`, registers at `0xE90000`). PrismRTG's PICASSO2 driver drives it;
+while the card's monitor switch is on, the window (and the PPM dumps) show
+its picture at its own size. `OMEGA_RTG=0` leaves the card out. To try it,
+put PrismRTG's files on a 3.1.4 image the way `regression.sh` builds
+`rtg314.hdf` (PrismD, PrismSetup, `Libs/Prism/PICASSO2.driver`,
+`Devs/Monitors/Prism`, `PrismSetup WBID=0001` for PRISM:640x480 8-bit) and
+boot it with `OMEGA_CPU=68ec020`.
+
 ### Screenshot regression suite
 
 `REGRESSION=1` is a native compile-time build mode. It forces a headless build
@@ -204,8 +216,8 @@ REGRESSION=1 VIDEO=PAL ./native/build.sh
 
 The regression runner builds in that mode, boots the three ROM-only screens,
 the three Workbench/installer cases and Kickstart 3.1.4 and 2.05 from fresh
-hard-disk images (`hdf314`, `hdf205`, and `hdf314-ec020` on the 68EC020),
-then compares exact final-frame PPM
+hard-disk images (`hdf314`, `hdf205`, `hdf314-ec020` on the 68EC020, and
+`rtg314`: PrismRTG's Workbench on the Picasso II+), then compares exact final-frame PPM
 hashes, sorted by case name:
 
 ```sh

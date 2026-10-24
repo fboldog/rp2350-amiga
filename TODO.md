@@ -206,6 +206,32 @@ goes to PSRAM; card access blocks core 0.
 
 ---
 
+## Phase 2c – RTG: an emulated Picasso II+
+
+Decided 2026-10-24: emulate a real board so stock drivers work and nothing
+on the Amiga side has to be written or kept up to date (an own board with
+its own PrismRTG driver may come later, for speed). The board is a Village
+Tronic Picasso II+: a Cirrus GD5428 on Zorro II, VRAM 2167/11 + registers
+2167/12, as WinUAE emulates it. Register semantics: PrismRTG's
+`docs/cirrus-picasso2-hw.md` (github.com/lainejones/PrismRTG).
+
+- [x] **Native** (2026-10-24): `omega/Picasso2.c` (registers, DAC and its
+      hidden register, BitBLT engine incl. CPU-fed colour expansion,
+      64x64 cursor, monitor switch, vretrace status), the boards in the
+      autoconfig chain after the Fast RAM (`omega/Expansion.c`: VRAM at
+      `0x400000`, registers at `0xE90000`), the card's picture in the SDL
+      window. PrismRTG 1.2's PICASSO2 driver finds "Picasso II+ (GD5428)"
+      and Workbench runs on PRISM:640x480 8-bit with the hardware cursor
+      (`rtg314` regression case, 68EC020).
+- [ ] **Board:** VRAM in PSRAM (1 MB board: the map has no 2 MB left
+      while the ARGB fallback buffers exist), mapped 1:1 at `0x400000` as
+      the Fast RAM is; registers through MemoryBoot.c. Display: while the
+      switch is on, core 1 copies the visible 8-bit screen into the SRAM
+      scanout frames and the scanout expands one row per HDMI line
+      (640x480; PAL centres it in 576 lines). Then 16-bit.
+- [ ] 16-bit Workbench test (WBID gives 256 pens), Picasso96's own
+      PicassoII.card, PrismRTG's test kit (tmpltest, p96test).
+
 ## Phase 3 – Input
 
 - [x] **USB host (2026-10-03):** TinyUSB host with hub on the native USB-C

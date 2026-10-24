@@ -23,6 +23,7 @@
 #include "../omega/m68k.h"
 #include "KickSmash.h"
 #include "Expansion.h"
+#include "Picasso2.h"
 
 unsigned char low16Meg[16777216];
 
@@ -50,24 +51,64 @@ static inline unsigned int customMirror(unsigned int address){
     return 0xDFF000u | (address & 0x1FFu);
 }
 
-// Fast RAM, once autoconfig has placed it (omega/Expansion.c): low16Meg at
-// its own addresses. Elsewhere 0x200000-0x9FFFFF is open bus.
-static unsigned int fastBase, fastSize;
+// The Zorro II boards, once autoconfig has placed them (omega/Expansion.c):
+// the Fast RAM is low16Meg at its own addresses, the Picasso II+'s VRAM
+// p2Vram (omega/Picasso2.c). Elsewhere 0x200000-0x9FFFFF is open bus.
+static unsigned int fastBase, fastSize, vramBase, vramSize, regsBase, regsSize;
+static uint8_t p2Vram[P2_VRAM_SIZE];
 #define IN_FAST_RAM(a) ((a) - fastBase < fastSize)
+#define IN_VRAM(a)     ((a) - vramBase < vramSize)
+#define IN_P2_REGS(a)  ((a) - regsBase < regsSize)
 
-void expansionHostMapFastRam(uint32_t base, uint32_t size){
-    if (base < 0x200000u || base + size > 0xA00000u)
-        size = 0;
-    fastBase = base;
-    fastSize = size;
+void memoryNativeInit(void){
+    p2Init(p2Vram);
 }
 
-// Autoconfig space: the board's register, else an open bus (reads high;
-// zero would describe a board and make firmware enumerate ghosts).
+void expansionHostMap(int board, uint32_t base){
+    switch (board) {
+    case EXPANSION_FAST_RAM:
+        fastBase = base;
+        fastSize = base >= 0x200000u &&
+                   base + expansionFastRamSize <= 0xA00000u
+                 ? expansionFastRamSize : 0;
+        break;
+    case EXPANSION_P2_VRAM:
+        vramBase = base;
+        vramSize = base ? P2_VRAM_SIZE : 0;
+        break;
+    case EXPANSION_P2_REGS:
+        regsBase = base;
+        regsSize = base ? P2_REGS_SIZE : 0;
+        if (!base)
+            p2Reset();
+        break;
+    }
+}
+
+// VRAM writes: source data while a blit takes it from the CPU.
+static void vramWrite(unsigned int address, uint8_t value){
+    if (p2CpuBlt)
+        p2BltFeed(value);
+    else
+        p2Vram[address - vramBase] = value;
+}
+
+// Autoconfig space: the board's register (or the Picasso's registers),
+// else an open bus (reads high; zero would describe a board and make
+// firmware enumerate ghosts).
 static unsigned int expansionRead(unsigned int address){
+    if (IN_P2_REGS(address))
+        return p2RegRead(address - regsBase);
     const int value = address < EXPANSION_END && address >= EXPANSION_BASE
                     ? expansionReadByte(address) : -1;
     return value < 0 ? 0xFF : (unsigned int)value;
+}
+
+static void expansionWrite(unsigned int address, uint8_t value){
+    if (IN_P2_REGS(address))
+        p2RegWrite(address - regsBase, value);
+    else if (address < EXPANSION_END && address >= EXPANSION_BASE)
+        expansionWriteByte(address, value);
 }
 
 unsigned int chipReadByte(unsigned int address){
@@ -75,6 +116,8 @@ unsigned int chipReadByte(unsigned int address){
         return 0xFF;
     if (IN_FAST_RAM(address))
         return low16Meg[address];
+    if (IN_VRAM(address))
+        return p2Vram[address - vramBase];
     //ROM
     if(address>=0xF80000){
         return low16Meg[address];
@@ -150,6 +193,11 @@ unsigned int chipReadWord(unsigned int address){
         return 0xFFFF;
     if (IN_FAST_RAM(address))
         return (unsigned int)low16Meg[address] << 8 | low16Meg[address + 1];
+    if (IN_VRAM(address))
+        return (unsigned int)p2Vram[address - vramBase] << 8 |
+               p2Vram[(address + 1 - vramBase) & (P2_VRAM_SIZE - 1)];
+    if (IN_P2_REGS(address))
+        return expansionRead(address) << 8 | expansionRead(address + 1);
     //ROM
     if(address>0xF7FFFF){
         //return READ_WORD(chipset.rom,address-0xF80000);
@@ -231,6 +279,8 @@ unsigned int chipReadLong(unsigned int address){
         return (unsigned int)low16Meg[address] << 24 |
                (unsigned int)low16Meg[address + 1] << 16 |
                (unsigned int)low16Meg[address + 2] << 8 | low16Meg[address + 3];
+    if (IN_VRAM(address) || IN_P2_REGS(address))
+        return chipReadWord(address) << 16 | chipReadWord(address + 2);
     // KickSmash ROM switcher protocol (omega/KickSmash.c)
     if (address > 0xF7FFFFu && kickSmashWatches(address)) {
         uint32_t value;
@@ -328,6 +378,10 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
         low16Meg[address] = (uint8_t)value;
         return;
     }
+    if (IN_VRAM(address)) {
+        vramWrite(address, (uint8_t)value);
+        return;
+    }
     if(address>=0xF80000){
         return;
     }
@@ -335,8 +389,7 @@ void chipWriteByte(unsigned int address,unsigned int value){   //ROM
     // Zorro/autoconfig space: the board's registers, never decoded as
     // out-of-range custom registers.
     if(address>0xDFFFFF){
-        if (address < EXPANSION_END && address >= EXPANSION_BASE)
-            expansionWriteByte(address, (uint8_t)value);
+        expansionWrite(address, (uint8_t)value);
         return;
     }
 
@@ -455,6 +508,17 @@ void chipWriteWord(unsigned int address,unsigned int value){
         low16Meg[address + 1] = (uint8_t)value;
         return;
     }
+    if (IN_VRAM(address) && IN_VRAM(address + 1)) {
+        vramWrite(address, (uint8_t)(value >> 8));
+        vramWrite(address + 1, (uint8_t)value);
+        return;
+    }
+    if (IN_P2_REGS(address)) {
+        // an index/data pair: the high byte to the even port
+        expansionWrite(address, (uint8_t)(value >> 8));
+        expansionWrite(address + 1, (uint8_t)value);
+        return;
+    }
     //ROM
     if(address>=0xF80000){
         return;
@@ -462,8 +526,7 @@ void chipWriteWord(unsigned int address,unsigned int value){
 
     if(address>0xDFFFFF){
         // autoconfig: the high byte
-        if (address < EXPANSION_END && address >= EXPANSION_BASE)
-            expansionWriteByte(address, (uint8_t)(value >> 8));
+        expansionWrite(address, (uint8_t)(value >> 8));
         return;
     }
 
@@ -590,6 +653,11 @@ void chipWriteLong(unsigned int address,unsigned int value){
         low16Meg[address + 1] = (uint8_t)(value >> 16);
         low16Meg[address + 2] = (uint8_t)(value >> 8);
         low16Meg[address + 3] = (uint8_t)value;
+        return;
+    }
+    if (IN_VRAM(address) || IN_P2_REGS(address)) {
+        chipWriteWord(address, value >> 16);
+        chipWriteWord(address + 2, value & 0xFFFF);
         return;
     }
     //ROM
