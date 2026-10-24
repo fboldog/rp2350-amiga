@@ -5,9 +5,9 @@
 //  Zorro II autoconfig at 0xE80000. The boards answer one after another,
 //  in this order: Fast RAM, then the Picasso II+'s VRAM and register
 //  boards (omega/Picasso2.c). Kickstart's expansion code reads each
-//  board's description and gives it a base address: 0x200000 for the Fast
-//  RAM, 0x400000 for the VRAM, 0xE90000 for the registers. The host keeps
-//  the memory and maps each board (expansionHostMap).
+//  board's description and gives it a base address: 0x200000 for 2 MB of
+//  Fast RAM, then 0x400000 for the VRAM, 0xE90000 for the registers. The
+//  host keeps the memory and maps each board (expansionHostMap).
 //
 
 #ifndef Expansion_h
@@ -20,16 +20,16 @@
 
 enum {
     EXPANSION_FAST_RAM,     // expansionFastRamSize bytes, in the memory list
-    EXPANSION_P2_VRAM,      // Picasso II+ VRAM, 2 MB (2167/11)
+    EXPANSION_P2_VRAM,      // Picasso II+ VRAM, 1 or 2 MB (2167/11)
     EXPANSION_P2_REGS,      // Picasso II+ registers, 64 KB (2167/12)
     EXPANSION_BOARDS
 };
 
 // The boards present, set by the host before the first reset: the Fast
 // RAM board's size (a power of two from 64 KB to 8 MB, or 0 for none) and
-// whether the Picasso II+ is there.
+// the Picasso II+'s VRAM (1 or 2 MB, or 0 for no card).
 extern uint32_t expansionFastRamSize;
-extern uint8_t  expansionPicasso2;
+extern uint32_t expansionPicasso2Vram;
 
 // The reset line: every board is unconfigured again and unmapped (memory
 // contents stay, as on real hardware).

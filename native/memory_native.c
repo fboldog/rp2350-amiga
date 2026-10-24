@@ -61,7 +61,14 @@ static uint8_t p2Vram[P2_VRAM_SIZE];
 #define IN_P2_REGS(a)  ((a) - regsBase < regsSize)
 
 void memoryNativeInit(void){
-    p2Init(p2Vram);
+    static uint32_t state[P2_STATE_BYTES / 4];
+    p2Init(p2Vram, expansionPicasso2Vram ? expansionPicasso2Vram
+                                         : P2_VRAM_SIZE, state);
+}
+
+// The window draws the card's picture straight from VRAM.
+void p2HostDirty(uint32_t offset, uint32_t length){
+    (void)offset; (void)length;
 }
 
 void expansionHostMap(int board, uint32_t base){
@@ -74,7 +81,7 @@ void expansionHostMap(int board, uint32_t base){
         break;
     case EXPANSION_P2_VRAM:
         vramBase = base;
-        vramSize = base ? P2_VRAM_SIZE : 0;
+        vramSize = base ? expansionPicasso2Vram : 0;
         break;
     case EXPANSION_P2_REGS:
         regsBase = base;

@@ -14,7 +14,7 @@
 #include <stdio.h>
 
 uint32_t expansionFastRamSize;
-uint8_t  expansionPicasso2;
+uint32_t expansionPicasso2Vram;
 
 #define VILLAGE_TRONIC 2167u
 #define OMEGA_MFR      0x1212u      // unregistered, "Omega"
@@ -36,7 +36,7 @@ static int present(int board) {
     switch (board) {
     case EXPANSION_FAST_RAM: return expansionFastRamSize != 0;
     case EXPANSION_P2_VRAM:
-    case EXPANSION_P2_REGS:  return expansionPicasso2;
+    case EXPANSION_P2_REGS:  return expansionPicasso2Vram != 0;
     }
     return 0;
 }
@@ -45,10 +45,11 @@ static void describe(void) {
     // Fast RAM: memory, preferring the 8 MB space.
     boards[EXPANSION_FAST_RAM] = (BoardDesc){
         expansionFastRamSize, OMEGA_MFR, 1, 1, 0x80, 0 };
-    // Picasso II+: 2 MB of VRAM (not system memory), then 64 KB of
-    // registers. Serial 0x00100000 tells a II+ (GD5428) from a II.
+    // Picasso II+: its VRAM (not system memory; the drivers take the
+    // board's size as the VRAM's), then 64 KB of registers. Serial
+    // 0x00100000 tells a II+ (GD5428) from a II.
     boards[EXPANSION_P2_VRAM] = (BoardDesc){
-        0x200000u, VILLAGE_TRONIC, 11, 0, 0x00, 0x00100000u };
+        expansionPicasso2Vram, VILLAGE_TRONIC, 11, 0, 0x00, 0x00100000u };
     boards[EXPANSION_P2_REGS] = (BoardDesc){
         0x10000u, VILLAGE_TRONIC, 12, 0, 0x00, 0x00100000u };
 }

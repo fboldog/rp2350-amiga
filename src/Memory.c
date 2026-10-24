@@ -5,6 +5,8 @@
 //   Amiga 0x000000–0x1FFFFF → PSRAM[0x000000] (chip RAM, 2 MB)
 //   Amiga 0x200000–0x3FFFFF → PSRAM[0x200000] (Fast RAM, once autoconfig
 //                             has placed the Zorro II board there)
+//   Amiga 0x400000–0x4FFFFF → PSRAM[0x400000] (the RTG card's VRAM)
+//   0xE90000–0xE9FFFF       → its registers (omega/Picasso2.c)
 //   0xE80000–0xE8FFFF       → autoconfig (omega/Expansion.c, MemoryBoot.c)
 //   0xC00000–0xD7FFFF       → custom register mirror (no slow RAM, as an
 //                             A500 without trapdoor RAM)
@@ -29,9 +31,22 @@
 uint8_t *chip_ram;          // PSRAM + PSRAM_CHIPRAM_OFFSET
 
 // Fast RAM, once autoconfig has placed it at 0x200000 (MemoryBoot.c): it
-// follows chip RAM in PSRAM, so chip_ram[a] is its byte too. 0: none.
+// follows chip RAM in PSRAM, so chip_ram[a] is its byte too. 0: none. The
+// RTG card's VRAM follows at 0x400000 and is part of this window: from
+// vram_from on, writes go through memory_vram_write() (a blit may take
+// them as its source; the display copies what changed).
+#if OMEGA_FAST_RAM
 uint32_t fast_ram_size;
 #define IN_FAST_RAM(a) ((a) - 0x200000u < fast_ram_size)
+#else
+#define IN_FAST_RAM(a) 0
+#endif
+#if OMEGA_RTG
+uint32_t vram_from = 0xFFFFFFFFu;
+#define IN_VRAM(a) __builtin_expect((a) >= vram_from, 0)
+#else
+#define IN_VRAM(a) 0
+#endif
 
 // ── ROM (read-only: flash via XIP, or the SD card's copy in PSRAM) ────────
 const uint8_t *rom_base;
@@ -148,7 +163,7 @@ unsigned int chipReadWord(unsigned int address) {
         return ram_read_word(rom_ptr(address));
     }
     // Autoconfig space
-    if (address > 0xDFFFFFu) return memory_expansion_read(address) << 8;
+    if (address > 0xDFFFFFu) return memory_expansion_read_word(address);
     // Custom chipset registers
     if (address > 0xDFEFFFu) {
         uint32_t off = (address - 0xDFF000u) >> 1;
@@ -216,7 +231,13 @@ unsigned int chipReadLong(unsigned int address) {
 // ── chipWriteByte ─────────────────────────────────────────────────────────
 void chipWriteByte(unsigned int address, unsigned int value) {
     if (address <= CHIPTOP) { chip_ram[address] = (uint8_t)value; return; }
-    if (IN_FAST_RAM(address)) { chip_ram[address] = (uint8_t)value; return; }
+    if (IN_FAST_RAM(address)) {
+        if (IN_VRAM(address))
+            memory_vram_write(address, value, 1);
+        else
+            chip_ram[address] = (uint8_t)value;
+        return;
+    }
     if (address >= 0xF80000u) return;  // ROM: no-op
     if (address > 0xDFFFFFu) {         // autoconfig
         memory_expansion_write(address, value);
@@ -257,12 +278,15 @@ void chipWriteWord(unsigned int address, unsigned int value) {
         return;
     }
     if (IN_FAST_RAM(address)) {
-        ram_write_word(&chip_ram[address], (uint16_t)value);
+        if (IN_VRAM(address))
+            memory_vram_write(address, value, 2);
+        else
+            ram_write_word(&chip_ram[address], (uint16_t)value);
         return;
     }
     if (address >= 0xF80000u) return;
-    if (address > 0xDFFFFFu) {         // autoconfig: the high byte
-        memory_expansion_write(address, value >> 8);
+    if (address > 0xDFFFFFu) {         // autoconfig, the RTG card's registers
+        memory_expansion_write_word(address, value);
         return;
     }
     // Custom chipset registers
@@ -301,7 +325,10 @@ void chipWriteLong(unsigned int address, unsigned int value) {
         return;
     }
     if (IN_FAST_RAM(address)) {
-        ram_write_long(&chip_ram[address], value);
+        if (IN_VRAM(address))
+            memory_vram_write(address, value, 4);
+        else
+            ram_write_long(&chip_ram[address], value);
         return;
     }
     if (address >= 0xF80000u) return;

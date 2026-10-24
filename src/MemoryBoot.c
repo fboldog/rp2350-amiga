@@ -5,6 +5,10 @@
 #include "Memory.h"
 #include "psram.h"
 #include "../omega/Expansion.h"
+#if OMEGA_RTG
+#include "../omega/Picasso2.h"
+#endif
+#include "hardware/regs/addressmap.h"
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,7 +18,16 @@ extern uint8_t *chip_ram;
 extern const uint8_t *rom_base;
 extern uint32_t rom_size;
 extern const uint8_t *chip_fetch_page[];
+#if OMEGA_FAST_RAM
 extern uint32_t fast_ram_size;
+#else
+static uint32_t fast_ram_size;          // no Fast RAM board: stays 0
+#endif
+#if OMEGA_RTG
+extern uint32_t vram_from;
+#else
+static uint32_t vram_from;              // no RTG card: unused
+#endif
 
 #define PAGE_SHIFT 16
 #define PAGE_COUNT (0x1000000u >> PAGE_SHIFT)
@@ -65,6 +78,11 @@ void memory_init(void) {
 
     memory_map_pages();
     expansionFastRamSize = BOARD_MAP_FAST_RAM_SIZE;
+#if OMEGA_RTG
+    p2Init(psram_ptr(BOARD_MAP_RTG_VRAM_OFFSET), BOARD_MAP_RTG_VRAM_SIZE,
+           psram_ptr(BOARD_MAP_RTG_STATE_OFFSET));
+    expansionPicasso2Vram = BOARD_MAP_RTG_VRAM_SIZE;
+#endif
 
     printf("Memory: clearing chip RAM\n");
     memory_clear_chipram();
@@ -87,33 +105,118 @@ void memory_clear_chipram(void) {
 }
 
 // Autoconfig placed a board at base (Expansion.c), or the reset line
-// unmapped it (base 0). Only the Fast RAM board is fitted here: its memory
-// is PSRAM at BOARD_MAP_FAST_RAM_OFFSET, right after chip RAM, so Memory.c
-// reaches it through chip_ram; only the base Kickstart gives the first
-// board, 0x200000, is taken.
+// unmapped it (base 0). The Fast RAM is PSRAM at BOARD_MAP_FAST_RAM_OFFSET,
+// right after chip RAM, and the RTG card's VRAM follows it, so Memory.c
+// reaches both through chip_ram as one window: only the bases Kickstart
+// gives them, 0x200000 and 0x400000, are taken.
 _Static_assert(BOARD_MAP_FAST_RAM_OFFSET ==
                BOARD_MAP_CHIPRAM_OFFSET + 0x200000u,
                "Memory.c expects Fast RAM right after chip RAM in PSRAM");
+_Static_assert(BOARD_MAP_RTG_VRAM_OFFSET ==
+               BOARD_MAP_CHIPRAM_OFFSET + 0x400000u,
+               "Memory.c expects the VRAM at Amiga address 0x400000 in PSRAM");
+static uint32_t fast_base, vram_base, regs_base;
+
 void expansionHostMap(int board, uint32_t base) {
-    if (board != EXPANSION_FAST_RAM)
+    switch (board) {
+    case EXPANSION_FAST_RAM: fast_base = base; break;
+#if OMEGA_RTG
+    case EXPANSION_P2_VRAM:  vram_base = base; break;
+    case EXPANSION_P2_REGS:
+        regs_base = base;
+        if (!base)
+            p2Reset();
         return;
-    uint32_t size = expansionFastRamSize;
-    if (size > BOARD_MAP_FAST_RAM_SIZE || (base && base != 0x200000u)) {
-        printf("Expansion: Fast RAM at 0x%06lx not mapped\n",
-               (unsigned long)base);
-        size = 0;
+#endif
+    default: return;
     }
-    fast_ram_size = base ? size : 0;
+    if (base && base != (board == EXPANSION_FAST_RAM ? 0x200000u : 0x400000u))
+        printf("Expansion: board %d at 0x%06lx not mapped\n", board,
+               (unsigned long)base);
+    const int fast = fast_base == 0x200000u &&
+                     expansionFastRamSize <= BOARD_MAP_FAST_RAM_SIZE;
+    const int vram = fast && expansionFastRamSize == 0x200000u &&
+                     vram_base == 0x400000u;
+    fast_ram_size = fast ? expansionFastRamSize + (vram ? expansionPicasso2Vram : 0)
+                         : 0;
+    vram_from = vram ? 0x400000u : 0xFFFFFFFFu;
     memory_map_pages();
 }
 
+#if OMEGA_RTG
+// VRAM pages (4 KB) the CPU or a blit changed since the display last
+// copied them (rtg_display.c).
+uint32_t rtg_dirty[BOARD_MAP_RTG_VRAM_SIZE >> 17];
+
+void p2HostDirty(uint32_t offset, uint32_t length) {
+    if (!length)
+        return;
+    // Core 1 reads VRAM uncached (rtg_display.c), so the new bytes are
+    // written out of the XIP cache (write-back) first: a "clean by address"
+    // per 8-byte line at the maintenance alias. Only then the pages are
+    // marked, or core 1 could copy stale bytes and clear the mark.
+    const uintptr_t base = PSRAM_BASE - XIP_BASE + BOARD_MAP_RTG_VRAM_OFFSET;
+    for (uint32_t a = offset & ~7u; a < offset + length; a += 8u)
+        *(volatile uint8_t *)(XIP_MAINTENANCE_BASE + base +
+                              (a & (BOARD_MAP_RTG_VRAM_SIZE - 1)) + 3u) = 0;
+    __asm volatile("dsb" ::: "memory");
+    const uint32_t pages = (uint32_t)sizeof rtg_dirty * 8u;
+    uint32_t first = offset >> 12, last = (offset + length - 1) >> 12;
+    if (last - first >= pages)
+        last = first + pages - 1;
+    for (uint32_t p = first; p <= last; p++)
+        rtg_dirty[(p % pages) >> 5] |= 1u << (p & 31);
+}
+
+void memory_vram_write(unsigned int address, unsigned int value, int size) {
+    if (p2CpuBlt) {
+        // a blit's source data, most significant byte first
+        for (int i = size - 1; i >= 0; i--)
+            p2BltFeed((uint8_t)(value >> (8 * i)));
+        return;
+    }
+    for (int i = 0; i < size; i++)
+        chip_ram[address + i] = (uint8_t)(value >> (8 * (size - 1 - i)));
+    p2HostDirty(address - 0x400000u, (uint32_t)size);
+}
+
+static int in_regs(unsigned int address) {
+    return regs_base && address - regs_base < P2_REGS_SIZE;
+}
+#else
+// Without the RTG card: no registers to answer.
+#define in_regs(address) 0
+#define p2RegRead(offset) 0u
+#define p2RegWrite(offset, value) ((void)0)
+#endif
+
 unsigned int memory_expansion_read(unsigned int address) {
+    if (in_regs(address))
+        return p2RegRead(address - regs_base);
     const int value = address >= EXPANSION_BASE && address < EXPANSION_END
                     ? expansionReadByte(address) : -1;
     return value < 0 ? 0 : (unsigned int)value;
 }
 
+unsigned int memory_expansion_read_word(unsigned int address) {
+    if (in_regs(address))
+        return p2RegRead(address - regs_base) << 8 |
+               p2RegRead(address + 1 - regs_base);
+    return memory_expansion_read(address) << 8;
+}
+
 void memory_expansion_write(unsigned int address, unsigned int value) {
-    if (address >= EXPANSION_BASE && address < EXPANSION_END)
+    if (in_regs(address))
+        p2RegWrite(address - regs_base, (uint8_t)value);
+    else if (address >= EXPANSION_BASE && address < EXPANSION_END)
         expansionWriteByte(address, (uint8_t)value);
+}
+
+void memory_expansion_write_word(unsigned int address, unsigned int value) {
+    if (in_regs(address)) {
+        p2RegWrite(address - regs_base, (uint8_t)(value >> 8));
+        p2RegWrite(address + 1 - regs_base, (uint8_t)value);
+    } else {
+        memory_expansion_write(address, value >> 8);
+    }
 }

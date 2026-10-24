@@ -88,6 +88,23 @@ uint8_t *dvi_display_field_acquire(int field, dvi_indexed_frame_t **record,
 void dvi_display_field_publish(uint16_t border);
 void dvi_display_weave_stop(void);
 
+#if OMEGA_RTG
+// RTG: while on, scanout shows the RTG card's picture (Host.c): `width` x
+// `height` palette indices (the image area, not more) from the frame
+// memory dvi_display_rtg_frame() returns, one row per line, centred, with
+// the 64x64 hardware cursor laid over it. The palette is 256 RGB888
+// entries. The Amiga's frames are lost meanwhile (their memory holds the
+// picture).
+typedef struct {
+    int on, size, x, y;           // cursor: size 32 or 64
+    uint32_t rgb[2];              // its colours 1 and 2
+    const uint8_t *pattern;       // its two planes, as the card stores them
+} dvi_rtg_cursor_t;
+uint8_t *dvi_display_rtg_frame(uint32_t *capacity, uint32_t **palette);
+void dvi_display_rtg_show(int width, int height, const dvi_rtg_cursor_t *c);
+void dvi_display_rtg_off(void);
+#endif
+
 static inline uint8_t dvi_rgb332(uint32_t argb) {
     return (uint8_t)(((argb >> 16) & 0xe0u) |
                      ((argb >> 11) & 0x1cu) |

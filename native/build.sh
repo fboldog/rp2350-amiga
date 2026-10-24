@@ -94,7 +94,7 @@ if [ -n "$SDL_SRC" ]; then
         -Isrc -Iomega \
         -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
         -Wno-incompatible-pointer-types \
-        $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
+        $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE -DP2_DEBUG_BLITS \
         -c -o native/display_sdl.o native/display_sdl.c
     SDL_OBJ="native/display_sdl.o"
 fi
@@ -105,7 +105,7 @@ $CC -O2 -g -std=gnu11 \
     -Isrc -Iomega \
     -Wall -Wno-unused -Wno-implicit-fallthrough -Wno-comment -Wno-format \
     -Wno-incompatible-pointer-types \
-    $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE \
+    $SDL_FLAGS $REGRESSION_FLAGS $KICKSMASH_FLAGS -DOMEGA_VIDEO_STANDARD=$VIDEO_DEFINE -DP2_DEBUG_BLITS \
     -o "$OUT" \
     native/main_native.c native/host_native.c native/memory_native.c \
     native/hdf_native.c $KICKSMASH_SRC \

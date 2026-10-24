@@ -97,38 +97,56 @@
 //  0x000000..0x1FFFFF  Chip RAM        (2 MB)      Amiga 0x000000..0x1FFFFF
 //  0x200000..0x3FFFFF  Fast RAM        (2 MB)      Zorro II autoconfig
 //                                                  board, Amiga 0x200000..
-//  0x400000..0x403FFF  DF0 MFM track   (16 KB; the active track of the flash
+//  0x400000..0x4FFFFF  RTG VRAM        (1 MB)      the Picasso II+'s,
+//                                                  Amiga 0x400000..
+//  0x500000..0x57FFFF  SD Kickstart cache (512 KB, SD-card builds)
+//  0x580000..0x583FFF  DF0 MFM track   (16 KB; the active track of the flash
 //                                       ADF, or the empty drive's track,
 //                                       read uncached; the ADF streams)
-//  0x404000..0x47FFFF  Free
-//  0x480000..0x4FFFFF  SD Kickstart cache (512 KB, SD-card builds)
-//  0x540000..0x639FFF  Video DMA raster scratch (640x400 ARGB32, 1000 KB)
+//  0x584000..0x67DFFF  Video DMA raster scratch (640x400 ARGB32, 1000 KB)
+//  0x67E000..0x67FFFF  Free
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
 //  0x780000..0x7817FF  SD work area (FatFs volume, sector buffers, the
 //                       KickSmash state and its settings text)
-//  0x781800..0x787FFF  Free
+//  0x781800..0x781FFF  Free
+//  0x782000..0x782FFF  RTG card's state (registers, DAC, blitter buffer)
+//  0x783000..0x787FFF  Free
 //  0x788000..0x7A7FFF  68000 opcode table scratch (128 KB, boot only)
 //  0x7A8000..0x7CBFFF  HDMI frame records (dvi_indexed_frame_t x4, 144 KB)
 //  0x7CC000..0x7FEFFF  Reserved
 //  0x7FF000..0x7FF00B  DF0 disk rotation state (survives resets only)
 #define BOARD_MAP_CHIPRAM_OFFSET   0x000000u
 #define BOARD_MAP_FAST_RAM_OFFSET  0x200000u
-#define BOARD_MAP_DF0_OFFSET       0x400000u
+#define BOARD_MAP_RTG_VRAM_OFFSET  0x400000u
+#define BOARD_MAP_DF0_OFFSET       0x580000u
 #define BOARD_MAP_FRAMEBUF_OFFSET  0x680000u
 #define BOARD_MAP_DVI_RECORDS_OFFSET 0x7A8000u
 #define BOARD_MAP_DVI_RECORDS_SIZE 0x024000u
 #define BOARD_MAP_OPCODE_BUILD_OFFSET 0x788000u
 #define BOARD_MAP_BOOT_STATE_OFFSET 0x7FF000u
-#define BOARD_MAP_VIDEO_RASTER_OFFSET 0x540000u
-#define BOARD_MAP_SD_ROM_OFFSET    0x480000u
+#define BOARD_MAP_VIDEO_RASTER_OFFSET 0x584000u
+#define BOARD_MAP_SD_ROM_OFFSET    0x500000u
 #define BOARD_MAP_SD_WORK_OFFSET   0x780000u
+#define BOARD_MAP_RTG_STATE_OFFSET 0x782000u
 
 #define BOARD_MAP_CHIPRAM_SIZE     0x200000u   // 2 MB
-// Fast RAM: a power of two from 64 KB to 2 MB, or 0 for none
-// (-DBOARD_MAP_FAST_RAM_SIZE=0).
-#ifndef BOARD_MAP_FAST_RAM_SIZE
-#define BOARD_MAP_FAST_RAM_SIZE    0x200000u   // 2 MB
+// The Zorro II boards (CMake OMEGA_FAST_RAM and OMEGA_RTG, both on by
+// default). Fast RAM: a power of two from 64 KB to 2 MB, or 0 for none.
+#ifndef OMEGA_FAST_RAM
+#define OMEGA_FAST_RAM 1
 #endif
+#ifndef OMEGA_RTG
+#define OMEGA_RTG 0
+#endif
+#if OMEGA_RTG && !OMEGA_FAST_RAM
+#error "OMEGA_RTG needs OMEGA_FAST_RAM: the VRAM follows the Fast RAM"
+#endif
+#define BOARD_MAP_FAST_RAM_SIZE    (OMEGA_FAST_RAM ? 0x200000u : 0u)   // 2 MB
+// RTG: the Picasso II+'s VRAM, 1 MB (2 MB has no room while the ARGB
+// fallback buffers exist). It needs the 2 MB of Fast RAM before it:
+// autoconfig then puts it at 0x400000, which Memory.c maps 1:1 onto this
+// PSRAM. Its PSRAM stays reserved without the card.
+#define BOARD_MAP_RTG_VRAM_SIZE    0x100000u   // 1 MB
 #define BOARD_MAP_FLOPPY_SIZE      0x004000u   // 16 KB (one DF0 MFM track)
 #define BOARD_MAP_SD_ROM_SIZE      0x080000u   // 512 KB maximum
 #define BOARD_MAP_SD_WORK_SIZE     0x001800u   // 6 KB
@@ -141,9 +159,13 @@
 //  Compile-time sanity checks
 // ---------------------------------------------------------------------------
 _Static_assert(BOARD_MAP_FAST_RAM_OFFSET + BOARD_MAP_FAST_RAM_SIZE <=
-               BOARD_MAP_DF0_OFFSET, "Fast RAM overruns the DF0 track");
+               BOARD_MAP_RTG_VRAM_OFFSET, "Fast RAM overruns the RTG VRAM");
+_Static_assert(BOARD_MAP_RTG_VRAM_OFFSET + BOARD_MAP_RTG_VRAM_SIZE <=
+               BOARD_MAP_SD_ROM_OFFSET, "RTG VRAM overruns the SD ROM cache");
+_Static_assert(BOARD_MAP_SD_ROM_OFFSET + BOARD_MAP_SD_ROM_SIZE <=
+               BOARD_MAP_DF0_OFFSET, "SD ROM cache overruns the DF0 track");
 _Static_assert(BOARD_MAP_DF0_OFFSET + BOARD_MAP_FLOPPY_SIZE <=
-               BOARD_MAP_SD_ROM_OFFSET, "DF0 track overruns the SD ROM cache");
+               BOARD_MAP_VIDEO_RASTER_OFFSET, "DF0 track overruns the raster");
 _Static_assert(BOARD_MAP_FRAMEBUF_OFFSET + 640u*400u*4u <= BOARD_PSRAM_SIZE_BYTES,
                "framebuffer overruns fitted PSRAM - shrink the map or fit more PSRAM");
 _Static_assert(BOARD_MAP_VIDEO_RASTER_OFFSET + 640u*400u*4u <= BOARD_MAP_FRAMEBUF_OFFSET,

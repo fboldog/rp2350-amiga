@@ -16,20 +16,46 @@
 #include "Picasso2.h"
 #include "Chipset.h"
 #include <string.h>
+#ifdef P2_DEBUG_BLITS
+#include <stdio.h>
+int p2DebugBlits;              // native: OMEGA_P2_DEBUG=1 logs every blit
+#endif
 
 // ── State ────────────────────────────────────────────────────────────────
 static uint8_t *vram;
+static uint32_t vramSize, vramMask;
 
-static uint8_t seq[0x20], seqIndex;
-static uint8_t crt[0x40], crtIndex;
-static uint8_t gr[0x40], grIndex;
-static uint8_t attr[0x20], attrIndex, attrFlip;   // flip: 1 = data next
+// The register files, the DAC and the blitter, in memory the host gives
+// (P2_STATE_BYTES; PSRAM on the board, where SRAM is full).
+typedef struct {
+    uint8_t seq[0x20], crt[0x40], gr[0x40], attr[0x20];
+    // DAC: 256 entries plus the two cursor colours, 6 bits each.
+    uint8_t dac[256 + 2][3];
+    struct {
+        unsigned width, height;     // bytes, rows
+        unsigned dpitch, spitch;
+        uint32_t dst, src;
+        uint8_t mode, rop, skip;
+        unsigned bpp;               // 1 or 2
+        // A blit fed by the CPU: its source rows as they arrive.
+        unsigned row, rowBytes, have;
+        uint8_t buf[2048];
+    } blt;
+} P2State;
+_Static_assert(sizeof(P2State) <= P2_STATE_BYTES, "P2_STATE_BYTES too small");
+static P2State *st;
+#define seq  (st->seq)
+#define crt  (st->crt)
+#define gr   (st->gr)
+#define attr (st->attr)
+#define dac  (st->dac)
+#define blt  (st->blt)
+
+static uint8_t seqIndex, crtIndex, grIndex;
+static uint8_t attrIndex, attrFlip;               // flip: 1 = data next
 static uint8_t misc;
 static uint8_t cursorXLow, cursorYLow;            // SR10/SR11 bits 2-0
 static uint8_t monitorRtg;                        // switch: the card's picture
-
-// DAC: 256 entries plus the two cursor colours, 6 bits each.
-static uint8_t dac[256 + 2][3];
 static uint8_t dacWrite, dacRead, dacComponent, dacReadComponent;
 static uint8_t pixelMask = 0xFF;
 static uint8_t hdr, hdrReads;                     // hidden DAC register
@@ -71,18 +97,7 @@ static uint8_t rop(uint8_t code, uint8_t s, uint8_t d) {
     return s;
 }
 
-#define VRAM_MASK (P2_VRAM_SIZE - 1)
-
-static struct {
-    unsigned width, height;     // bytes, rows
-    unsigned dpitch, spitch;
-    uint32_t dst, src;
-    uint8_t mode, rop, skip;
-    unsigned bpp;               // 1 or 2
-    // A blit fed by the CPU: its source rows as they arrive.
-    unsigned row, rowBytes, have;
-    uint8_t buf[2048];
-} blt;
+#define VRAM_MASK vramMask
 
 static void put(uint32_t a, uint8_t s) {
     a &= VRAM_MASK;
@@ -105,6 +120,13 @@ static void expand_row(uint32_t d, const uint8_t *bits, unsigned first) {
         for (unsigned i = 0; i < blt.bpp; i++)
             put(d + x * blt.bpp + i, set ? fg[i] : bg[i]);
     }
+}
+
+// The bytes a blit may write: its rows, from the first to the last.
+static void blit_dirty(void) {
+    const uint32_t span = (blt.height - 1) * blt.dpitch + blt.width;
+    p2HostDirty((blt.mode & 0x01) ? (blt.dst - span + 1) & VRAM_MASK : blt.dst,
+                span);
 }
 
 static void blit_vram(void) {
@@ -161,6 +183,13 @@ static void blit_start(void) {
     blt.rop = gr[0x32];
     blt.skip = gr[0x2F] & 7;
     blt.bpp = (blt.mode & 0x10) ? 2 : 1;
+#ifdef P2_DEBUG_BLITS
+    if (p2DebugBlits)
+        printf("P2 blt mode %02x rop %02x %ux%u dst %06lx/%u src %06lx/%u fg %02x bg %02x skip %u\n",
+               blt.mode, blt.rop, blt.width, blt.height,
+               (unsigned long)blt.dst, blt.dpitch, (unsigned long)blt.src,
+               blt.spitch, gr[0x01], gr[0x00], blt.skip);
+#endif
     if (blt.mode & 0x04) {
         // the source comes from the CPU: expansion rows byte-padded,
         // plain rows padded to 32 bits
@@ -173,6 +202,7 @@ static void blit_start(void) {
         return;
     }
     blit_vram();
+    blit_dirty();
 }
 
 void p2BltFeed(uint8_t value) {
@@ -187,9 +217,17 @@ void p2BltFeed(uint8_t value) {
     else
         for (unsigned x = 0; x < blt.width; x++)
             put(d + x, blt.buf[x]);
+    // marked as each row lands: a host copying VRAM may have taken the
+    // area since the blit started
+    p2HostDirty(d & VRAM_MASK, blt.width);
     blt.have = 0;
-    if (++blt.row >= blt.height)
+    if (++blt.row >= blt.height) {
         p2CpuBlt = 0;
+#ifdef P2_DEBUG_BLITS
+        if (p2DebugBlits)
+            printf("P2 CPU blit done\n");
+#endif
+    }
 }
 
 // ── Registers ────────────────────────────────────────────────────────────
@@ -315,8 +353,14 @@ void p2RegWrite(uint32_t offset, uint8_t value) {
     case 0x3CF: {
         const unsigned i = grIndex & 0x3F;
         if (i == 0x31) {
-            if (value & 0x04)            // reset: stop the engine
+            if (value & 0x04) {          // reset: stop the engine
+#ifdef P2_DEBUG_BLITS
+                if (p2DebugBlits && p2CpuBlt)
+                    printf("P2 reset during a CPU blit: row %u of %u, %u of %u bytes\n",
+                           blt.row, blt.height, blt.have, blt.rowBytes);
+#endif
                 p2CpuBlt = 0;
+            }
             gr[0x31] = value & ~0x02u;
             if ((value & 0x02) && !p2CpuBlt)
                 blit_start();
@@ -350,8 +394,11 @@ void p2Reset(void) {
     gr[0x31] = 0;
 }
 
-void p2Init(uint8_t *memory) {
+void p2Init(uint8_t *memory, uint32_t size, void *state) {
+    st = state;
     vram = memory;
+    vramSize = size;
+    vramMask = size - 1;
     memset(seq, 0, sizeof seq);
     memset(crt, 0, sizeof crt);
     memset(gr, 0, sizeof gr);
@@ -401,7 +448,7 @@ static void cursor_line(int y, uint32_t *out, int width) {
     const int row = y - cy;
     if (row < 0 || row >= size)
         return;
-    const uint32_t base = P2_VRAM_SIZE - 0x4000u +
+    const uint32_t base = vramSize - 0x4000u +
                           (uint32_t)(seq[0x13] & (big ? 0x3C : 0x3F)) * 256u;
     const uint8_t *p0 = &vram[big ? base + row * 16u : base + row * 4u];
     const uint8_t *p1 = big ? p0 + 8 : p0 + 128;
@@ -418,6 +465,28 @@ static void cursor_line(int y, uint32_t *out, int width) {
         else
             out[sx] = dac_rgb(CURSOR_DAC + b0);
     }
+}
+
+uint32_t p2Rgb(unsigned entry) {
+    return dac_rgb(entry < 256 ? entry : CURSOR_DAC + (entry & 1));
+}
+
+void p2Display(P2Display *d) {
+    p2Geometry(&d->width, &d->height);
+    d->pitch = (crt[0x13] | (crt[0x1B] & 0x10) << 4) * 8u;
+    d->start = (crt[0x0D] | crt[0x0C] << 8 | (crt[0x1B] & 0x01) << 16 |
+                (crt[0x1B] & 0x0C) << 15) * 4u & vramMask;
+    const unsigned depth = (seq[0x07] >> 1) & 3;
+    d->bytesPerPixel = depth == 0 ? 1 : depth == 2 ? 3 : 2;
+    d->rgb565 = (hdr & 0xCF) == 0xC1;
+    d->pixelMask = pixelMask;
+    d->cursorOn = seq[0x12] & 0x01;
+    const int big = seq[0x12] & 0x04;
+    d->cursorSize = big ? 64 : 32;
+    d->cursorX = seq[0x10] << 3 | cursorXLow;
+    d->cursorY = seq[0x11] << 3 | cursorYLow;
+    d->cursorPattern = vramSize - 0x4000u +
+                       (uint32_t)(seq[0x13] & (big ? 0x3C : 0x3F)) * 256u;
 }
 
 void p2RenderLine(int y, uint32_t *out) {

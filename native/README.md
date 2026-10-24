@@ -198,11 +198,33 @@ The runner also has an RTG card: a Picasso II+ (`omega/Picasso2.c`, a
 GD5428 with 2 MB of VRAM), configured after the Fast RAM (VRAM at
 `0x400000`, registers at `0xE90000`). PrismRTG's PICASSO2 driver drives it;
 while the card's monitor switch is on, the window (and the PPM dumps) show
-its picture at its own size. `OMEGA_RTG=0` leaves the card out. To try it,
-put PrismRTG's files on a 3.1.4 image the way `regression.sh` builds
-`rtg314.hdf` (PrismD, PrismSetup, `Libs/Prism/PICASSO2.driver`,
-`Devs/Monitors/Prism`, `PrismSetup WBID=0001` for PRISM:640x480 8-bit) and
-boot it with `OMEGA_CPU=68ec020`.
+its picture at its own size. `OMEGA_RTG=0` leaves the card out, `OMEGA_RTG=1024`
+gives it 1 MB of VRAM as on the board. To try it, put PrismRTG's files on a
+3.1.4 image the way `regression.sh` builds `rtg314.hdf` (PrismD, PrismSetup,
+`Libs/Prism/PICASSO2.driver`, `Devs/Monitors/Prism`, `PrismSetup WBID=0001`
+for PRISM:640x480 8-bit, its `screenmode.prefs` copied to `ENV:` for the
+first boot) and boot it with `OMEGA_CPU=68ec020`.
+
+Debugging aids:
+
+* `OMEGA_P2_DEBUG=1` logs every blit of the card (mode, raster op, size,
+  addresses, colours), the end of each blit fed by the CPU and engine
+  resets during one.
+* `OMEGA_MOUSE="frame:dx:dy:buttons,..."` moves and clicks the mouse: from
+  each frame the movement (in mouse counts, two per frame, below
+  Intuition's acceleration) and the buttons (bit 0 left, 1 right). On the
+  RTG screen one count is one pixel; e.g.
+  `OMEGA_MOUSE="1700:-800:-800:0,2200:40:40:0,2300:0:0:1,2310:0:0:0"` goes to
+  the top-left corner, then onto the first disk icon, and clicks it.
+* PrismRTG's own checks build from its sources with the m68k-amigaos-gcc
+  toolchain: `PrismTest BOARD=PICASSO2 DEPTH=8 BLIT` (fills and copies
+  against the CPU) and `p96test` (the Picasso96 API, 29 checks) pass.
+
+Known PrismRTG 1.2 issue (not the emulator's): a selected icon without its
+own selected image is drawn as an empty box. icon.library clears the masked
+area with pen 0 and calls BltMaskBitMapRastPort with minterm 0x20 ("invert
+the source through the mask"); PrismD's `blit_masked` applies it as a
+BltBitMap minterm (`~source AND destination`), which is 0 there.
 
 ### Screenshot regression suite
 

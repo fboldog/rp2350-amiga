@@ -82,10 +82,16 @@ static inline unsigned int chipFetchLongInline(unsigned int address) {
 #endif
 
 #ifdef PICO_BUILD
-// Autoconfig space (0xE00000-0xF7FFFF): the Fast RAM board's register
-// byte, else 0; writes configure it (MemoryBoot.c, kept out of SRAM).
+// Autoconfig space (0xE00000-0xF7FFFF): the register byte of the board
+// waiting for its address or of the RTG card, else 0; writes configure
+// the boards (MemoryBoot.c, kept out of SRAM). A word reaches the card's
+// even port with its high byte and the odd one with its low byte.
 unsigned int memory_expansion_read(unsigned int address);
+unsigned int memory_expansion_read_word(unsigned int address);
 void memory_expansion_write(unsigned int address, unsigned int value);
+void memory_expansion_write_word(unsigned int address, unsigned int value);
+// A CPU write of `size` bytes to the RTG card's VRAM.
+void memory_vram_write(unsigned int address, unsigned int value, int size);
 #endif
 
 void chipWriteByte(unsigned int address, unsigned int value);

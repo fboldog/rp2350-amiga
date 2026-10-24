@@ -223,12 +223,38 @@ Tronic Picasso II+: a Cirrus GD5428 on Zorro II, VRAM 2167/11 + registers
       window. PrismRTG 1.2's PICASSO2 driver finds "Picasso II+ (GD5428)"
       and Workbench runs on PRISM:640x480 8-bit with the hardware cursor
       (`rtg314` regression case, 68EC020).
-- [ ] **Board:** VRAM in PSRAM (1 MB board: the map has no 2 MB left
-      while the ARGB fallback buffers exist), mapped 1:1 at `0x400000` as
-      the Fast RAM is; registers through MemoryBoot.c. Display: while the
-      switch is on, core 1 copies the visible 8-bit screen into the SRAM
-      scanout frames and the scanout expands one row per HDMI line
-      (640x480; PAL centres it in 576 lines). Then 16-bit.
+- [x] **Board** (2026-10-24): 1 MB of VRAM in PSRAM (`0x400000`, mapped
+      1:1 with the Fast RAM; the chip's state in PSRAM too), registers via
+      MemoryBoot.c. While the switch is on, core 1 copies the changed VRAM
+      pages of the visible screen (`rtg_dirty`) into the SRAM scanout
+      frames (`src/rtg_display.c`) and the scanout expands one row per HDMI
+      line with the card's palette and cursor. VRAM changes are cleaned
+      out of the XIP cache before they are marked (core 1 reads uncached).
+      Verified: PrismRTG Workbench at 640x480 8-bit on HDMI, the copied
+      frame equal to VRAM, no late rows. SRAM: one more ring step.
+- [x] CMake options `OMEGA_FAST_RAM` and `OMEGA_RTG` (default ON): OFF
+      compiles the board's SRAM code out and gives the ring its room back.
+- [ ] RTG screens wider than 640 or taller than the output's lines are
+      cropped; 15/16/24-bit show as RGB332 (README: why 640x480 8-bit is
+      the supported mode). A true 16-bit view does not fit SRAM (600 KB)
+      and a per-line PSRAM scanout misses its deadlines.
+- [ ] Report to PrismRTG (github.com/lainejones/PrismRTG): a selected icon
+      without its own selected image draws as an empty box - PrismD's
+      `blit_masked` treats BltMaskBitMapRastPort's minterm 0x20 ("invert
+      source through mask") as a BltBitMap minterm (native/README.md).
+- [ ] **Dithered 15/16/24-bit view** (planned, not started): keep the 8-bit
+      SRAM frame and the RGB332 palette, but convert with an ordered 4x4
+      Bayer dither in `rtg_copy()` (`src/rtg_display.c`): per pixel at
+      (x, y), threshold t = bayer4[y & 3][x & 3] (0..15); red and green
+      (3 bits) = min(7, (c8 * 7 + t * 16) >> 8) with c8 the 8-bit channel,
+      blue (2 bits) = min(3, (b8 * 3 + t * 16) >> 8); index = r << 5 |
+      g << 2 | b. The dither pattern must use the pixel's screen position,
+      not its VRAM offset, so a page copied alone still matches its
+      neighbours (the copy works page by page). Cost: a table lookup and
+      a few adds per pixel on core 1; no SRAM. Gradients and photos look
+      much smoother; fine coloured text shows the pattern a little. An
+      adaptive palette per screen (median cut) would be more accurate but
+      costly and shifts colours when the content changes.
 - [ ] 16-bit Workbench test (WBID gives 256 pens), Picasso96's own
       PicassoII.card, PrismRTG's test kit (tmpltest, p96test).
 

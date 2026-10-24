@@ -16,6 +16,12 @@ option(OMEGA_ENABLE_SDCARD "Build microSD: Kickstart from the card, IDE hard dis
 set(OMEGA_SD_ROM "rom/kick13.rom" CACHE STRING "Kickstart file on the SD card's FAT partition")
 option(OMEGA_ENABLE_FLASH_FLOPPY "Load ADF images embedded in flash" OFF)
 option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OFF)
+# Zorro II boards in the autoconfig chain: 2 MB of Fast RAM, then the RTG
+# card (a Picasso II+ with 1 MB of VRAM, shown on HDMI; it needs the Fast
+# RAM, which puts its VRAM at 0x400000). OFF leaves the board out and its
+# SRAM code too: the core-1 ring gets the room back.
+option(OMEGA_FAST_RAM "Zorro II Fast RAM board (2 MB, PSRAM)" ON)
+option(OMEGA_RTG "Picasso II+ RTG card (needs OMEGA_FAST_RAM and HDMI)" ON)
 # HDMI builds only: HSTX runs from PLL_USB, so clk_sys is independent of the
 # video mode. PSRAM runs at clk_sys / ceil(clk_sys / 133 MHz).
 # USB host needs 48 MHz from PLL_SYS (PLL_USB drives HSTX), so clk_sys must
@@ -96,6 +102,16 @@ if(OMEGA_ENABLE_HDMI)
     list(APPEND PLATFORM_SOURCES src/dvi_display.c)
 endif()
 
+# The RTG card needs the Fast RAM (its VRAM follows it at 0x400000) and the
+# HDMI output (its picture).
+set(OMEGA_RTG_ACTIVE OFF)
+if(OMEGA_RTG AND OMEGA_FAST_RAM AND OMEGA_ENABLE_HDMI)
+    set(OMEGA_RTG_ACTIVE ON)
+    list(APPEND PLATFORM_SOURCES src/rtg_display.c omega/Picasso2.c)
+elseif(OMEGA_RTG)
+    message(STATUS "RTG card left out: it needs OMEGA_FAST_RAM and OMEGA_ENABLE_HDMI")
+endif()
+
 if(OMEGA_ENABLE_SDCARD)
     list(APPEND PLATFORM_SOURCES
         src/sd_card.c
@@ -162,16 +178,24 @@ elseif(OMEGA_HDMI_AUDIO_ACTIVE)
 else()
     set(OMEGA_RING_WORDS_VALUE 15616)
 endif()
-# The Fast RAM board's decoding (Memory.c, in SRAM) needs a little of it,
-# SD-card builds (FatFs, the IDE drive, the KickSmash ROM switcher) a little
-# more. The size is a constant in the ring's index arithmetic, and a
-# multiple of 128 words keeps that code short (10016 cost 120 bytes).
+# Some features need a little of it (SRAM code and data): SD-card builds
+# (FatFs, the IDE drive, the KickSmash ROM switcher), the Fast RAM board's
+# decoding (Memory.c) and the RTG card (its VRAM writes, its scanout). The
+# size is a constant in the ring's index arithmetic, and a multiple of 128
+# words keeps that code short (10016 cost 120 bytes).
 if(NOT OMEGA_RING_WORDS)
+    set(_omega_ring_reserve 0)
     if(OMEGA_ENABLE_SDCARD)
-        math(EXPR OMEGA_RING_WORDS_VALUE "(${OMEGA_RING_WORDS_VALUE} - 160) / 128 * 128")
-    else()
-        math(EXPR OMEGA_RING_WORDS_VALUE "(${OMEGA_RING_WORDS_VALUE} - 128) / 128 * 128")
+        math(EXPR _omega_ring_reserve "${_omega_ring_reserve} + 32")
     endif()
+    if(OMEGA_FAST_RAM)
+        math(EXPR _omega_ring_reserve "${_omega_ring_reserve} + 128")
+    endif()
+    if(OMEGA_RTG_ACTIVE)
+        math(EXPR _omega_ring_reserve "${_omega_ring_reserve} + 160")
+    endif()
+    math(EXPR OMEGA_RING_WORDS_VALUE
+         "(${OMEGA_RING_WORDS_VALUE} - ${_omega_ring_reserve}) / 128 * 128")
 endif()
 
 # USB host is only built with HDMI (which sets up the clocks for it).
@@ -194,6 +218,8 @@ target_compile_definitions(omega-amiga PRIVATE
     BOARD_SD_ROM_PATH="0:/${OMEGA_SD_ROM}"
     OMEGA_ENABLE_FLASH_FLOPPY=$<BOOL:${OMEGA_ENABLE_FLASH_FLOPPY}>
     OMEGA_DF0_INSERT_AT_BOOT=$<BOOL:${OMEGA_DF0_INSERT_AT_BOOT}>
+    OMEGA_FAST_RAM=$<BOOL:${OMEGA_FAST_RAM}>
+    OMEGA_RTG=$<BOOL:${OMEGA_RTG_ACTIVE}>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
     OMEGA_SYS_CLK_KHZ=${OMEGA_SYS_CLK_KHZ}u
     OMEGA_CPU_CYCLES_PER_SLOT=${OMEGA_CPU_CYCLES_PER_SLOT}
@@ -284,5 +310,7 @@ message(STATUS "PSRAM:      ${PSRAM_SIZE_BYTES} bytes, CS GPIO${PSRAM_CS_PIN}")
 message(STATUS "HDMI:       ${OMEGA_ENABLE_HDMI}")
 message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD} (Kickstart ${OMEGA_SD_ROM})")
 message(STATUS "Flash ADF:  ${OMEGA_ENABLE_FLASH_FLOPPY}")
+message(STATUS "Fast RAM:   ${OMEGA_FAST_RAM}")
+message(STATUS "RTG card:   ${OMEGA_RTG_ACTIVE}")
 message(STATUS "DF0 at boot:${OMEGA_DF0_INSERT_AT_BOOT}")
 message(STATUS "Console:    ${OMEGA_STDIO_DESCRIPTION}")

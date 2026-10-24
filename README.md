@@ -25,6 +25,8 @@ Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | HDMI output (HSTX) | ✅ verified NTSC and PAL; build-disabled by default |
 | Paula audio | ✅ emulated, 48 kHz stereo; over HDMI (`OMEGA_HDMI_AUDIO`, NTSC and PAL), native: `OMEGA_PCM=<file>` |
 | USB HID keyboard/mouse | ✅ verified (mouse + keyboard receivers through a powered hub); HDMI builds |
+| 2 MB Fast RAM (Zorro II) | ✅ verified; `OMEGA_FAST_RAM` (default ON) |
+| RTG: Picasso II+ (PrismRTG) | ✅ verified 640x480 8-bit on HDMI; `OMEGA_RTG` (default ON, HDMI builds) |
 
 ## Hardware
 
@@ -89,8 +91,37 @@ places at `0x200000` and adds to the free list; no tools needed. The memory
 is PSRAM right after chip RAM, so `src/Memory.c` reaches both through one
 pointer. A reset unconfigures the board (its contents stay). Workbench 1.3
 shows about 4 MB free; `Avail` under 3.1.4 lists 2,097,152 bytes of fast.
-`-DBOARD_MAP_FAST_RAM_SIZE=0` builds without it; the native runner takes
-`OMEGA_FAST_RAM_KB` (default 2048).
+CMake `-DOMEGA_FAST_RAM=OFF` builds without it (and without its SRAM code:
+the core-1 ring gets the room); the native runner takes `OMEGA_FAST_RAM_KB`
+(default 2048).
+
+After it comes the RTG card: an emulated Village Tronic Picasso II+ (Cirrus
+GD5428, `omega/Picasso2.c`) with 1 MB of VRAM at `0x400000` and its
+registers at `0xE90000`. PrismRTG's PICASSO2 driver drives it unchanged.
+While its monitor switch is on, HDMI shows its picture (`src/rtg_display.c`:
+core 1 copies the changed VRAM pages of the visible screen into the scanout
+frames). CMake `-DOMEGA_RTG=OFF` leaves it out; it needs
+`OMEGA_FAST_RAM` and `OMEGA_ENABLE_HDMI`. Native: `OMEGA_RTG=0` (or `1024`
+for a 1 MB card as on the board).
+
+**Supported RTG mode: 640x480 (or 640x400) in 256 colours.** Choose
+PRISM:640x480 8bit for the Workbench. Why only this one:
+
+* The HDMI picture is always scanned out of SRAM: PSRAM line fetches miss
+  the scanline deadline while the emulator keeps the shared QMI bus busy
+  (see `dvi_display.c`). An 8-bit 640x480 screen is 300 KB and fits the
+  memory of the two Amiga scanout frames (320 KB PAL, 300 KB NTSC), which
+  the RTG picture borrows while it is shown.
+* A 16-bit 640x480 screen is 600 KB, more than the RP2350's whole 520 KB of
+  SRAM, so 15/16/24-bit screens are reduced to 8 bits on the way: plain
+  RGB332 (256 fixed colours) for now, which bands. The card itself, its
+  blitter and PrismRTG work at every depth; only the HDMI view is reduced.
+* The output is 640 pixels wide (PAL: 720x576 with a 640-wide image area;
+  NTSC: 640x480), so wider screens (800x600, 1024x768) are cropped at the
+  right and bottom. A different HDMI mode would need clocks the RP2350's
+  HSTX setup does not reach.
+* The VRAM is 1 MB (960 KB usable after PrismRTG's scratch): 800x600 at 16
+  bits would leave no room for off-screen bitmaps.
 
 ## SRAM Layout
 

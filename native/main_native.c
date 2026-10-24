@@ -24,10 +24,14 @@
 //                       kicksmash.cfg).
 //   OMEGA_FAST_RAM_KB=<n>  Zorro II Fast RAM board size (default 2048,
 //                       as the board; 0 for none; omega/Expansion.c)
-//   OMEGA_RTG=0         no Picasso II+ RTG card (omega/Picasso2.c); the
-//                       window shows its picture while its switch is on
+//   OMEGA_P2_DEBUG=1    log the RTG card's blits
+//   OMEGA_RTG=0|1024    no Picasso II+ RTG card (omega/Picasso2.c), or
+//                       one with 1 MB of VRAM (as the board) instead of 2;
+//                       the window shows its picture while its switch is on
 //   OMEGA_HDF=<file>    attach this RDB hard-disk image as the A600 IDE
 //                       drive (omega/Gayle.c; see make_hdf.sh)
+//   OMEGA_MOUSE=<list>  move and click: "frame:dx:dy:buttons,..." (counts,
+//                       spread two a frame; buttons bit 0 left, 1 right)
 //   OMEGA_KEYS=<list>   type Amiga raw keys: "frame:code,..." (hex code),
 //                       e.g. "200:04,260:02" presses and releases key 4 at
 //                       frame 200, then key 2 at frame 260.
@@ -47,6 +51,7 @@
 #endif
 #include "../omega/CPU.h"
 #include "../omega/Expansion.h"
+#include "../omega/Picasso2.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
 #include "../omega/DMA.h"
@@ -207,9 +212,16 @@ int main(int argc, char **argv) {
     // board; 0 for none).
     const char *fastKb = getenv("OMEGA_FAST_RAM_KB");
     expansionFastRamSize = (fastKb ? (uint32_t)atoi(fastKb) : 2048u) << 10;
-    // OMEGA_RTG=0: no Picasso II+ RTG card (omega/Picasso2.c).
+    // OMEGA_RTG: the Picasso II+ RTG card (omega/Picasso2.c): 0 for none,
+    // 1024 for 1 MB of VRAM (as the board has), else 2 MB.
     const char *rtg = getenv("OMEGA_RTG");
-    expansionPicasso2 = !rtg || atoi(rtg) != 0;
+    expansionPicasso2Vram = !rtg ? P2_VRAM_SIZE
+                          : atoi(rtg) == 0 ? 0
+                          : atoi(rtg) == 1024 ? P2_VRAM_SIZE / 2 : P2_VRAM_SIZE;
+    // OMEGA_P2_DEBUG=1: log the RTG card's blits (and the end of each
+    // blit fed by the CPU, and engine resets during one).
+    extern int p2DebugBlits;
+    p2DebugBlits = getenv("OMEGA_P2_DEBUG") ? atoi(getenv("OMEGA_P2_DEBUG")) : 0;
     memoryNativeInit();
     cpu_init();
     const char *cpuType = getenv("OMEGA_CPU");
@@ -289,6 +301,42 @@ int main(int argc, char **argv) {
                 keyReleaseFrame = (int)native_frame_counter + 1;
                 printf("  vbl=%lu key %02x\n", native_frame_counter, keyHeld);
             }
+        }
+
+        // OMEGA_MOUSE: "frame:dx:dy:buttons,..." - from each frame, move
+        // the mouse by dx/dy counts (two a frame, below Intuition's
+        // acceleration) and hold the buttons (bit 0 left, 1 right), as
+        // the board's USB mouse does (src/usb_input.c).
+        static const char *mouse;
+        static int mouseRead, mouseDx, mouseDy;
+        static unsigned long mouseFrame;
+        if (!mouseRead) {
+            mouseRead = 1;
+            mouse = getenv("OMEGA_MOUSE");
+        }
+        if (mouse && native_frame_counter != mouseFrame) {
+            mouseFrame = native_frame_counter;
+            char *next;
+            const unsigned long frame = strtoul(mouse, &next, 10);
+            if (*mouse && native_frame_counter >= frame && *next == ':') {
+                mouseDx += (int)strtol(next + 1, &next, 10);
+                mouseDy += (int)strtol(next + 1, &next, 10);
+                const int buttons = (int)strtol(next + 1, &next, 10);
+                mouse = *next == ',' ? next + 1 : next;
+                if (buttons & 1) CIAA.pra &= (uint8_t)~0x40;
+                else             CIAA.pra |= 0x40;
+                if (buttons & 2) chipset.potinp &= (uint16_t)~0x0400;
+                else             chipset.potinp |= 0x0400;
+                printf("  vbl=%lu mouse %d,%d buttons %d\n",
+                       native_frame_counter, mouseDx, mouseDy, buttons);
+            }
+            const int dx = mouseDx > 2 ? 2 : mouseDx < -2 ? -2 : mouseDx;
+            const int dy = mouseDy > 2 ? 2 : mouseDy < -2 ? -2 : mouseDy;
+            mouseDx -= dx;
+            mouseDy -= dy;
+            const uint8_t h = (uint8_t)((chipset.joy0dat & 0xFF) + dx);
+            const uint8_t v = (uint8_t)((chipset.joy0dat >> 8) + dy);
+            chipset.joy0dat = (uint16_t)(v << 8 | h);
         }
 
         // Kickstart only accepts a disk-change once the drive has finished

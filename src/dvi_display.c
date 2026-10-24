@@ -459,7 +459,21 @@ typedef struct {
     uint32_t ham_set[64];
     uint32_t applied;
 } scan_state_t;
+#if OMEGA_RTG
+// RTG mode (dvi_display_rtg_show) takes their memory for its palette.
+static union {
+    scan_state_t frames[2];
+    uint32_t rtg_palette[256];
+} scan_union;
+#define scan_states scan_union.frames
+static volatile bool rtg_on;
+volatile uint32_t rtg_late;     // debug: RTG lines sent before their row
+static uint rtg_w, rtg_h, rtg_y0;
+static dvi_rtg_cursor_t rtg_cursor;
+#else
 static scan_state_t scan_states[2];
+#define rtg_on false
+#endif
 // Branchless HAM:
 //   next = (previous & scan_ham_keep[code >> 4]) | ham_set[code].
 // Codes 0x00..0x0f load a colour register (keep nothing), 0x10/0x20/0x30
@@ -785,6 +799,11 @@ static void SCAN_FUNC(hstx_next_hblank)(uint p) {
     const uint line = hstx_hblank_line[p];
     hstx_hblank_line[p] = line_plus_2(line);
 
+    if (line == 0u && rtg_on) {
+        dvi_refreshes++;
+        border_active[BORDER_LINE_COLOUR_WORD] = 0;
+        goto line0_done;
+    }
     if (line == 0u) {
         dvi_refreshes++;
         // Interlace: once both fields are drawn, weave them (buffer 0, the
@@ -892,7 +911,15 @@ line0_done:;
     // buffer that the previous row's two lines are not using, by the
     // low-priority expansion interrupt. Weaving expands every line: the
     // short field's row on even lines, the long field's on odd ones.
-    if (line < MODE_V_ACTIVE_LINES) {
+    if (line < MODE_V_ACTIVE_LINES && rtg_on) {
+#if OMEGA_RTG
+        // RTG: every line its own row
+        const uint b = line % IMAGE_LINE_BUFFERS;
+        expand_frame[b] = 2;
+        expand_y[b] = (int)(line - rtg_y0);
+#endif
+        irq_set_pending(expand_irq);
+    } else if (line < MODE_V_ACTIVE_LINES) {
         const uint image_y = line / 2u - DVI_IMAGE_Y0;
         if (image_y < AMIGA_SOURCE_HEIGHT) {
             if (weave_active) {
@@ -910,6 +937,42 @@ line0_done:;
     }
 }
 
+#if OMEGA_RTG
+// RTG row y (may be outside the picture: black), the cursor over it.
+static void SCAN_FUNC(rtg_expand_row)(uint y, uint32_t *out) {
+    if (y >= rtg_h) {
+        scan_fill(out, 0, AMIGA_SOURCE_WIDTH, 0);
+        return;
+    }
+    const uint8_t *row = &sram_frames[0][0] + y * rtg_w;
+    const uint32_t *pal = scan_union.rtg_palette;
+    for (uint x = 0; x < rtg_w; ++x)
+        out[x] = pal[row[x]];
+    scan_fill(out, rtg_w, AMIGA_SOURCE_WIDTH, 0);
+    const dvi_rtg_cursor_t *c = &rtg_cursor;
+    const uint cy = y - (uint)c->y;
+    if (!c->on || cy >= (uint)c->size)
+        return;
+    // 64x64: per row 8 bytes of plane 0, then 8 of plane 1; 32x32: plane 0
+    // in bytes 0-127 (4 per row), plane 1 in 128-255
+    const uint8_t *p0 = c->size == 64 ? c->pattern + cy * 16u
+                                      : c->pattern + cy * 4u;
+    const uint8_t *p1 = c->size == 64 ? p0 + 8 : p0 + 128;
+    for (int i = 0; i < c->size; ++i) {
+        const uint x = (uint)(c->x + i);
+        if (x >= rtg_w)
+            break;
+        const uint b0 = (p0[i >> 3] >> (7 - (i & 7))) & 1u;
+        const uint b1 = (p1[i >> 3] >> (7 - (i & 7))) & 1u;
+        if (b1)
+            out[x] = c->rgb[b0];
+        else if (b0)
+            out[x] ^= 0xffffffu;
+    }
+}
+
+#endif
+
 // Row expansion runs at a lower priority than the DMA interrupt, which can
 // preempt it to reprogram its channels on time: a slow row (HAM with many
 // palette changes) can at worst arrive late and tear, never desynchronise
@@ -925,6 +988,14 @@ static void __not_in_flash_func(hstx_expand_irq)(void) {
             expand_y[b] = -1;
             again = true;
             uint32_t *out = image_lines[b];
+#if OMEGA_RTG
+            if (expand_frame[b] == 2) {
+                rtg_expand_row((uint)y, out + IMAGE_LINE_PIXELS);
+                if (DVI_IMAGE_X0)
+                    out[IMAGE_LINE_LEFT + 1] = out[IMAGE_LINE_RIGHT + 1] = 0;
+                continue;
+            }
+#endif
             const uint32_t border = scan_expand_row(expand_frame[b], (uint)y,
                                                     out + IMAGE_LINE_PIXELS);
             if (DVI_IMAGE_X0) {
@@ -941,7 +1012,14 @@ static void __not_in_flash_func(hstx_next_active)(uint p) {
     hstx_active_line[p] = line_plus_2(line);
     const uint32_t *list;
     uint count;
-    if (line < MODE_V_ACTIVE_LINES) {
+    if (line < MODE_V_ACTIVE_LINES && rtg_on) {
+#if OMEGA_RTG
+        if (expand_y[line % IMAGE_LINE_BUFFERS] >= 0)
+            rtg_late++;             // debug: its row is not expanded yet
+#endif
+        list = image_lines[line % IMAGE_LINE_BUFFERS];
+        count = IMAGE_LINE_WORDS;
+    } else if (line < MODE_V_ACTIVE_LINES) {
         const uint image_y = line / 2u - DVI_IMAGE_Y0;
         if (image_y < AMIGA_SOURCE_HEIGHT) {
             list = weave_active ? image_lines[line % IMAGE_LINE_BUFFERS]
@@ -1165,3 +1243,33 @@ void dvi_display_start(void) {
     printf("DVI: HSTX %s emulator scanout on %s\n",
            DVI_MODE_NAME, BOARD_DVI_PIN_RANGE);
 }
+
+#if OMEGA_RTG
+// ── RTG ──────────────────────────────────────────────────────────────────
+uint8_t *dvi_display_rtg_frame(uint32_t *capacity, uint32_t **palette) {
+    *capacity = sizeof sram_frames;
+    *palette = scan_union.rtg_palette;
+    return &sram_frames[0][0];
+}
+
+void dvi_display_rtg_show(int width, int height, const dvi_rtg_cursor_t *c) {
+    if (width > (int)AMIGA_SOURCE_WIDTH)
+        width = AMIGA_SOURCE_WIDTH;
+    if (height > (int)MODE_V_ACTIVE_LINES)
+        height = MODE_V_ACTIVE_LINES;
+    rtg_w = (uint)width;
+    rtg_h = (uint)height;
+    rtg_y0 = (MODE_V_ACTIVE_LINES - rtg_h) / 2u;
+    rtg_cursor = *c;
+    rtg_on = true;
+}
+
+void dvi_display_rtg_off(void) {
+    if (!rtg_on)
+        return;
+    rtg_on = false;
+    // The palette overwrote the HAM tables; the frames' own palettes come
+    // back at the next frame (scan_begin_frame).
+    dvi_init_ham_tables();
+}
+#endif

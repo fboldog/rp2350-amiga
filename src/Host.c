@@ -24,6 +24,9 @@ static void hostAudioService(void);
 #if OMEGA_ENABLE_HDMI
 #include "dvi_display.h"
 #endif
+#if OMEGA_RTG
+#include "rtg_display.h"
+#endif
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
 #include "../omega/Audio.h"
@@ -465,6 +468,13 @@ static dvi_indexed_frame_t *c1_prev_record; // the buffer's last frame
 static uint32_t c1_buf_frame[2];   // frame each buffer holds (0: none)
 static int c1_mark_row;            // last row with a row-end message
 static uint16_t c1_mark_pos;       // its palette-log position
+#if OMEGA_RTG
+// Keeps the HDMI audio output fed during long work on core 1 (rtg_display.c).
+void hostAudioPoll(void) {
+    AUDIO_SERVICE();
+}
+#endif
+
 // Core 1's loops must not become libc memset/memcpy calls (flash code).
 #define C1_FUNC(name) \
     __attribute__((optimize("no-tree-loop-distribute-patterns"))) \
@@ -744,6 +754,19 @@ static void C1_FUNC(c1Lores)(int row, int x, uint32_t p12,
 
 static void C1_FUNC(c1Begin)(uint32_t layout, uint32_t size,
                              uint32_t frame_no) {
+#if OMEGA_RTG
+    // The RTG card's picture is shown instead (rtg_display.c); once it is
+    // gone, the Amiga's frames were overwritten: core 0 sends whole ones.
+    const int rtg = rtgFrame();
+    if (rtg > 0) {
+        c1_image = NULL;
+        return;
+    }
+    if (rtg < 0) {
+        c1_buf_frame[0] = c1_buf_frame[1] = 0;
+        __atomic_store_n(&c1_oldest_frame, 0u, __ATOMIC_RELEASE);
+    }
+#endif
     c1_frame_no = frame_no;
     c1_first_row = (int16_t)(layout & 0xffffu);
     c1_step = (int)((layout >> 16) & 0xffu);
