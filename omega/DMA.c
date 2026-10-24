@@ -677,7 +677,14 @@ static void advanceBitplanePointers(void) {
     // window the compatibility advancement stays: Kickstart 2.x/3.x load
     // their pointers mid-line just before a few no-fetch lines, and the
     // display layout is calibrated with the modulo applied there.
-    if (!bitplaneLine.inDisplayWindow)
+    // HDMI direct frames anchor narrow layouts (DDFSTRT >= 0x40) at their
+    // beam position (see lineRasterDdf), so those lines behave as the
+    // hardware does: Kickstart 3.1.4's insert-disk screen loads its
+    // pointers on line $61 and enables its planes on $63, and the modulo of
+    // the lines between moved its picture 3 words. Full-width layouts
+    // (xSysInfo) keep the calibration.
+    if (!bitplaneLine.inDisplayWindow ||
+        (hostDirectActive && !omegaDdfIsFullWidth(chipset.ddfstrt)))
         return;
     fetched = bitplaneLine.fetchEligibleMask != 0
         ? bitplaneLine.fetchEligibleMask
@@ -956,8 +963,16 @@ static void dmaUpdateLineState(void) {
         // where the pointer was drawn 16 columns left.
         // An early HIRES fetch (DDFSTRT < 0x38; 0x38 itself is the
         // rotated layout) is placed the same way, against HIRES 0x3C.
+        // So is a narrow HDMI direct one (DDFSTRT >= 0x40; Kickstart 2.04
+        // and 3.1.4's insert-disk screens): its frame maps raster column
+        // x to image column x - HOST_FETCH_LEAD, so column 0 is that many
+        // columns (4 a slot) before 0x3C. Against DDFSTRT, both pictures
+        // and their sprites sat 40 columns left.
         lineRasterDdf = !hires && omegaDdfIsFullWidth(chipset.ddfstrt) ? 0x38
                       : hires && chipset.ddfstrt < 0x38 ? 0x3C
+                      : hires && hostDirectActive &&
+                        !omegaDdfIsFullWidth(chipset.ddfstrt)
+                      ? 0x3C - HOST_FETCH_LEAD / 4
                       : chipset.ddfstrt;
     }
     // Disabled planes' slots may be skipped (see slotIsActive()); clear their
@@ -1843,10 +1858,13 @@ static inline void hiresPlane1Fetch(void){
     if (hostDirectActive) {
         if (bitplaneLine.hiresWords == 1) {
             // An early fetch (Agony's intro: DDFSTRT 0x30) starts left of
-            // column 0 by its beam distance from 0x3C, 4 columns a slot.
+            // column 0 by its beam distance from 0x3C, 4 columns a slot; a
+            // narrow one right of it (see lineRasterDdf).
             host.rasterRow = internal.vPos - OMEGA_DIRECT_FIRST_LINE;
-            host.rasterX = (chipset.ddfstrt < 0x38
-                            ? ((chipset.ddfstrt & ~3) - 0x3C) * 4 : 0) +
+            host.rasterX = (chipset.ddfstrt < 0x38 ||
+                            !omegaDdfIsFullWidth(chipset.ddfstrt)
+                            ? ((chipset.ddfstrt & ~3) - lineRasterDdf) * 4
+                            : 0) +
                            bplScrollColumns();
         }
     } else if (lineFullWidth) {

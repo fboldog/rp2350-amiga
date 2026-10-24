@@ -282,8 +282,7 @@ static void hostDirectBegin(void) {
     const bool full_width = omegaDdfIsFullWidth(chipset.ddfstrt);
     // Narrow layouts that need hostPresentFrame()'s wrapped-fetch
     // reconstruction (pixels moved between lines) keep the ARGB path.
-    const bool narrow = !full_width &&
-        !omegaDiwCrossesVerticalBank(chipset.diwstrt, chipset.diwstop);
+    const bool narrow = !full_width;
     direct_frame = full_width || narrow;
     hostDirectActive = direct_frame;
     if (!direct_frame)
