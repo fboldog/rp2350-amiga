@@ -105,7 +105,11 @@ only through a reset: without the reboot option it waits for the next one.
 
 The default native CPU remains a 68000. `OMEGA_CPU=68020` selects Musashi's
 68020 core at run time; its full indexed addressing and 68020 CACR behavior are
-needed by the release 2.0 switcher image.
+needed by the release 2.0 switcher image. `OMEGA_CPU=68ec020` selects the
+board's 68EC020 (24-bit bus). A KickSmash switch takes the bank's CPU from
+`kicksmash.cfg` (`cpu <n> 68020`), as the board does. Coprocessor (FPU, MMU)
+instructions take the F-line exception on the 68020 too, as on a real one
+without an FPU: Kickstart detects the FPU that way.
 
 ### DiagROM
 
@@ -193,7 +197,8 @@ REGRESSION=1 VIDEO=PAL ./native/build.sh
 
 The regression runner builds in that mode, boots the three ROM-only screens,
 the three Workbench/installer cases and Kickstart 3.1.4 and 2.05 from fresh
-hard-disk images (`hdf314`, `hdf205`), then compares exact final-frame PPM
+hard-disk images (`hdf314`, `hdf205`, and `hdf314-ec020` on the 68EC020),
+then compares exact final-frame PPM
 hashes, sorted by case name:
 
 ```sh

@@ -11992,65 +11992,40 @@ void m68k_op_cmpm_32(void)
 
 void m68k_op_cpbcc_32(void)
 {
-	if(CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
-	{
-		M68K_DO_LOG((M68K_LOG_FILEHANDLE "%s at %08x: called unimplemented instruction %04x (%s)\n",
-					 m68ki_cpu_names[CPU_TYPE], ADDRESS_68K(REG_PC - 2), REG_IR,
-					 m68k_disassemble_quick(ADDRESS_68K(REG_PC - 2))));
-		return;
-	}
+	/* No coprocessor (FPU, MMU) is attached: a real 68020 takes the F-line
+	   exception, which is also how Kickstart detects that there is none. */
 	m68ki_exception_1111();
 }
 
 
 void m68k_op_cpdbcc_32(void)
 {
-	if(CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
-	{
-		M68K_DO_LOG((M68K_LOG_FILEHANDLE "%s at %08x: called unimplemented instruction %04x (%s)\n",
-					 m68ki_cpu_names[CPU_TYPE], ADDRESS_68K(REG_PC - 2), REG_IR,
-					 m68k_disassemble_quick(ADDRESS_68K(REG_PC - 2))));
-		return;
-	}
+	/* No coprocessor (FPU, MMU) is attached: a real 68020 takes the F-line
+	   exception, which is also how Kickstart detects that there is none. */
 	m68ki_exception_1111();
 }
 
 
 void m68k_op_cpgen_32(void)
 {
-	if(CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
-	{
-		M68K_DO_LOG((M68K_LOG_FILEHANDLE "%s at %08x: called unimplemented instruction %04x (%s)\n",
-					 m68ki_cpu_names[CPU_TYPE], ADDRESS_68K(REG_PC - 2), REG_IR,
-					 m68k_disassemble_quick(ADDRESS_68K(REG_PC - 2))));
-		return;
-	}
+	/* No coprocessor (FPU, MMU) is attached: a real 68020 takes the F-line
+	   exception, which is also how Kickstart detects that there is none. */
 	m68ki_exception_1111();
 }
 
 
 void m68k_op_cpscc_32(void)
 {
-	if(CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
-	{
-		M68K_DO_LOG((M68K_LOG_FILEHANDLE "%s at %08x: called unimplemented instruction %04x (%s)\n",
-					 m68ki_cpu_names[CPU_TYPE], ADDRESS_68K(REG_PC - 2), REG_IR,
-					 m68k_disassemble_quick(ADDRESS_68K(REG_PC - 2))));
-		return;
-	}
+	/* No coprocessor (FPU, MMU) is attached: a real 68020 takes the F-line
+	   exception, which is also how Kickstart detects that there is none. */
 	m68ki_exception_1111();
 }
 
 
 void m68k_op_cptrapcc_32(void)
 {
-	if(CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
-	{
-		M68K_DO_LOG((M68K_LOG_FILEHANDLE "%s at %08x: called unimplemented instruction %04x (%s)\n",
-					 m68ki_cpu_names[CPU_TYPE], ADDRESS_68K(REG_PC - 2), REG_IR,
-					 m68k_disassemble_quick(ADDRESS_68K(REG_PC - 2))));
-		return;
-	}
+	/* No coprocessor (FPU, MMU) is attached: a real 68020 takes the F-line
+	   exception, which is also how Kickstart detects that there is none. */
 	m68ki_exception_1111();
 }
 

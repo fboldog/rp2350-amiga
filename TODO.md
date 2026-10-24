@@ -148,12 +148,19 @@ Steps:
 - [ ] **Card preparation:** document (or script) partitioning a card:
       FAT32 partition 1, type `0x76` partition 2, optionally `dd` an image
       into partition 2.
-- [ ] **Install:** boot `Install3_1_4.adf`, partition with HDToolBox, run
-      the installer; for 2.05, its own Workbench disks. Or prepare the
-      image on the PC.
+- [x] **Install** (2026-10-24): AmigaOS installed on partitions of the
+      card's 0x76 drive with the board itself; Kick 2.05 + OS 2.05 and Kick
+      3.1.4 + OS 3.1.4 boot from the card. OS 3.2 not yet reported.
 - [ ] Stream ADF tracks from SD instead of storing a complete MFM image in
       PSRAM; this is needed for practical disk swapping (reuses the SD
       layer and the DF0 track buffer)
+- [ ] **ADF swapping from the card** (requested 2026-10-24, after RTG):
+      today DF0's disks are the flash slots (`tooling/disk.sh`), one per
+      board boot by rotation, and KEY only ejects/inserts the mounted
+      disk; the card's `/adf` is not read. Wanted: KEY steps to the next
+      ADF in `/adf` (sorted) without a reboot (eject, load, insert), so
+      multi-disk installs and games work; flash slots stay the fallback
+      without a card.
 - [x] **Kickstart chooser: the KickSmash ROM switcher** (2026-10-24). The
       protocol is answered on the board and natively (`omega/KickSmash.c`),
       the banks are the card's `/rom` ROMs (`/rom/kicksmash.cfg` for names
@@ -166,6 +173,22 @@ Steps:
       Still open: SWITCHER through Ctrl-Amiga-Amiga (built, not yet tried),
       the long-reset bank sequence (stored, not acted on), merged banks for
       ROMs over 512 KB.
+- [x] **68EC020 per bank** (2026-10-24, the first step towards RTG, whose
+      P96 driver needs a 68020). `cpu <n> 68020` in `/rom/kicksmash.cfg`
+      runs that bank on Musashi's 68EC020 (24-bit bus, so the memory map is
+      unchanged), else on the 68000; selected at each bank load. The board
+      keeps one cycle byte per handler and refills it on a CPU change (no
+      SRAM cost). Coprocessor instructions now take the F-line exception
+      as on a real 68020 without an FPU (Musashi ignored them, so Kickstart
+      found a 68881, and 2.05/3.1.4 crashed or reset-looped). With the
+      68010 off, Musashi counted the EC020 as "010 or less", so indexed
+      addressing lost the 020's scale and full extension words (PrismRTG's
+      PrismSetup failed with #80000004 on a scaled jump table); fixed in
+      `m68kcpu.h`. Verified
+      natively (`hdf314-ec020` regression case, Kick 1.3/2.05/3.1.4/3.2
+      start, PrismSetup DETECT) and on the board (3.1.4 boots on the
+      EC020, PrismRTG's installer runs). Open: the CPU pacing on a 68020
+      (`OMEGA_CPU_CYCLES_PER_SLOT` was tuned on the 68000).
 - [ ] Optional: a tiny on-screen disk chooser
 - [ ] Later: fast RAM in free PSRAM (an installed 3.1.4 wants it; overlaps
       with RTG); USB mass storage as a second source behind the same block

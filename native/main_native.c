@@ -18,7 +18,10 @@
 //                      instead of the built-in Kickstart 1.3.
 //   OMEGA_DISASM=1     turn on the Musashi disassembler (to UART/stdout) -
 //                      useful for seeing where a ROM's early init diverges.
-//   OMEGA_CPU=68020     use Musashi's 68020 core instead of the default 68000.
+//   OMEGA_CPU=68020     use Musashi's 68020 core instead of the default 68000;
+//                       68ec020 for the board's 24-bit 68EC020. A KickSmash
+//                       switch takes the bank's CPU ("cpu <n> 68020" in
+//                       kicksmash.cfg).
 //   OMEGA_HDF=<file>    attach this RDB hard-disk image as the A600 IDE
 //                       drive (omega/Gayle.c; see make_hdf.sh)
 //   OMEGA_KEYS=<list>   type Amiga raw keys: "frame:code,..." (hex code),
@@ -199,6 +202,8 @@ int main(int argc, char **argv) {
     if (cpuType && strcmp(cpuType, "68020") == 0) {
         m68k_set_cpu_type(M68K_CPU_TYPE_68020);
         printf("  CPU: 68020\n");
+    } else if (cpuType && strcmp(cpuType, "68ec020") == 0) {
+        cpu_select_68020(1);
     }
     ChipsetInit();
 

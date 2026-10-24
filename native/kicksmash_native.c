@@ -3,13 +3,14 @@
 // directory of OMEGA_ROM), sorted by name; kicksmash.cfg there keeps the
 // switcher's settings and may map banks to files ("bank <n> <file>").
 // "Switch and Reboot" loads the bank's file and resets the Amiga
-// (main_native.c), as the board does.
+// (main_native.c), as the board does, on the bank's CPU ("cpu <n> 68020").
 
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "CPU.h"
 #include "KickSmash.h"
 #include "kicksmash_native.h"
 
@@ -73,6 +74,7 @@ void kicksmash_native_init(const char *rom_path) {
         bank = kickSmashFindBank(rom_file);
     }
     state.bi.bank_current = bank >= 0 ? (uint8_t)bank : 0xff;
+    cpu_select_68020(kickSmashBankCpu020(bank));
 }
 
 int kicksmash_native_bank_path(int bank, char *out, size_t size) {
@@ -85,6 +87,7 @@ int kicksmash_native_bank_path(int bank, char *out, size_t size) {
 void kicksmash_native_switched(int bank) {
     state.bi.bank_current = (uint8_t)bank;
     state.bi.bank_nextreset = 0xff;
+    cpu_select_68020(kickSmashBankCpu020(bank));
 }
 
 void kickSmashHostSettingsChanged(void) {

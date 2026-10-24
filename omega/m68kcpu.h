@@ -409,7 +409,10 @@ static inline uint m68ki_instruction_cycles(uint ir)
 #else
 	#define CPU_TYPE_IS_010(A)         0
 	#define CPU_TYPE_IS_010_PLUS(A)    CPU_TYPE_IS_EC020_PLUS(A)
-	#define CPU_TYPE_IS_010_LESS(A)    CPU_TYPE_IS_EC020_LESS(A)
+	/* Up to the 68010: the 68000 alone. (Musashi used EC020_LESS here,
+	   which includes the 68EC020: it then decoded indexed addressing as
+	   a 68000 does, without the 020's scale and full extension words.) */
+	#define CPU_TYPE_IS_010_LESS(A)    ((A) & CPU_TYPE_000)
 #endif
 
 #if M68K_EMULATE_020 || M68K_EMULATE_EC020

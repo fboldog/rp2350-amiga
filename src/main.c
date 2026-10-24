@@ -332,7 +332,7 @@ static bool load_rom_from_sd(const char *path) {
 }
 
 // Loads a KickSmash bank (or, for bank -1, `path`) and records it as the
-// bank the Amiga runs.
+// bank the Amiga runs, on the bank's CPU (68000 or 68EC020).
 static bool load_bank_from_sd(int bank, const char *path) {
     char bank_path[48];
     if (bank >= 0 && kicksmash_sd_bank_path(bank, bank_path, sizeof bank_path))
@@ -340,6 +340,7 @@ static bool load_bank_from_sd(int bank, const char *path) {
     if (!load_rom_from_sd(path))
         return false;
     kicksmash_sd_set_current(bank);
+    cpu_select_68020(kickSmashBankCpu020(bank));
     return true;
 }
 

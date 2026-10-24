@@ -88,6 +88,21 @@ void cpu_keyboard_reset(void){
     m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
 }
 
+/* The CPU model: a 68000 (A500), or a 68EC020 (A1200-like, 24-bit bus),
+   which RTG drivers and 020-only software need. Takes effect at once after
+   cpu_init(), so a caller selects it just before a reset. */
+static unsigned int cpu_type = M68K_CPU_TYPE_68000;
+static int cpu_ready;
+
+void cpu_select_68020(int on){
+    const unsigned int type = on ? M68K_CPU_TYPE_68EC020 : M68K_CPU_TYPE_68000;
+    if (type != cpu_type)
+        printf("CPU: %s\n", on ? "68EC020" : "68000");
+    cpu_type = type;
+    if (cpu_ready)
+        m68k_set_cpu_type(cpu_type);
+}
+
 void cpu_init(){
 
     //set CIA IDs
@@ -95,7 +110,8 @@ void cpu_init(){
     CIAInit(&CIAB, 40960);
     
     m68k_init();
-    m68k_set_cpu_type(M68K_CPU_TYPE_68000); //Pretend to be an A500 for now...
+    m68k_set_cpu_type(cpu_type);
+    cpu_ready = 1;
     m68k_set_reg(M68K_REG_SR, 0x2700); // Reset enters supervisor mode, IRQs masked
     m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
 

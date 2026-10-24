@@ -37,6 +37,7 @@ typedef struct {
     uint8_t  nv[32];             // NV[0]: switcher timeout, NV[1]: its bank
     char     board_name[16];
     char     file[KS_ROM_BANKS][KS_FILE_MAX];  // ROM file of each bank
+    uint8_t  cpu020[KS_ROM_BANKS];   // nonzero: the bank runs a 68EC020
     // Transport
     uint8_t  shift;              // request word = offset >> shift
     uint16_t req_pos;            // words received (magic included)
@@ -69,6 +70,9 @@ int kickSmashFormatConfig(char *out, int size);
 void kickSmashDefaultBanks(const char *const *files, int count);
 // The bank whose file is `file` (case-insensitive), or -1.
 int kickSmashFindBank(const char *file);
+// Nonzero if the bank runs on a 68EC020 ("cpu <n> 68020" in the settings),
+// else it runs on a 68000.
+int kickSmashBankCpu020(int bank);
 
 // Host side. The switch is requested from inside a ROM read: the host
 // acts on it between emulation slices (kickSmashTakeSwitch()), loading the

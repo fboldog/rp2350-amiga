@@ -233,7 +233,10 @@ unsigned int chipReadLong(unsigned int address){
     //Chipregs
     if(address>0xDFEFFF){
         address = (address - 0xDFF000) >> 1;
-        address &=0xFF;  //maskout stupid values
+        // getChipReg32 covers only the first 16 registers; everything else
+        // reads 0 like its noReadL entries (as src/Memory.c).
+        if (address >= 16u)
+            return 0;
         debugChipAddress = address;
         return getChipReg32[address]();
     }

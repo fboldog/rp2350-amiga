@@ -72,7 +72,8 @@ run_case() {
     insert_at=$5
     hdf=${6:-}
     echo "[$VIDEO_NAME] $name"
-    OMEGA_HDF="$hdf" OMEGA_ROM="$PWD/$rom" ./native/omega-native "$adf" \
+    OMEGA_CPU="${CPU:-}" OMEGA_HDF="$hdf" OMEGA_ROM="$PWD/$rom" \
+        ./native/omega-native "$adf" \
         "$iterations" 0 "$insert_at" >"$OUTPUT_DIR/$name.log" 2>&1
     cp frame_final.ppm "$OUTPUT_DIR/$name.ppm"
     checksum=$(hash_file "$OUTPUT_DIR/$name.ppm")
@@ -98,6 +99,14 @@ run_case wb314 "$ROM_DIR/kick314.rom" \
     "$ADF_DIR/amiga-os-205-workbench.adf" >/dev/null
 run_case hdf314 "$ROM_DIR/kick314.rom" "" 500000 3000 "$OUTPUT_DIR/hdf314.hdf"
 run_case hdf205 "$ROM_DIR/kick205.rom" "" 500000 3000 "$OUTPUT_DIR/hdf205.hdf"
+
+# The same boot on the board's 68EC020 (the KickSmash "cpu <n> 68020"
+# setting): Kickstart must find no FPU and use its 68020 exec paths.
+./native/make_hdf.sh "$OUTPUT_DIR/hdf314-ec020.hdf" System ffs+intl \
+    "$ADF_DIR/amiga-os-314-workbench.adf" \
+    "$ADF_DIR/amiga-os-314-modules-a500.adf" >/dev/null
+CPU=68ec020 run_case hdf314-ec020 "$ROM_DIR/kick314.rom" "" 500000 3000 \
+    "$OUTPUT_DIR/hdf314-ec020.hdf"
 
 if [ "${UPDATE_BASELINES:-0}" = "1" ]; then
     UPDATED="$OUTPUT_DIR/updated.sha256"

@@ -411,6 +411,10 @@ static void copy_str(char *dst, size_t size, const char *src) {
     dst[n] = '\0';
 }
 
+int kickSmashBankCpu020(int bank) {
+    return ks && bank >= 0 && bank < KS_ROM_BANKS && ks->cpu020[bank];
+}
+
 static void set_bank(unsigned b, const char *file, const char *name) {
     copy_str(ks->file[b], KS_FILE_MAX, file);
     memset(ks->bi.name[b], 0, sizeof ks->bi.name[b]);
@@ -510,6 +514,14 @@ void kickSmashParseConfig(const char *text) {
                 strcpy(ks->board_name, rest);
             else
                 set_bank((unsigned)b, tok, rest);
+        } else if (!strcmp(key, "cpu")) {
+            // "cpu <bank> 68000|68020"
+            p = word(p, tok, sizeof tok);
+            const int b = number(tok, 10);
+            word(p, tok, sizeof tok);
+            if (b >= 0 && b < KS_ROM_BANKS)
+                ks->cpu020[b] = !strcmp(tok, "68020") ||
+                                same_name(tok, "68EC020");
         } else if (!strcmp(key, "poweron")) {
             word(p, tok, sizeof tok);
             const int b = number(tok, 10);
@@ -537,7 +549,8 @@ void kickSmashParseConfig(const char *text) {
 int kickSmashFormatConfig(char *out, int size) {
     int n = snprintf(out, size,
         "# KickSmash ROM switcher settings (Omega). Edited by the switcher's\n"
-        "# Save; \"bank <n> <file in /rom> [name]\" lines map banks to files.\n"
+        "# Save; \"bank <n> <file in /rom> [name]\" lines map banks to files,\n"
+        "# \"cpu <n> 68020\" runs a bank on a 68EC020 (else a 68000).\n"
         "name %s\npoweron %u\nlongreset",
         ks->board_name, ks->bi.bank_poweron);
     for (int b = 0; b < KS_ROM_BANKS && ks->bi.longreset_seq[b] != 0xff &&
@@ -557,5 +570,8 @@ int kickSmashFormatConfig(char *out, int size) {
         if (ks->file[b][0])
             n += snprintf(out + n, size - n, "bank %d %s %s\n", b,
                           ks->file[b], ks->bi.name[b]);
+    for (int b = 0; b < KS_ROM_BANKS && n < size; b++)
+        if (ks->cpu020[b])
+            n += snprintf(out + n, size - n, "cpu %d 68020\n", b);
     return n < size ? n : -1;
 }

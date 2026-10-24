@@ -6,8 +6,8 @@
 
 #define OPCODE_CPU_TYPES 3
 #ifdef PICO_BUILD
-// The RP2350 port always configures an A500-class 68000. Do not reserve two
-// unused 64 KiB cycle tables for the 68010 and 68020 in scarce internal SRAM.
+// The RP2350 port runs a 68000 or a 68EC020 and keeps one byte of cycles per
+// handler (m68ki_handler_cycles), not 64 KiB cycle tables in scarce SRAM.
 #define NUM_CPU_TYPES 1
 #else
 #define NUM_CPU_TYPES OPCODE_CPU_TYPES
@@ -2019,8 +2019,26 @@ static M68KI_HANDLER_TABLE_CONST opcode_handler_struct m68k_opcode_handler_table
 /* The terminating entry's slot dispatches illegal opcodes. */
 #define M68KI_ILLEGAL_INDEX (M68KI_HANDLER_COUNT - 1)
 void (*m68ki_handler_ptrs[M68KI_HANDLER_COUNT])(void);
-/* Per-handler 68000 cycles; replaces the 64 KiB per-opcode cycle table. */
+/* Per-handler cycles of the current CPU type; replaces the 64 KiB
+   per-opcode cycle tables. */
 unsigned char m68ki_handler_cycles[M68KI_HANDLER_COUNT];
+/* Fills m68ki_handler_cycles from the handler table's column for a CPU
+   type (0: 68000, 2: 68EC020); m68k_set_cpu_type() calls it. */
+void m68ki_set_handler_cycles(int type)
+{
+	for(unsigned i = 0; i < M68KI_HANDLER_COUNT; i++)
+	{
+		const opcode_handler_struct *os = &m68k_opcode_handler_table[i];
+		m68ki_handler_cycles[i] = os->cycles[type];
+		/* 68000 register shifts by an immediate count cost 2 cycles per
+		   bit; m68ki_instruction_cycles() adds them from the opcode. The
+		   68020's shifts take the same time for any count. */
+		if(type == 0 && os->mask == 0xf1f8 &&
+		   (os->match & 0xf000) == 0xe000 && !(os->match & 0x20))
+			m68ki_handler_cycles[i] |= M68KI_CYCLES_IMMEDIATE_SHIFT;
+	}
+	m68ki_handler_cycles[M68KI_ILLEGAL_INDEX] = 0;
+}
 #define M68KI_SET_HANDLER(op, os) \
 	(m68ki_instruction_index[op] = \
 		(unsigned short)((os) - m68k_opcode_handler_table))
@@ -2102,17 +2120,7 @@ void m68ki_build_opcode_table(void)
 	for(i = 0; i < (int)M68KI_HANDLER_COUNT; i++)
 		m68ki_handler_ptrs[i] = m68k_opcode_handler_table[i].opcode_handler;
 	m68ki_handler_ptrs[M68KI_ILLEGAL_INDEX] = m68k_op_illegal;
-	for(i = 0; i < (int)M68KI_HANDLER_COUNT; i++)
-	{
-		ostruct = &m68k_opcode_handler_table[i];
-		m68ki_handler_cycles[i] = ostruct->cycles[0];
-		/* Register shifts by an immediate count cost 2 cycles per bit;
-		   m68ki_instruction_cycles() adds them from the opcode. */
-		if(ostruct->mask == 0xf1f8 &&
-		   (ostruct->match & 0xf000) == 0xe000 && !(ostruct->match & 0x20))
-			m68ki_handler_cycles[i] |= M68KI_CYCLES_IMMEDIATE_SHIFT;
-	}
-	m68ki_handler_cycles[M68KI_ILLEGAL_INDEX] = 0;
+	m68ki_set_handler_cycles(0);
 #endif
 
 	for(i = 0; i < 0x10000; i++)

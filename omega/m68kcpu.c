@@ -574,6 +574,8 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CPU_SR_MASK      = 0xa71f; /* T1 -- S  -- -- I2 I1 I0 -- -- -- X  N  Z  V  C  */
 #ifndef PICO_BUILD
 			CYC_INSTRUCTION  = m68ki_cycles[0];
+#else
+			m68ki_set_handler_cycles(0);
 #endif
 			CYC_EXCEPTION    = m68ki_exception_cycle_table[0];
 			CYC_BCC_NOTAKE_B = -2;
@@ -603,11 +605,18 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CYC_SHIFT        = 1;
 			CYC_RESET        = 130;
 			return;
+#endif
+		/* RP2350: the 68020 is an EC020, whose 24-bit bus fits the memory
+		   map (Memory.c decodes 16 MB). */
 		case M68K_CPU_TYPE_68EC020:
 			CPU_TYPE         = CPU_TYPE_EC020;
 			CPU_ADDRESS_MASK = 0x00ffffff;
 			CPU_SR_MASK      = 0xf71f; /* T1 T0 S  M  -- I2 I1 I0 -- -- -- X  N  Z  V  C  */
+#ifndef PICO_BUILD
 			CYC_INSTRUCTION  = m68ki_cycles[2];
+#else
+			m68ki_set_handler_cycles(2);
+#endif
 			CYC_EXCEPTION    = m68ki_exception_cycle_table[2];
 			CYC_BCC_NOTAKE_B = -2;
 			CYC_BCC_NOTAKE_W = 0;
@@ -619,6 +628,7 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CYC_SHIFT        = 0;
 			CYC_RESET        = 518;
 			return;
+#ifndef PICO_BUILD
 		case M68K_CPU_TYPE_68020:
 			CPU_TYPE         = CPU_TYPE_020;
 			CPU_ADDRESS_MASK = 0xffffffff;

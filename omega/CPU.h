@@ -33,6 +33,7 @@ void cpu_set_fc(unsigned int fc);
 int  cpu_irq_ack(int level);
 void cpu_instr_callback();
 
+void cpu_select_68020(int on);  // else a 68000; select before a reset
 void cpu_init();
 void cpu_execute();
 
