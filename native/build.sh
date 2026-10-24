@@ -14,8 +14,8 @@
 # Screenshot regression build:
 #   REGRESSION=1     — force headless output and suppress diagnostic dumps
 #
-# KickSmash ROM-switcher support:
-#   KICKSMASH_SIM=1  — answer the native ROM transport queries
+# KickSmash ROM switcher (the protocol is always answered, omega/KickSmash.c):
+#   KICKSMASH_SIM=1  — also echo the Amiga's serial output to stdout
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -38,11 +38,10 @@ if [ "${REGRESSION:-0}" = "1" ]; then
 fi
 
 KICKSMASH_FLAGS=""
-KICKSMASH_SRC=""
+KICKSMASH_SRC="native/kicksmash_native.c"
 if [ "${KICKSMASH_SIM:-0}" = "1" ]; then
     KICKSMASH_FLAGS="-DOMEGA_KICKSMASH_SIM=1"
-    KICKSMASH_SRC="native/kicksmash_sim.c"
-    echo "KICKSMASH_SIM=1 — enabling native KickSmash query simulation"
+    echo "KICKSMASH_SIM=1 — echoing the Amiga's serial output"
 fi
 
 SDL_FLAGS=""
@@ -72,6 +71,7 @@ OMEGA_SRC=(
   omega/DMA.c
   omega/Floppy.c
   omega/Gayle.c
+  omega/KickSmash.c
   omega/m68kcpu.c
   omega/m68kdasm.c
   omega/m68kopac.c

@@ -45,6 +45,8 @@
 #include "../omega/Floppy.h"
 #include "../omega/VideoStandard.h"
 #include "../omega/m68k.h"
+#include "../omega/KickSmash.h"
+#include "kicksmash_native.h"
 
 #include "../omega/Kick13.h" // const unsigned char kick13[524288]
 
@@ -120,6 +122,7 @@ int main(int argc, char **argv) {
     // ── Kickstart ROM into low16Meg at 0xF80000 ─────────────────────────
     if (romPath) {
         if (load_rom_file(romPath)) return 1;
+        kicksmash_native_init(romPath);
     } else {
         memcpy(&low16Meg[0xF80000], kick13, 524288);   // built-in KS 1.3
         printf("  ROM: built-in Kickstart 1.3\n");
@@ -226,6 +229,21 @@ int main(int argc, char **argv) {
             cpu_execute();
         }
 #endif
+
+        // KickSmash "Switch and Reboot": the bank's ROM, then a reset, as
+        // the board does (between slices, once the reply was read).
+        {
+            const int bank = kickSmashTakeSwitch();
+            char bankPath[600];
+            if (bank >= 0 &&
+                kicksmash_native_bank_path(bank, bankPath, sizeof bankPath) &&
+                !load_rom_file(bankPath)) {
+                printf("  vbl=%lu KickSmash: bank %d\n",
+                       native_frame_counter, bank);
+                kicksmash_native_switched(bank);
+                cpu_keyboard_reset();
+            }
+        }
 
         // OMEGA_KEYS: press each listed key at its frame, release it the
         // next frame (as the keyboard's serial line would deliver it).

@@ -1,0 +1,182 @@
+From 59baf911782dffac34fdbd2a84105aea9ffc1680 Mon Sep 17 00:00:00 2001
+From: Ferenc Boldog <ferenc.boldog+claude@gmail.com>
+Date: Sat, 24 Oct 2026 14:45:46 +0200
+Subject: [PATCH] ROM Switcher - Run on the 68000 and 68010
+
+- Build for the 68000. Files with inline assembly for 68010+ control
+  registers, caches, MMU or FPU let their assembler accept it
+  (-Wa,-m68060); it only runs once the CPU type is known.
+- Detect a 68020 or later without an illegal instruction (MOVEM
+  predecrement store) before probing CACR; the 68000 and 68010 are
+  reported as 68000.
+- 68000/68010: the vectors are copied to address 0 instead of setting
+  VBR, and CacheControl() does nothing.
+- Vector entry stubs are assembly: gcc's 68000 code for the C wrapper
+  jumped through A0 without loading the handler's address.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PSkXbnUNziWZzCu6bw9vum
+---
+ amiga/cpu_control.c   | 26 ++++++++++++++++++++++++++
+ amiga/cpu_control.h   |  1 +
+ romswitcher/Makefile  | 11 ++++++++++-
+ romswitcher/cache.c   |  3 +++
+ romswitcher/vectors.c | 31 +++++++++++++++++++++++++++++--
+ 5 files changed, 69 insertions(+), 3 deletions(-)
+
+diff --git a/amiga/cpu_control.c b/amiga/cpu_control.c
+index a75f64d..7b0d9f8 100644
+--- a/amiga/cpu_control.c
++++ b/amiga/cpu_control.c
+@@ -75,11 +75,37 @@ cia_spin(unsigned int ticks)
+ }
+ 
+ #ifdef STANDALONE
++/*
++ * Tells a 68020 or later from a 68000 or 68010 without an illegal
++ * instruction, so it is safe before the CPU type is known: when MOVEM
++ * stores its own address register in predecrement mode, the 68000 and
++ * 68010 store its initial value, the 68020 and later the decremented one.
++ */
++unsigned int
++cpu_is_68020_or_later(void)
++{
++    volatile uint32_t slot[2];
++    uintptr_t end = (uintptr_t) &slot[2];
++
++    __asm__ volatile("move.l %0, a0\n\t"
++                     "movem.l a0, -(a0)"   // Stores a0 at end - 4
++                     :: "r" (end) : "a0", "memory");
++    return (slot[1] != end);
++}
++
+ static unsigned int
+ get_cpu(void)
+ {
+     unsigned int cpu_type = 0;
+ 
++    /*
++     * The CACR probes below are illegal instructions on the 68000 and
++     * 68010, which are both reported as 68000 (the 68010 needs nothing
++     * more here: its VBR is 0 after reset, as the 68000's vectors are).
++     */
++    if (!cpu_is_68020_or_later())
++        return (68000);
++
+     __asm__ volatile(
+         "move.l #68000, %0\n"      // Default to 68000
+         "move.l #0x80000100, d1\n" // Enable 68020, 68030 and 68040+ D cache
+diff --git a/amiga/cpu_control.h b/amiga/cpu_control.h
+index be731c1..15fa653 100644
+--- a/amiga/cpu_control.h
++++ b/amiga/cpu_control.h
+@@ -135,6 +135,7 @@
+ #define ARRAY_SIZE(x) ((sizeof (x) / sizeof ((x)[0])))
+ 
+ void cpu_control_init(void);
++unsigned int cpu_is_68020_or_later(void);
+ void cia_spin(unsigned int ticks);
+ 
+ #ifndef _DCC
+diff --git a/romswitcher/Makefile b/romswitcher/Makefile
+index 643056a..2fe3dda 100644
+--- a/romswitcher/Makefile
++++ b/romswitcher/Makefile
+@@ -37,7 +37,7 @@ GCC_VER := $(shell $(CC) -dumpversion 2>/dev/null)
+ CFLAGS  := -Wall -Wextra -Wno-pointer-sign -Wno-format -Wno-strict-aliasing
+ CFLAGS  += -Wno-sign-compare -fomit-frame-pointer
+ CFLAGS  += -fno-delete-null-pointer-checks
+-CFLAGS  += -DROMFS -DSTANDALONE -DEMBEDDED_CMD -fbaserel -resident -mcpu=68060
++CFLAGS  += -DROMFS -DSTANDALONE -DEMBEDDED_CMD -fbaserel -resident -mcpu=68000
+ CFLAGS  += -DHAVE_SPACE_PHYS
+ CFLAGS  += -DRAM_BASE=0x00000000
+ CFLAGS  += -I. -I$(FW) -I$(AM)
+@@ -143,6 +143,15 @@ $(OBJDIR)/sm_msg.o $(OBJDIR)/sm_msg_core.o: $(AM)/cpu_control.h $(AM)/sm_msg.h $
+ $(MED_OBJS): med_cmdline.h med_cmds.h med_main.h med_readline.h pcmds.h
+ $(MED_OBJS):: CFLAGS += -Wno-unused-parameter
+ 
++# The code is built for the 68000 so the switcher runs on every Amiga.
++# Files with inline assembly for 68010+ control registers, caches, MMU or
++# FPU let their assembler accept it; it only runs once the CPU type is
++# known (the C code is still 68000 code).
++CPU_ASM_SRCS := cache.c cpu_control.c vectors.c sm_msg.c smash_flash.c \
++		mem_access.c med_cpu.c smash.c
++CPU_ASM_OBJS := $(addprefix $(OBJDIR)/,$(CPU_ASM_SRCS:.c=.o))
++$(CPU_ASM_OBJS):: CFLAGS += -Wa,-m68060
++
+ $(OBJS): Makefile | $(OBJDIR)
+ 	@echo Building $@
+ 	$(QUIET)$(CC) $(CFLAGS) -c $(filter-out ../fw/version.c,$(filter %.c,$^)) -Wa,-a,-ad >$(@:.o=.lst) -o $@
+diff --git a/romswitcher/cache.c b/romswitcher/cache.c
+index 1d3afc5..d588eeb 100644
+--- a/romswitcher/cache.c
++++ b/romswitcher/cache.c
+@@ -67,6 +67,9 @@ CacheControl(uint32_t cache_bits, uint32_t cache_mask)
+     uint32_t cacr_bits;
+     uint32_t return_cacr;
+ 
++    if (cpu_type < 68020)
++        return (0);  // The 68000 and 68010 have no cache and no CACR
++
+     old_cacr = cpu_get_cacr();
+     switch (cpu_type) {
+         default:
+diff --git a/romswitcher/vectors.c b/romswitcher/vectors.c
+index 054c53d..c400c6c 100644
+--- a/romswitcher/vectors.c
++++ b/romswitcher/vectors.c
+@@ -23,6 +23,7 @@
+ #include "med_cmdline.h"
+ #include "mouse.h"
+ #include "reset.h"
++#include "cpu_control.h"
+ #include "screen.h"
+ #include "sprite.h"
+ #include "timer.h"
+@@ -408,7 +409,23 @@ Int7(void)
+ }
+ #endif
+ 
+-#define VECTOR_WRAP(func) void _##func(void) { SAVE_FULL_FRAME(); func(); }
++/*
++ * Each vector enters through a stub which saves the registers and the
++ * exception frame (as SAVE_FULL_FRAME() does), then jumps to the handler,
++ * whose RTE ends the exception. The stub is assembly: written in C, it
++ * relied on gcc turning the handler call into a jump, and gcc's 68000
++ * code for it jumped through A0 without loading the handler's address.
++ */
++#define VECTOR_WRAP(func)                                                  \
++    void _##func(void);                                                    \
++    static void (*const keep_##func)(void) __attribute__ ((used)) = func;  \
++    __asm__(".text\n\t.even\n"                                            \
++            "__" #func ":\n\t"                                             \
++            "movem.l d0-d7/a0-a7,0x120.w\n\t"                              \
++            "move.w 0(sp),0x160.w\n\t"                                     \
++            "move.l 2(sp),0x162.w\n\t"                                     \
++            "move.w 6(sp),0x166.w\n\t"                                     \
++            "jmp _" #func)
+ #define VECTOR(func) _##func
+ 
+ VECTOR_WRAP(Audio);
+@@ -496,7 +513,17 @@ vectors_init(void *base)
+     memcpy(base, vectors, sizeof (vectors));
+ 
+ //  __asm("movec %0,VBR" :: "r" (base));  // Set up vector base in RAM
+-    __asm("movec %0,VBR" :: "r" (vectors));  // Set up vector base in ROM
++    if (cpu_is_68020_or_later()) {
++        __asm("movec %0,VBR" :: "r" (vectors));  // Set up vector base in ROM
++    } else {
++        /*
++         * The 68000 has no VBR: its vectors are at address 0 (chip RAM,
++         * with the ROM overlay off). The 68010 is taken the same way, its
++         * VBR being 0 after reset. Only the 64 processor and interrupt
++         * vectors are copied; the RAM above them is in use (0x120).
++         */
++        memcpy((void *) 0, vectors, 64 * sizeof (vectors[0]));
++    }
+ 
+     memset(ADDR32(0x1000), 0, 0x20);  // Wipe interrupt counters
+ 
+-- 
+2.56.0
+

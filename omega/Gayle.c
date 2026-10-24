@@ -100,6 +100,7 @@ static unsigned gayleIdBit;
 #define ATA_HEADS    16u        // default geometry: the test images match it
 #define ATA_SPT      63u
 #define ATA_MULTIPLE_MAX 16u
+#define ATA_SECTOR_BYTES 512u
 
 enum { XFER_NONE, XFER_READ, XFER_WRITE };
 
@@ -116,7 +117,7 @@ static struct {
     unsigned inBlock;           // sectors left in this block
     unsigned pos;               // byte position in the buffer
     int identify;               // the buffer holds IDENTIFY data
-    uint8_t buffer[512];
+    uint8_t *buffer;            // one sector, from gayleDiskBuffer()
 } ata = { .status = ATA_SR_DRDY | ATA_SR_DSC, .heads = ATA_HEADS,
           .spt = ATA_SPT };
 
@@ -220,7 +221,7 @@ static void ataIdentify(void) {
     const uint32_t cur_chs = (uint32_t)cyl * (uint32_t)ata.heads *
                              (uint32_t)ata.spt;
     const uint32_t lba = sectors > 0x0fffffffu ? 0x0fffffffu : sectors;
-    memset(ata.buffer, 0, sizeof ata.buffer);
+    memset(ata.buffer, 0, ATA_SECTOR_BYTES);
     ataWord(0, 0x0040);                 // fixed disk
     ataWord(1, cyl);
     ataWord(3, ATA_HEADS);
@@ -403,7 +404,7 @@ static uint16_t ataReadData(void) {
     const uint16_t v = (uint16_t)(ata.buffer[ata.pos] << 8 |
                                   ata.buffer[ata.pos + 1u]);
     ata.pos += 2u;
-    if (ata.pos >= sizeof ata.buffer)
+    if (ata.pos >= ATA_SECTOR_BYTES)
         ataSectorDone();
     return v;
 }
@@ -414,7 +415,7 @@ static void ataWriteData(uint16_t value) {
     ata.buffer[ata.pos] = (uint8_t)(value >> 8);
     ata.buffer[ata.pos + 1u] = (uint8_t)value;
     ata.pos += 2u;
-    if (ata.pos >= sizeof ata.buffer)
+    if (ata.pos >= ATA_SECTOR_BYTES)
         ataSectorDone();
 }
 
@@ -537,6 +538,8 @@ static void gayleWriteByte(unsigned int address, uint8_t value) {
 static int gayleDecodes(unsigned int address) {
     if (!ataSectors())
         return 0;
+    if (!ata.buffer)
+        ata.buffer = gayleDiskBuffer();
     return (address & 0xFF8000u) == 0xDA0000u ||
            (address & 0xFFC000u) == 0xDA8000u ||
            (address & ~1u) == 0xDE1000u;

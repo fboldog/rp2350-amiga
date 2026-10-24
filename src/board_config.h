@@ -27,6 +27,16 @@
 #define BOARD_HAS_USER_BUTTON 1
 #define BOARD_USER_BUTTON_PIN 23      // KEY: inserts/ejects the flash DF0 disk
 #define BOARD_USER_BUTTON_ACTIVE_LOW 1
+// SWITCHER: held while the board starts, it boots the ROM switcher
+// (BOARD_SD_SWITCHER_PATH) instead of Kickstart. Active low: a button to GND
+// (internal pull-up). Active high (=0): a button module (VCC to 3V3, OUT
+// with its own pull-down) that drives OUT high when pressed.
+#ifndef BOARD_SWITCHER_BUTTON_PIN
+#define BOARD_SWITCHER_BUTTON_PIN 26
+#endif
+#ifndef BOARD_SWITCHER_BUTTON_ACTIVE_LOW
+#define BOARD_SWITCHER_BUTTON_ACTIVE_LOW 1
+#endif
 
 // ---------------------------------------------------------------------------
 //  PSRAM  (QMI CS1)
@@ -53,8 +63,9 @@
 // ---------------------------------------------------------------------------
 //  microSD card (SPI), optional: build with -DOMEGA_ENABLE_SDCARD=ON
 // ---------------------------------------------------------------------------
-// The WeAct board has no slot; these defaults (SPI1) must match the external
-// module's wiring and can be overridden with -D definitions.
+// The WeAct board has no slot; these defaults (SPI1, GPIO28..31, a Pmod TF
+// card adapter's pins 3/1/4/2) must match the external module's wiring and
+// can be overridden with -D definitions.
 #ifndef BOARD_SD_SPI
 #define BOARD_SD_SPI            spi1
 #endif
@@ -65,16 +76,19 @@
 #define BOARD_SD_MOSI_PIN       31    // SPI1 TX   (SD CMD)
 #endif
 #ifndef BOARD_SD_MISO_PIN
-#define BOARD_SD_MISO_PIN       40    // SPI1 RX   (SD DAT0)
+#define BOARD_SD_MISO_PIN       28    // SPI1 RX   (SD DAT0)
 #endif
 #ifndef BOARD_SD_CS_PIN
-#define BOARD_SD_CS_PIN         43    // plain GPIO (SD DAT3)
+#define BOARD_SD_CS_PIN         29    // plain GPIO (SD DAT3)
 #endif
 #ifndef BOARD_SD_SPI_BAUD
 #define BOARD_SD_SPI_BAUD       12500000u   // 12.5 MHz after card init
 #endif
 #ifndef BOARD_SD_ROM_PATH
 #define BOARD_SD_ROM_PATH       "0:/rom/kick13.rom"
+#endif
+#ifndef BOARD_SD_SWITCHER_PATH
+#define BOARD_SD_SWITCHER_PATH  "0:/rom/switcher.rom"
 #endif
 
 // ---------------------------------------------------------------------------
@@ -89,7 +103,9 @@
 //  0x480000..0x4FFFFF  SD Kickstart cache (512 KB, SD-card builds)
 //  0x540000..0x639FFF  Video DMA raster scratch (640x400 ARGB32, 1000 KB)
 //  0x680000..0x77FFFF  Framebuffer 640x400 ARGB32 (1 MB)
-//  0x780000..0x787FFF  Free
+//  0x780000..0x7817FF  SD work area (FatFs volume, sector buffers, the
+//                       KickSmash state and its settings text)
+//  0x781800..0x787FFF  Free
 //  0x788000..0x7A7FFF  68000 opcode table scratch (128 KB, boot only)
 //  0x7A8000..0x7CBFFF  HDMI frame records (dvi_indexed_frame_t x4, 144 KB)
 //  0x7CC000..0x7FEFFF  Reserved
@@ -103,10 +119,12 @@
 #define BOARD_MAP_BOOT_STATE_OFFSET 0x7FF000u
 #define BOARD_MAP_VIDEO_RASTER_OFFSET 0x540000u
 #define BOARD_MAP_SD_ROM_OFFSET    0x480000u
+#define BOARD_MAP_SD_WORK_OFFSET   0x780000u
 
 #define BOARD_MAP_CHIPRAM_SIZE     0x200000u   // 2 MB
 #define BOARD_MAP_FLOPPY_SIZE      0x200000u   // 2 MB (DF0)
 #define BOARD_MAP_SD_ROM_SIZE      0x080000u   // 512 KB maximum
+#define BOARD_MAP_SD_WORK_SIZE     0x001800u   // 6 KB
 
 //  Kickstart ROM in flash (place with tools/combine_uf2.py at offset 0x200000)
 #define BOARD_ROM_FLASH_BASE       0x10200000u

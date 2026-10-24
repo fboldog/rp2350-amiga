@@ -21,9 +21,7 @@
 #include "DMA.h"
 #include "Gayle.h"
 #include "../omega/m68k.h"
-#ifdef OMEGA_KICKSMASH_SIM
-#include "kicksmash_sim.h"
-#endif
+#include "KickSmash.h"
 
 unsigned char low16Meg[16777216];
 
@@ -207,15 +205,12 @@ unsigned int chipReadWord(unsigned int address){
 unsigned int chipReadLong(unsigned int address){
     if (address > 0xFFFFFFu)
         return 0xFFFFFFFFu;
-#ifdef OMEGA_KICKSMASH_SIM
-    uint32_t simulated;
-    // The transport routine copies itself to RAM before issuing ROM reads.
-    // Keep instruction fetches from the ROM (notably at response offsets)
-    // from consuming the simulated reply stream.
-    if (m68k_get_reg(NULL, M68K_REG_PC) < 0xF80000u &&
-        kicksmash_sim_read_long(address, &simulated))
-        return simulated;
-#endif
+    // KickSmash ROM switcher protocol (omega/KickSmash.c)
+    if (address > 0xF7FFFFu && kickSmashWatches(address)) {
+        uint32_t value;
+        if (kickSmashReadLong(address, &value))
+            return value;
+    }
     
     //ROM
     if(address>0xF7FFFF){

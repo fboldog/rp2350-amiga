@@ -13,11 +13,12 @@
 #include <stdint.h>
 
 // The A600's Gayle with one IDE drive, which Kickstart 2.05 and 3.1.4 boot
-// from with their own scsi.device. On by default in the native runner; the
-// RP2350 build keeps the old stubs until the SD card backend exists.
+// from with their own scsi.device. On in the native runner and in RP2350
+// builds with the SD card (src/ide_sd.c); other RP2350 builds keep the old
+// stubs.
 #ifndef OMEGA_ENABLE_IDE
 #ifdef PICO_BUILD
-#define OMEGA_ENABLE_IDE 0
+#define OMEGA_ENABLE_IDE OMEGA_ENABLE_SDCARD
 #else
 #define OMEGA_ENABLE_IDE 1
 #endif
@@ -37,8 +38,10 @@ int gayleInterruptPending(void);
 #if OMEGA_ENABLE_IDE
 // The drive's disk image, provided by the host: a raw hard-disk image
 // (RDB) of 512-byte sectors. gayleDiskSectors() returns 0 for no drive;
-// the reads and writes return 0 on success.
+// the reads and writes return 0 on success. gayleDiskBuffer() is the
+// drive's one-sector (512-byte) buffer, asked for once a drive exists.
 uint32_t gayleDiskSectors(void);
+uint8_t *gayleDiskBuffer(void);
 int gayleDiskRead(uint32_t lba, uint8_t *buffer);
 int gayleDiskWrite(uint32_t lba, const uint8_t *buffer);
 #endif

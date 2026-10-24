@@ -45,23 +45,9 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 ## Phase 2 – Display output (DVI COMPLETE ON WEACT)
 
 HDMI runs on the RP2350 HSTX peripheral (GPIO12..19), verified with Kickstart
-1.3/2.04, Workbench 1.3 and xsysinfo in NTSC and PAL. VGA and SPI TFT remain
-alternative future backends.
+1.3/2.04, Workbench 1.3 and xsysinfo in NTSC and PAL.
 
-### Option A: SPI TFT (easiest hardware, lowest bandwidth)
-- [ ] Choose driver chip: ILI9341 (240×320) or ST7789 (240×240 or 320×240)
-- [ ] Add SPI TFT driver (bare-metal or from Pimoroni C++ SDK)
-- [ ] In `display_push_frame()`: scale/crop 640×400 → 320×240 and push via SPI DMA
-- [ ] Configure SPI GPIO pins in CMakeLists.txt (add `hardware_spi`)
-
-### Option B: VGA via PIO (best resolution, needs resistor DAC)
-- [ ] Wire 3-bit R, 3-bit G, 2-bit B resistor ladder + HSync + VSync (5 GPIOs total)
-- [ ] Port or import pico-vga scanvideo library (in pico-extras)
-- [ ] Set up scanvideo for 640×480 @ 60 Hz
-- [ ] In DMA `evenCycle` VBL handler, push each scanline to the VGA scanvideo buffer
-- [ ] Add `pico_scanvideo_dpi` to target_link_libraries
-
-### Option C: DVI/HDMI via HSTX
+### DVI/HDMI via HSTX
 - [x] First bring-up with PicoDVI (PIO + core-1 software TMDS), replaced by
       HSTX on 2026-09-29 and removed with the Waveshare board
 - [x] Standard 640×480p60 (252 Mbit/s) for NTSC and 720×576p50 (270 Mbit/s)
@@ -76,12 +62,13 @@ alternative future backends.
 
 ## Phase 2b – microSD and HDF hard disk (external SPI module)
 
-Goal: boot an installed system from a hard-disk image on the SD card. This
-comes before RTG.
+Goal: boot an installed system from a hard disk on the SD card. This comes
+before RTG.
 
 Decisions (2026-10-22):
-- **Card:** an external SPI microSD module on the WeAct board (3.3 V, short
-  wires, pull-up on MISO). USB mass storage on the hub was considered and
+- **Card:** an external SPI microSD module on the WeAct board (a Pmod TF
+  card adapter, 3.3 V, short wires, pull-up on MISO) on SPI1: MISO GPIO28,
+  CS GPIO29, SCK GPIO30, MOSI GPIO31 (Pmod pins 3, 1, 4, 2). USB mass storage on the hub was considered and
   skipped: the RP2350's USB is full speed only (~0.6–1 MB/s, shared with
   the mouse and keyboard), each request takes ~1–3 ms on core 0 in
   `tuh_task()`, and it needs SRAM the board does not have. SPI reads a
@@ -92,38 +79,50 @@ Decisions (2026-10-22):
   provides Gayle and an ATA drive, with no expansion board or driver of
   its own. Hard-disk boot on 1.3 and 2.04 (an autoconfig board with its
   own boot ROM and device driver) is out of scope.
-- **Image:** an RDB hard-disk image, `/hdf/dh0.hdf`. It must be contiguous
-  on the card: FatFs finds it at boot, then sectors are read and written
-  directly, so the FAT and directory are never written (power loss can
-  hurt the Amiga filesystem inside the image, as on a real drive, but not
-  the card's FAT). Start with a small image (~256–500 MB): 2.05's
-  `scsi.device` addresses the disk by cylinder/head/sector (checked on the
-  native runner), where ~504 MB is the safe limit.
+- **Card layout (2026-10-24), as Emu68 does it:** an MBR with
+  - partition 1, FAT32: `/rom/` Kickstarts, `/adf/` floppy images, later
+    `/hdf/` images; written from any PC;
+  - partition 2, type `0x76`: the Amiga hard disk, raw. The IDE drive's
+    sector 0 is the partition's first sector, so the RDB lives there and
+    the Amiga owns everything inside it (HDToolBox, FFS, PFS3, SFS). The
+    firmware never parses an Amiga filesystem or the RDB; a ready image can
+    be written in with `dd` (e.g. from `native/make_hdf.sh`).
+  Fallback when there is no `0x76` partition: an RDB image `/hdf/dh0.hdf` on
+  the FAT partition, which must be contiguous (FatFs finds it at boot, then
+  sectors go straight to the card, so the FAT is never written). An
+  Amiga-only card (FFS partitions for Kickstarts and ADFs) was rejected:
+  the firmware would need an FFS (or PFS3) reader just to boot, and the
+  card could not be filled from a PC.
+- **Size:** 2.05's `scsi.device` addresses the disk by cylinder/head/sector
+  (checked on the native runner), where ~504 MB is the safe limit; 3.1.4
+  uses LBA. Start with a small Amiga partition (~256–500 MB).
 
 Steps:
 - [x] Add a read-only FatFs + SD-SPI driver; default pins in
-      `board_config.h` (SPI1 SCK30/MOSI31/MISO40/CS43), overridable with
+      `board_config.h` (SPI1 MISO28/CS29/SCK30/MOSI31), overridable with
       `-DBOARD_SD_*`
-- [~] Load Kickstart ROM from `/rom/kick13.rom`, with flash fallback. The code
-      compiles with `-DOMEGA_ENABLE_SDCARD=ON` but needs an SD module wired to
-      the WeAct board for validation. The DF0 ADF remains flash-backed.
-- [ ] **Fit the SD build in SRAM.** An HDMI build with
-      `-DOMEGA_ENABLE_SDCARD=ON` is ~1 KB over today: move the FatFs work
-      area and sector buffers to PSRAM (free: 0x200000–0x27FFFF, and the
-      unused SD ROM cache), or shrink the core-1 ring.
-- [ ] **SD layer** (`src/sd_diskio.c`): single and multi-block writes
-      (CMD24/CMD25), multi-block reads (CMD18), a faster SPI clock
-      (25 MHz or more if the wiring allows), then validate on the board with
-      the module's pins in `board_config.h`.
-- [ ] **HDF lookup:** find `/hdf/dh0.hdf`, check that its cluster chain is
-      contiguous, keep its first card sector and size; refuse (and say so on
-      the console) a fragmented image.
+- [x] Kickstart from the card (`-DOMEGA_SD_ROM=rom/kick314.rom`, default
+      `rom/kick13.rom`), with flash fallback; verified on the board
+      (2026-10-24, SDHC card, byte-identical to the file).
+- [x] **Fit the SD build in SRAM:** the FatFs volume and the sector buffers
+      are in PSRAM (0x780000, 4 KB work area); own SPI loops in flash instead
+      of the SDK's SRAM ones; boot-only memory setup moved from `Memory.c`
+      (SRAM) to `MemoryBoot.c` (flash). PAL and NTSC SD builds keep the full
+      core-1 ring.
+- [~] **SD layer** (`src/sd_diskio.c`): multi-block reads (CMD18) and
+      single-block writes (CMD24) done; still to do: multi-block writes
+      (CMD25), a faster SPI clock (25 MHz or more if the wiring allows),
+      reading ahead for READ MULTIPLE.
+- [x] **Hard-disk lookup** (`sd_card_find_disk()`): a type `0x76` MBR
+      partition, else a contiguous `/hdf/dh0.hdf` (FatFs fast-seek table
+      with room for one fragment; a fragmented image is refused). Either way
+      the backend is a sector offset.
 - [x] **Gayle** (`omega/Gayle.c`, routed from 0xDA0000–0xDFEFFF by both
       memory maps): the ID register at 0xDE1000 (0xD0, A600; 0xDE109A is
       accessed first and is not it), status, interrupt request and enable
       registers, and the IDE interrupt held on INT2 (PORTS) like CIA-A's in
       `intreq()`. No PCMCIA card. Without a disk image there is no Gayle, as
-      before. `OMEGA_ENABLE_IDE`: on in the native runner, off on the board.
+      before. `OMEGA_ENABLE_IDE`: on in the native runner and in SD builds.
 - [x] **ATA drive:** the A600 task-file registers from 0xDA2000; IDENTIFY
       DEVICE (16 heads × 63 sectors, LBA), READ/WRITE SECTOR(S), READ/WRITE
       MULTIPLE, SET MULTIPLE MODE, INITIALIZE DEVICE PARAMETERS, and
@@ -138,19 +137,35 @@ Steps:
       `MakeDir` and `Copy C: ALL`). On 3.1.4 and 2.05 the file reads back, the
       copies are byte-identical and the whole partition unpacks without
       errors with `xdftool` (see `native/README.md`).
-- [ ] **On the board:** `OMEGA_ENABLE_IDE` with the SD backend
-      (`gayleDiskSectors/Read/Write`); the drive state and its 512-byte
-      buffer must not grow SRAM (PSRAM, or the ring gives way).
-- [ ] **Board boot:** mount the card, Kickstart from SD (else flash), HDF if
-      present. DF0 boots ahead of the hard disk, so a hard-disk boot needs
-      DF0 empty: a build option or an empty slot in the disk rotation (the
-      KEY button already ejects).
+- [x] **On the board:** `OMEGA_ENABLE_IDE` follows `OMEGA_ENABLE_SDCARD`;
+      `src/ide_sd.c` is the SD backend, the drive's sector buffer comes from
+      the host (`gayleDiskBuffer()`, PSRAM on the board).
+- [x] **Board boot:** mount the card, Kickstart from SD (else flash), attach
+      the hard disk. With an RDB on it DF0 starts empty (KEY inserts the
+      disk), so Kickstart boots the hard disk; a blank disk boots DF0 as
+      before. Verified: Install 3.1.4 boots with a blank 2 GB partition
+      attached.
+- [ ] **Card preparation:** document (or script) partitioning a card:
+      FAT32 partition 1, type `0x76` partition 2, optionally `dd` an image
+      into partition 2.
 - [ ] **Install:** boot `Install3_1_4.adf`, partition with HDToolBox, run
       the installer; for 2.05, its own Workbench disks. Or prepare the
       image on the PC.
 - [ ] Stream ADF tracks from SD instead of storing a complete MFM image in
       PSRAM; this is needed for practical disk swapping (reuses the SD
       layer and the DF0 track buffer)
+- [x] **Kickstart chooser: the KickSmash ROM switcher** (2026-10-24). The
+      protocol is answered on the board and natively (`omega/KickSmash.c`),
+      the banks are the card's `/rom` ROMs (`/rom/kicksmash.cfg` for names
+      and settings, written by the switcher's Save), "Switch and Reboot"
+      loads the bank and resets the Amiga; SWITCHER (GPIO26) at start-up
+      boots `/rom/switcher.rom`. The switcher was rebuilt to run on the 68000
+      (KickSmash release 2.0 + `tools/kicksmash-2.0-68000.patch`). Verified
+      on the board: the card's banks (long file names), Save (the file is
+      read back after a restart), Switch and Reboot, SWITCHER at start-up.
+      Still open: SWITCHER through Ctrl-Amiga-Amiga (built, not yet tried),
+      the long-reset bank sequence (stored, not acted on), merged banks for
+      ROMs over 512 KB.
 - [ ] Optional: a tiny on-screen disk chooser
 - [ ] Later: fast RAM in free PSRAM (an installed 3.1.4 wants it; overlaps
       with RTG); USB mass storage as a second source behind the same block
@@ -184,21 +199,6 @@ goes to PSRAM; card access blocks core 0.
 - [ ] Keyboard: report-protocol keyboards that ignore boot protocol.
 - [ ] Joysticks / gamepads (port 2: JOY1DAT, CIA-A /FIR1).
 - [ ] Optional: PS/2 keyboard via GPIO PIO (simpler than USB, no hub support)
-
----
-
-## Phase 4 – Dual-core operation
-
-Currently both DMA and CPU run on core 0 in a tight loop.
-Splitting onto two cores removes the manual interleaving and makes both faster.
-
-- [ ] Core 0: DMA engine (`dma_execute()` in a timer ISR at PAL pixel clock rate)
-- [ ] Core 1: Musashi 68K CPU (`m68k_execute()` in a tight loop)
-- [ ] Add spinlock or semaphore for shared chipset register access
-      (chipset.intreqr, chipset.intena, copper PC writes are the hot paths)
-- [ ] Uncomment `core1_entry` skeleton in `src/main.c`
-- [ ] DMA timer: use `hardware_timer` alarm at ~7.09 MHz (PAL pixel clock / 1)
-      or simply at line rate (15.625 kHz) and execute 227 DMA cycles per alarm
 
 ---
 
@@ -496,7 +496,18 @@ How to measure (no halt, firmware keeps running):
 - [ ] **Smaller frames.** Colour numbers need at most 6 bits; packing 16-colour
       screens at 4 bits per pixel would free ~80 KB per frame (HAM/EHB rows
       still need a byte) — room for a larger PAL ring or a third frame.
-- [ ] **Exact colours for wrapped-fetch layouts** (still ARGB → RGB332).
+- [x] **Wrapped-fetch layouts direct** (2026-10-24): every narrow layout
+      (DDFSTRT >= 0x40) now renders through the HDMI direct path; the ARGB
+      fallback had a stale palette (Kickstart 3.1.4's insert-disk screen:
+      blue/black colours, stale top-left area). Narrow HIRES lines are placed
+      against 0x3C (`lineRasterDdf`, so sprites and Copper colours follow;
+      Kickstart 2.04 and 3.1.4's screens sat 40 columns left), and narrow
+      lines in direct frames add no modulo without a fetch, as the hardware
+      (3.1.4 loads its pointers two lines before its planes start; the two
+      modulos moved it 3 words). Full-width layouts keep the calibrated
+      modulo (xSysInfo moves without it). Native is unchanged.
+- [ ] Narrow LORES layouts in direct frames: still placed against DDFSTRT
+      (no test case seen yet); check with a game that uses one.
 - [x] **Sprites.** Sprite DMA (`spriteCycle()`: POS/CTL after vertical
       blanking, DATA/DATB from VSTART, the next POS/CTL at VSTOP), DATA arms
       and CTL disarms (CPU or DMA), clipped to the display window, attached

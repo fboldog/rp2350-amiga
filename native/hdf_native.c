@@ -13,6 +13,7 @@
 static int hdf_fd = -1;
 static uint32_t hdf_sectors;
 static int hdf_opened;
+static uint8_t hdf_buffer[512];
 
 static void hdf_open(void) {
     hdf_opened = 1;
@@ -42,6 +43,10 @@ uint32_t gayleDiskSectors(void) {
     if (!hdf_opened)
         hdf_open();
     return hdf_sectors;
+}
+
+uint8_t *gayleDiskBuffer(void) {
+    return hdf_buffer;
 }
 
 int gayleDiskRead(uint32_t lba, uint8_t *buffer) {

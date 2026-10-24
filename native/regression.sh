@@ -55,6 +55,12 @@ done
 
 REGRESSION=1 VIDEO="$VIDEO_NAME" ./native/build.sh
 
+# KickSmash ROM-switcher protocol (omega/KickSmash.c), driven as the
+# switcher's transport drives it.
+${CC:-cc} -O1 -Wall -Wno-unused -include native/sdl_shim.h -Isrc -Iomega \
+    -o "$OUTPUT_DIR/kicksmash_test" native/kicksmash_test.c omega/KickSmash.c
+"$OUTPUT_DIR/kicksmash_test"
+
 RESULTS="$OUTPUT_DIR/results.sha256"
 : > "$RESULTS"
 

@@ -12,7 +12,8 @@ if(NOT PICO_BOARD STREQUAL "weact_studio_rp2350b_core")
 endif()
 
 option(OMEGA_ENABLE_HDMI "Build the HSTX HDMI output" OFF)
-option(OMEGA_ENABLE_SDCARD "Build microSD/FatFs Kickstart loading" OFF)
+option(OMEGA_ENABLE_SDCARD "Build microSD: Kickstart from the card, IDE hard disk" OFF)
+set(OMEGA_SD_ROM "rom/kick13.rom" CACHE STRING "Kickstart file on the SD card's FAT partition")
 option(OMEGA_ENABLE_FLASH_FLOPPY "Load ADF images embedded in flash" OFF)
 option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OFF)
 # HDMI builds only: HSTX runs from PLL_USB, so clk_sys is independent of the
@@ -85,6 +86,7 @@ set(PLATFORM_SOURCES
     src/main.c
     src/psram.c
     src/Memory.c
+    src/MemoryBoot.c
     src/Host.c
     src/Planar.c
     src/Presentation.c
@@ -98,7 +100,10 @@ if(OMEGA_ENABLE_SDCARD)
     list(APPEND PLATFORM_SOURCES
         src/sd_card.c
         src/sd_diskio.c
+        src/ide_sd.c
+        src/kicksmash_sd.c
         third_party/fatfs/ff.c
+        third_party/fatfs/ffunicode.c
     )
 endif()
 
@@ -114,6 +119,7 @@ set(OMEGA_SOURCES
     omega/DMA.c
     omega/Floppy.c
     omega/Gayle.c
+    omega/KickSmash.c
     omega/m68kcpu.c
     omega/m68kdasm.c
     omega/m68kopac.c
@@ -155,6 +161,12 @@ elseif(OMEGA_HDMI_AUDIO_ACTIVE)
 else()
     set(OMEGA_RING_WORDS_VALUE 15616)
 endif()
+# SD-card builds (FatFs, the IDE drive, the KickSmash ROM switcher) need a
+# little of it. The size is a constant in the ring's index arithmetic, and
+# a multiple of 128 words keeps that code short (10016 cost 120 bytes).
+if(NOT OMEGA_RING_WORDS AND OMEGA_ENABLE_SDCARD)
+    math(EXPR OMEGA_RING_WORDS_VALUE "(${OMEGA_RING_WORDS_VALUE} - 32) / 128 * 128")
+endif()
 
 # USB host is only built with HDMI (which sets up the clocks for it).
 set(OMEGA_USB_HOST_ACTIVE OFF)
@@ -173,6 +185,7 @@ target_compile_definitions(omega-amiga PRIVATE
     PICO_AUTO_DETECT_PSRAM_SIZE=1
     OMEGA_ENABLE_HDMI=$<BOOL:${OMEGA_ENABLE_HDMI}>
     OMEGA_ENABLE_SDCARD=$<BOOL:${OMEGA_ENABLE_SDCARD}>
+    BOARD_SD_ROM_PATH="0:/${OMEGA_SD_ROM}"
     OMEGA_ENABLE_FLASH_FLOPPY=$<BOOL:${OMEGA_ENABLE_FLASH_FLOPPY}>
     OMEGA_DF0_INSERT_AT_BOOT=$<BOOL:${OMEGA_DF0_INSERT_AT_BOOT}>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
@@ -263,7 +276,7 @@ message(STATUS "Sys clock:   ${OMEGA_SYS_CLK_KHZ} kHz (HDMI builds)")
 message(STATUS "CPU cycles:  ${OMEGA_CPU_CYCLES_PER_SLOT} per DMA slot (A500: 2), slices of ${OMEGA_CPU_SLICE_SLOTS} slots")
 message(STATUS "PSRAM:      ${PSRAM_SIZE_BYTES} bytes, CS GPIO${PSRAM_CS_PIN}")
 message(STATUS "HDMI:       ${OMEGA_ENABLE_HDMI}")
-message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD}")
+message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD} (Kickstart ${OMEGA_SD_ROM})")
 message(STATUS "Flash ADF:  ${OMEGA_ENABLE_FLASH_FLOPPY}")
 message(STATUS "DF0 at boot:${OMEGA_DF0_INSERT_AT_BOOT}")
 message(STATUS "Console:    ${OMEGA_STDIO_DESCRIPTION}")

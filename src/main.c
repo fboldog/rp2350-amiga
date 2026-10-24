@@ -41,6 +41,8 @@
 #endif
 #if OMEGA_ENABLE_SDCARD
 #include "sd_card.h"
+#include "Gayle.h"
+#include "KickSmash.h"
 #endif
 #if OMEGA_ENABLE_HDMI
 #include "dvi_display.h"
@@ -290,24 +292,116 @@ static void prepare_empty_df0(void) {
     }
 }
 
-static bool load_kickstart_from_sd(void) {
 #if OMEGA_ENABLE_SDCARD
+// The SWITCHER button, held while the board starts.
+static bool switcher_button_held(void) {
+    gpio_init(BOARD_SWITCHER_BUTTON_PIN);
+    gpio_set_dir(BOARD_SWITCHER_BUTTON_PIN, GPIO_IN);
+#if BOARD_SWITCHER_BUTTON_ACTIVE_LOW
+    gpio_pull_up(BOARD_SWITCHER_BUTTON_PIN);
+    sleep_us(100);              // let the pull-up charge the line
+    return !gpio_get(BOARD_SWITCHER_BUTTON_PIN);
+#else
+    gpio_pull_down(BOARD_SWITCHER_BUTTON_PIN);
+    sleep_us(100);
+    return gpio_get(BOARD_SWITCHER_BUTTON_PIN);
+#endif
+}
+#endif
+
+#if OMEGA_ENABLE_SDCARD
+// Loads a ROM image from the card into the ROM cache and maps it.
+static bool load_rom_from_sd(const char *path) {
     size_t rom_size = 0;
     uint8_t *rom_cache = psram_ptr(PSRAM_SD_ROM_OFFSET);
-    if (!sd_card_mount() ||
-        !sd_card_load_file(BOARD_SD_ROM_PATH, rom_cache, PSRAM_SD_ROM_SIZE,
-                           &rom_size)) {
-        printf("ROM: using flash fallback\n");
+    if (!sd_card_load_file(path, rom_cache, PSRAM_SD_ROM_SIZE, &rom_size))
         return false;
+    // A smaller image (the ROM switcher, ~110 KB) fills one 256 KB bank,
+    // zero-padded; the bank is mirrored as a 256 KB Kickstart is.
+    if (rom_size > 0 && rom_size < 0x40000u) {
+        memset(rom_cache + rom_size, 0, 0x40000u - rom_size);
+        rom_size = 0x40000u;
     }
     if (!memory_set_rom(rom_cache, (uint32_t)rom_size)) {
-        printf("ROM: %s must be a valid 256 KB or 512 KB Kickstart\n",
-               BOARD_SD_ROM_PATH);
+        printf("ROM: %s must be a valid 256 KB or 512 KB Kickstart\n", path);
+        return false;
+    }
+    printf("ROM: loaded %s from SD (%lu KB)\n", path,
+           (unsigned long)(rom_size >> 10));
+    return true;
+}
+
+// Loads a KickSmash bank (or, for bank -1, `path`) and records it as the
+// bank the Amiga runs.
+static bool load_bank_from_sd(int bank, const char *path) {
+    char bank_path[48];
+    if (bank >= 0 && kicksmash_sd_bank_path(bank, bank_path, sizeof bank_path))
+        path = bank_path;
+    if (!load_rom_from_sd(path))
+        return false;
+    kicksmash_sd_set_current(bank);
+    return true;
+}
+
+// Between emulation slices (kept out of the SRAM main loop): a keyboard
+// reset, KickSmash "Switch and Reboot" or a reset with a bank set for it
+// (the bank's ROM, then a warm reset, as KickSmash's reset line does), and
+// the switcher's settings to save.
+static void __attribute__((noinline)) kicksmash_poll(void) {
+    int bank = kickSmashTakeSwitch();
+    if (hostResetRequested) {
+        hostResetRequested = 0;
+        // SWITCHER held through a keyboard reset: the ROM switcher's bank.
+        int reset_bank = kickSmashTakeResetBank();
+        if (switcher_button_held()) {
+            const int switcher = kickSmashFindBank(
+                strrchr(BOARD_SD_SWITCHER_PATH, '/') + 1);
+            if (switcher >= 0)
+                reset_bank = switcher;
+        }
+        if (reset_bank >= 0)
+            bank = reset_bank;
+        else if (bank < 0)
+            cpu_keyboard_reset();
+    }
+    if (bank >= 0) {
+        printf("KickSmash: switching to bank %d\n", bank);
+        if (!load_bank_from_sd(bank, NULL) &&
+            !memory_set_rom((const uint8_t *)ROM_FLASH_BASE, ROM_SIZE))
+            printf("ROM: no Kickstart left to run\n");
+        cpu_keyboard_reset();
+    }
+    kicksmash_sd_poll();
+}
+#endif
+
+// Kickstart from the card: the KickSmash power-on bank (/rom/kicksmash.cfg),
+// else BOARD_SD_ROM_PATH; the ROM switcher while SWITCHER is held.
+static bool load_kickstart_from_sd(void) {
+#if OMEGA_ENABLE_SDCARD
+    const bool switcher = switcher_button_held();
+    if (switcher)
+        printf("ROM: SWITCHER GPIO%u held\n", BOARD_SWITCHER_BUTTON_PIN);
+    if (!sd_card_mount()) {
         printf("ROM: using flash fallback\n");
         return false;
     }
-    printf("ROM: loaded %s from SD (%lu KB)\n", BOARD_SD_ROM_PATH,
-           (unsigned long)(rom_size >> 10));
+    const char *rom_file = strrchr(BOARD_SD_ROM_PATH, '/') + 1;
+    const bool have_config = kicksmash_sd_init(rom_file);
+    int bank;
+    const char *path;
+    if (switcher) {
+        path = BOARD_SD_SWITCHER_PATH;
+        bank = kickSmashFindBank(strrchr(path, '/') + 1);
+    } else {
+        path = BOARD_SD_ROM_PATH;
+        bank = have_config ? kicksmash_sd_poweron_bank()
+                           : kickSmashFindBank(rom_file);
+    }
+    if (!load_bank_from_sd(bank, path)) {
+        printf("ROM: using flash fallback\n");
+        return false;
+    }
     return true;
 #else
     return false;
@@ -396,10 +490,14 @@ OMEGA_LOOP_FUNC(emulation_loop)(void) {
 #if OMEGA_ENABLE_USB_HOST
         usb_input_poll();
 #endif
+#if OMEGA_ENABLE_SDCARD
+        kicksmash_poll();
+#else
         if (hostResetRequested) {
             hostResetRequested = 0;
             cpu_keyboard_reset();
         }
+#endif
         // hostDisplay is called exactly once per VBL by the DMA engine.  It
         // converts the intermediate beam raster into the 640x400 output.
     }
@@ -446,6 +544,9 @@ int main(void) {
     // 3. Memory (chip RAM, flash ROM fallback, optional SD override)
     memory_init();
     load_kickstart_from_sd();
+#if OMEGA_ENABLE_SDCARD
+    ide_sd_attach();
+#endif
 
     // 4. Host (framebuffer, display hardware)
     hostInit();
@@ -467,6 +568,14 @@ int main(void) {
     disk_button_init();
     drive_led_init();
 #if OMEGA_DF0_INSERT_AT_BOOT
+#if OMEGA_ENABLE_SDCARD
+    // DF0 boots ahead of the hard disk, so with a bootable one (an RDB) it
+    // starts empty; a blank disk still boots the floppy, e.g. to install.
+    if (df0_loaded && ide_sd_bootable()) {
+        printf("DF0: empty for the hard-disk boot; KEY inserts the disk\n");
+        df0_loaded = false;
+    }
+#endif
     if (df0_loaded) {
         df[0].hasDisk = 1;
         df[0].pra &= 0xFB;

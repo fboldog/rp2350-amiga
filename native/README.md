@@ -66,32 +66,46 @@ be committed.
 
 ### KickSmash ROM switcher
 
-The native runner can boot the small standalone KickSmash ROM-switcher image.
-It needs a 68020 CPU and an opt-in compile-time simulation of the KickSmash32
-ROM-bus message interface:
+The KickSmash32 ROM-bus message protocol is answered by `omega/KickSmash.c`,
+the same code as on the board, so the standalone KickSmash ROM-switcher image
+lists real banks and its "Switch and Reboot" works. The banks are the `*.rom`
+files of the Kickstart's directory (`OMEGA_KS_DIR` overrides it), sorted by
+name, up to 8; `kicksmash.cfg` there keeps the switcher's settings (written
+when it saves) and may map banks to files. Switching loads the bank's file and
+resets the Amiga (Ctrl-Amiga-Amiga style), as the board does.
 
 ```sh
-KICKSMASH_SIM=1 VIDEO=PAL ./native/build.sh
-OMEGA_CPU=68020 OMEGA_ROM="$PWD/sd_card/rom/switcher.rom" \
-    ./native/omega-native
+VIDEO=PAL ./native/build.sh
+OMEGA_ROM="$PWD/sd_card/rom/switcher.rom" ./native/omega-native
 ```
+
+The KickSmash release 2.0 image needs a 68020 (`OMEGA_CPU=68020`); a build of
+release 2.0 with 68000 support (built for the 68000, CPU type checked before
+any 68010+ instruction, vectors at address 0 without a VBR, assembly vector
+stubs) runs on the default 68000 as well. `KICKSMASH_SIM=1` at build time
+echoes the Amiga's serial output (the switcher's log) to stdout.
 
 Native ROM loading accepts images from 1 byte through 512 KB. Images no larger
 than 256 KB are zero-padded to one 256 KB bank and mirrored across the complete
 Kickstart window, which is required by compact standalone ROMs.
 
-`KICKSMASH_SIM=1` recognizes the switcher's ID, bank-information, and timeout
-NVRAM queries and returns deterministic simulated board data with the protocol's
-normal header, payload, and CRC framing. The simulated ID reports KickSmash32
-firmware version 2.0. The responder models the hardware's
-address-independent reply DMA, including the older transport which consumes its
-first reply long on the command-triggering read. It is a native test fixture,
-not a full emulation of the flash programmer, USB link, or bank-switch/reset
-hardware. Unsupported commands return a protocol error.
+The protocol (`omega/KickSmash.c`): requests arrive as 32-bit ROM reads, a
+16-bit word encoded in each address (32- or 16-bit ROM mode), CRC-checked;
+the reply is returned by the ROM reads after the trigger read at offset
+0x1554 (which returns its first long), as KickSmash's reply DMA drives the bus
+whatever the address. Only reads by code running from RAM take part (the
+switcher's transport copies itself there; Kickstart reading its own tables
+must not). Commands: NOP, ID (reports "OMEGA-RP2350", version 2.0), bank info,
+bank set (current/next reset/power-on, with or without reboot), bank names,
+long-reset sequence, merge, board name, and the 32 NV bytes (the switcher's
+auto-switch timeout and bank); others answer "unknown command". A bank changes
+only through a reset: without the reboot option it waits for the next one.
+`native/kicksmash_test.c` drives every command as the switcher does
+(`native/regression.sh` runs it).
 
 The default native CPU remains a 68000. `OMEGA_CPU=68020` selects Musashi's
 68020 core at run time; its full indexed addressing and 68020 CACR behavior are
-needed by the standalone switcher firmware.
+needed by the release 2.0 switcher image.
 
 ### DiagROM
 

@@ -18,19 +18,16 @@
 #include "../omega/debug.h"
 #include "../omega/DMA.h"
 #include "../omega/Gayle.h"
+#include "../omega/KickSmash.h"
 #include <string.h>
 #include <stdint.h>
 
-// ── PSRAM region base pointers ────────────────────────────────────────────
-static uint8_t *chip_ram;   // PSRAM + PSRAM_CHIPRAM_OFFSET
+// ── PSRAM region base pointers (set up by MemoryBoot.c) ───────────────────
+uint8_t *chip_ram;          // PSRAM + PSRAM_CHIPRAM_OFFSET
 
-// ── ROM (read-only, live in flash via XIP) ────────────────────────────────
-static const uint8_t *rom_base;
-static uint32_t       rom_size;
-
-static void psram_clear_words(uint8_t *memory, uint32_t bytes) {
-    memset(memory, 0, bytes);
-}
+// ── ROM (read-only: flash via XIP, or the SD card's copy in PSRAM) ────────
+const uint8_t *rom_base;
+uint32_t       rom_size;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -67,7 +64,7 @@ static inline const uint8_t *rom_ptr(uint32_t amiga_addr) {
     return rom_base + rom_addr(amiga_addr);
 }
 
-// ── Page table for instruction fetches ───────────────────────────────────
+// ── Page table for instruction fetches (filled by MemoryBoot.c) ──────────
 // One entry per 64 KB page of the 24-bit 68000 address space: the host
 // address of the page's first byte where the page is plain memory (chip
 // RAM, ROM with its 256 KB mirror), NULL elsewhere (registers, CIAs, Gayle,
@@ -77,18 +74,6 @@ static inline const uint8_t *rom_ptr(uint32_t amiga_addr) {
 #define PAGE_SHIFT 16
 #define PAGE_COUNT (0x1000000u >> PAGE_SHIFT)
 const uint8_t *chip_fetch_page[PAGE_COUNT];
-
-static void memory_map_pages(void) {
-    for (uint32_t p = 0; p < PAGE_COUNT; ++p) {
-        const uint32_t a = p << PAGE_SHIFT;
-        const uint8_t *mem = NULL;
-        if (a <= CHIPTOP)
-            mem = chip_ram + a;
-        else if (a >= 0xF80000u && rom_base)
-            mem = rom_base + rom_addr(a);
-        chip_fetch_page[p] = mem;
-    }
-}
 
 // Host pointer for a 68000 address in plain memory, or NULL.
 static inline const uint8_t *fetch_ptr(uint32_t address) {
@@ -110,53 +95,6 @@ static inline int in_custom_mirror(uint32_t address) {
 }
 static inline uint32_t custom_mirror(uint32_t address) {
     return 0xDFF000u | (address & 0x1FFu);
-}
-
-// ── Public API ────────────────────────────────────────────────────────────
-
-void memory_init(void) {
-    chip_ram  = psram_ptr(PSRAM_CHIPRAM_OFFSET);
-
-    // ROM lives in flash; the user must place the Kickstart binary at
-    // flash offset 0x200000 (i.e. absolute address ROM_FLASH_BASE).
-    rom_base = (const uint8_t *)ROM_FLASH_BASE;
-    rom_size = ROM_SIZE;
-
-    // Validate ROM presence: first byte of a valid Kickstart is 0x11
-    if (rom_base[0] != 0x11) {
-        // ROM not found – ROM region will return 0 / open bus
-        rom_base = NULL;
-        rom_size = 0;
-        printf("ROM: no Kickstart header at flash 0x%08x\n",
-               (unsigned)ROM_FLASH_BASE);
-    } else {
-        uint16_t opcode = ram_read_word(rom_base + 2);
-        uint32_t entry = ram_read_long(rom_base + 4);
-        printf("ROM: flash 0x%08x, header=%02x%02x opcode=%04x entry=%08lx\n",
-               (unsigned)ROM_FLASH_BASE, rom_base[0], rom_base[1], opcode,
-               (unsigned long)entry);
-    }
-
-    memory_map_pages();
-
-    printf("Memory: clearing chip RAM\n");
-    memory_clear_chipram();
-    printf("Memory: PSRAM clear complete\n");
-}
-
-int memory_set_rom(const uint8_t *data, uint32_t size) {
-    if (!data || (size != 0x40000u && size != 0x80000u) || data[0] != 0x11) {
-        return 0;
-    }
-    rom_base = data;
-    rom_size = size;
-    memory_map_pages();
-    return 1;
-}
-
-void memory_clear_chipram(void) {
-    // Leave longword at 0x000000 (Guru indicator) intact; clear from 4 up
-    psram_clear_words(chip_ram + 4, PSRAM_CHIPRAM_SIZE - 4);
 }
 
 // ── chipReadByte ──────────────────────────────────────────────────────────
@@ -231,8 +169,12 @@ unsigned int chipReadWord(unsigned int address) {
 // ── chipReadLong ─────────────────────────────────────────────────────────
 unsigned int chipReadLong(unsigned int address) {
     if (address <= CHIPTOP) return ram_read_long(&chip_ram[address]);
-    // ROM
+    // ROM (and the KickSmash ROM switcher's messages: omega/KickSmash.c)
     if (address > 0xF7FFFFu) {
+        if (__builtin_expect(kickSmashWatches(address), 0)) {
+            uint32_t value;
+            if (kickSmashReadLong(address, &value)) return value;
+        }
         if (!rom_base) return 0;
         return ram_read_long(rom_ptr(address));
     }

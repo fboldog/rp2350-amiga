@@ -42,8 +42,15 @@ board header ships with the Pico SDK.
 - **KEY button** (GPIO23): inserts/ejects the DF0 disk.
 - **LED** (GPIO25): DF0's drive light, on while its motor runs (flash-floppy
   builds), like the light on the Amiga's floppy drive.
-- **microSD** (optional, external module): SPI1 defaults SCK=GPIO30,
-  MOSI=GPIO31, MISO=GPIO40, CS=GPIO43, overridable with `-DBOARD_SD_*_PIN`.
+- **SWITCHER** (GPIO26, SD-card builds): a button to GND (or, with
+  `-DBOARD_SWITCHER_BUTTON_ACTIVE_LOW=0`, a button module on 3V3 whose output
+  goes high when pressed); held while the
+  board starts (power-on, RESET or Ctrl+Alt+Del) or through Ctrl-Amiga-Amiga,
+  it boots `/rom/switcher.rom` from the card (the KickSmash ROM switcher)
+  instead of the Kickstart.
+- **microSD** (optional, external module such as a Pmod TF card adapter):
+  SPI1 defaults MISO=GPIO28, CS=GPIO29, SCK=GPIO30, MOSI=GPIO31 (Pmod pins
+  3, 1, 4, 2; power from 3V3), overridable with `-DBOARD_SD_*_PIN`.
 
 ## PSRAM Layout
 
@@ -324,23 +331,56 @@ Entering emulation loop
 DVI: first indexed emulator frame queued
 ```
 
-### Load Kickstart from microSD
+### microSD: Kickstart and IDE hard disk
 
 This path is excluded from the default build and needs an external SPI SD
-module (the WeAct board has no slot). Configure with `-DOMEGA_ENABLE_SDCARD=ON`
-and set the `BOARD_SD_*` pins to match the wiring.
+module (the WeAct board has no slot; a Pmod TF card adapter on GPIO28-31
+works). Configure with `-DOMEGA_ENABLE_SDCARD=ON` and pick the Kickstart with
+`-DOMEGA_SD_ROM=rom/kick314.rom` (default `rom/kick13.rom`).
 
-Format a microSD card as FAT16 or FAT32 and copy the project `sd_card`
-contents to its root. The default ROM path is therefore:
+Card layout (as Emu68 uses it): an MBR with
+
+- partition 1, FAT32: the project `sd_card` contents (`/rom/`, `/adf/`);
+- partition 2, type `0x76`: the Amiga hard disk, raw. It is the A600 Gayle
+  IDE drive (Kickstart 2.05 and 3.1.4 boot from it); the Amiga partitions
+  it with HDToolBox, and the firmware never looks inside.
+
+Without a `0x76` partition, a contiguous `/hdf/dh0.hdf` (RDB image) on the
+FAT partition is the drive instead (a fragmented one is refused).
+
+At boot the firmware mounts the card through SPI1, loads a valid 256 KB or
+512 KB Kickstart into PSRAM (else it uses the ROM in flash) and attaches the
+hard disk. With an RDB on the disk DF0 starts empty, so Kickstart boots the
+hard disk (KEY inserts the floppy); a blank disk boots DF0 as before, e.g.
+an install disk.
+
+The KickSmash ROM switcher works with the card's ROMs as its banks
+(`omega/KickSmash.c` answers its ROM-bus messages, `src/kicksmash_sd.c` keeps
+the banks): the `*.rom` files in `/rom`, sorted by name, up to 8, or as
+`/rom/kicksmash.cfg` maps them. That text file also keeps the switcher's
+settings (bank names, power-on bank, auto-switch timeout, board name); the
+switcher's Save writes it, and it can be edited on a PC:
 
 ```text
-/rom/kick13.rom
+name Omega
+poweron 1
+bank 0 kick205.rom Kickstart 2.05
+bank 1 kick314.rom Kickstart 3.1.4
+bank 2 switcher.rom ROM switcher
 ```
 
-At boot the firmware mounts the card through SPI1 and loads a valid 256 KB or
-512 KB Kickstart into PSRAM before resetting the 68K. Change
-`BOARD_SD_ROM_PATH` in `src/board_config.h` to select another ROM. If the card,
-filesystem, or file cannot be read, the firmware uses the ROM embedded in flash.
+At power-on the board runs the power-on bank (without a settings file, the
+build's Kickstart, `-DOMEGA_SD_ROM`). Holding the SWITCHER button (GPIO26)
+boots `/rom/switcher.rom` instead. "Switch and Reboot" loads the chosen bank
+from the card and resets the Amiga, as KickSmash's reset line does (chip RAM
+kept, DF0 unchanged). An image smaller than 256 KB (the switcher is ~110 KB)
+is zero-padded to one 256 KB bank and mirrored. The switcher must be a build
+that runs on the 68000: KickSmash release 2.0 with
+`tools/kicksmash-2.0-68000.patch` (`git am` it on the `release_2.0` tag of
+https://github.com/cdhooper/kicksmash32, then `make` in `romswitcher/` with
+Bebbo's m68k-amigaos-gcc; `AMIGA_GCC=` points at a toolchain with its C
+library). The card's state is readable over SWD (`sd_status`: init
+stage, OCR, mount result).
 
 Flash-backed DF0 keeps its raw ADF in flash and encodes only the active
 12,798-byte MFM track, streamed straight into the DF0 area of PSRAM. The
@@ -830,7 +870,10 @@ deadline.
 | `hdmi_audio.c` / `.h` | HDMI audio path: Paula's samples from the mixer, WSOLA time-stretching to real time on core 1, output ring for the line interrupt |
 | `Planar.c` | Planar-to-chunky ARGB conversion (HIRES, LORES, HAM) for the fallback raster and the native build |
 | `Presentation.c` / `.h` | ARGB fallback presentation: maps the DMA raster to a 640×400 frame, rebuilds wrapped-fetch rows |
-| `sd_card.c` / `sd_card.h`, `sd_diskio.c` | SD card over SPI (FatFs disk driver) and Kickstart loading from SD (SD-card builds only) |
+| `sd_card.c` / `sd_card.h`, `sd_diskio.c` | SD card over SPI (FatFs disk driver, raw block reads and writes), Kickstart loading and hard-disk lookup (MBR type `0x76` partition or `/hdf/dh0.hdf`) (SD-card builds only) |
+| `kicksmash_sd.c` | KickSmash ROM-switcher banks on the board: the card's `/rom` ROMs, `/rom/kicksmash.cfg` read and written (SD-card builds only) |
+| `ide_sd.c` | The IDE drive's backend on the board: the SD hard disk at a sector offset, its sector buffer in PSRAM (SD-card builds only) |
+| `MemoryBoot.c` | Boot-time memory map setup (`memory_init()`, `memory_set_rom()`, the fetch page table), kept in flash while `Memory.c` runs from SRAM |
 | `ld/default_text_excludes.incl` | Linker-script override (`OMEGA_HOT_CODE_IN_RAM`): keeps the hottest emulator files out of flash `.text`, so the SDK places their code in SRAM |
 
 ### `omega/` — emulator core (from the Omega project, extended)
@@ -847,7 +890,8 @@ deadline.
 | `CPU.c` / `CPU.h` | Glue to Musashi: memory callbacks, interrupt levels from INTENA/INTREQ, reset |
 | `m68k*.c`, `m68k*.h` | Musashi 68000 core. On the RP2350 the opcode table is two-level (`m68kops.c`) and cycle counts are per handler; `m68kdasm.c` is the disassembler (debug only) |
 | `m68khot.h` | The hottest opcode handlers to run from SRAM (`OMEGA_HOT_OPCODES_IN_RAM`); generated by `tooling/hotops.py` |
-| `Gayle.c` / `Gayle.h` | The A600's Gayle with one IDE drive on a host disk image (`OMEGA_ENABLE_IDE`: native runner only so far, see `native/README.md`); clock register stubs |
+| `KickSmash.c` / `KickSmash.h` | Target side of the KickSmash32 ROM-bus message protocol (requests as ROM reads, replies from ROM reads), the commands the ROM switcher uses, its settings text; hosted by `src/kicksmash_sd.c` and `native/kicksmash_native.c` |
+| `Gayle.c` / `Gayle.h` | The A600's Gayle with one IDE drive on a host disk image (`OMEGA_ENABLE_IDE`: native runner and SD-card builds, see `native/README.md`); clock register stubs |
 | `DisplayLayout.h` | Display-window and data-fetch decoding shared by DMA and host (DIWSTRT/DIWSTOP, DDFSTRT/DDFSTOP, layout constants) |
 | `VideoStandard.h` | PAL/NTSC constants: lines per frame, VPOSR ID, viewport offsets, sprite timing |
 | `debug.c` / `debug.h` | Register names for logging, old ADF/MFM helpers |
@@ -857,7 +901,7 @@ deadline.
 
 | Path | Does |
 |---|---|
-| `native/` | Head-less PC runner of the same `omega/` core (`main_native.c`, `host_native.c`, `memory_native.c`), optional SDL window (`display_sdl.c`), KickSmash ROM-switcher simulator, and the framebuffer regression test (`regression.sh` + `regression-baselines.sha256`). See `native/README.md` |
+| `native/` | Head-less PC runner of the same `omega/` core (`main_native.c`, `host_native.c`, `memory_native.c`), optional SDL window (`display_sdl.c`), KickSmash ROM-switcher banks (`kicksmash_native.c`, protocol test `kicksmash_test.c`), and the framebuffer regression test (`regression.sh` + `regression-baselines.sha256`). See `native/README.md` |
 | `tools/combine_uf2.py` | Builds the flashable UF2: firmware + Kickstart + up to 15 DF0 ADFs |
 | `tooling/` | Board scripts over SWD: frame capture with colour replay, frame rates, boot timing, disk slot selection, profiling, hot opcode selection. See `tooling/README.md` |
 | `image_refs/` | Reference screenshots for visual comparison |
@@ -892,8 +936,11 @@ deadline.
   flash ADF.
 - **CPU.c** has a `PICO_BUILD` guard in `cpu_pulse_reset()` to call
   `memory_clear_chipram()` instead of the `low16Meg` loop.
-- **FatFs** is configured read-only and provides optional FAT16/FAT32 ROM
-  loading. It is only compiled with `OMEGA_ENABLE_SDCARD=ON`.
+- **FatFs** (R0.16, long file names with the buffer on the stack, fast
+  seek to check that a disk image is contiguous) finds the Kickstart, the
+  KickSmash banks and the hard disk, and writes only `/rom/kicksmash.cfg`; the
+  disk's sectors are read and written directly. It is only compiled with
+  `OMEGA_ENABLE_SDCARD=ON`.
 
 ## License
 
