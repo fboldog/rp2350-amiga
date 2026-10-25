@@ -861,6 +861,14 @@ keyboards are used through their boot protocol (`src/usb_input.c`):
   boots again.
 - Ctrl + Alt + Delete reboots the board (watchdog reset, like
   `tooling/disk.sh`): the next ADF in the flash rotation is mounted.
+- Kickstart's boot menu (Early Startup Control, both mouse buttons) after
+  a board reset: press the buttons 1-2 s after the reset, not through it.
+  The reset restarts the USB host, and the HP wireless receiver then
+  reports buttons held since before as released (00, even while the mouse
+  moves; GET_REPORT answers the same) until they are pressed anew. The
+  mouse is back about 2.5 s after the reset and Kickstart checks the
+  buttons at about 6.4 s. An Amiga-only reset (Ctrl + both Amiga keys,
+  the switcher) keeps USB running, so buttons held through it are seen.
 - TinyUSB runs on core 0: the emulation loop checks every 32nd pass whether
   the USB interrupt queued work (`tuh_task_event_ready()`), which costs
   nothing measurable. Core 1 must not run flash code (see the display
