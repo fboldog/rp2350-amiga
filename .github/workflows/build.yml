@@ -1,12 +1,10 @@
-# Builds the RP2350 HDMI firmware and the native runner (NTSC and PAL) on
-# every push and pull request. The firmware is configured as in README.md
-# ("HDMI, DF0 from flash, disk inserted at boot") plus the SD card (Kickstart,
-# KickSmash banks and the hard disk from the card; flash fallback without
-# one), in two variants:
-#   fastram-68000  2 MB chip + 2 MB Fast RAM, 68000
-#   rtg-68020      the same plus the Picasso II+ RTG card, 68EC020
-# (a KickSmash bank's "cpu <n> 68000|68020" line overrides the CPU). The
-# Pico SDK is downloaded by pico_sdk_import.cmake at its pinned release.
+# Builds the RP2350 HDMI firmware (NTSC and PAL) and the native runner
+# (NTSC and PAL) on every push and pull request. The firmware is configured
+# as in README.md ("HDMI, DF0 from flash, disk inserted at boot") plus the SD
+# card, with the 2 MB Fast RAM and the RTG card built in (CMake defaults):
+# /rom/kicksmash.cfg picks each Kickstart bank's CPU and whether it gets
+# the RTG card. The Pico SDK is downloaded by pico_sdk_import.cmake at its
+# pinned release.
 # No Kickstart ROM or ADF is included: combine them with tools/combine_uf2.py.
 name: Build
 
@@ -17,17 +15,12 @@ on:
 
 jobs:
   firmware:
-    name: Firmware (${{ matrix.variant.name }}, ${{ matrix.video }})
+    name: Firmware (${{ matrix.video }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         video: [NTSC, PAL]
-        variant:
-          - name: fastram-68000
-            options: -DOMEGA_FAST_RAM=ON -DOMEGA_RTG=OFF -DOMEGA_CPU=68000
-          - name: rtg-68020
-            options: -DOMEGA_FAST_RAM=ON -DOMEGA_RTG=ON -DOMEGA_CPU=68020
     steps:
       - uses: actions/checkout@v7
 
@@ -52,8 +45,7 @@ jobs:
             -DOMEGA_ENABLE_HDMI=ON \
             -DOMEGA_ENABLE_FLASH_FLOPPY=ON \
             -DOMEGA_DF0_INSERT_AT_BOOT=ON \
-            -DOMEGA_ENABLE_SDCARD=ON \
-            ${{ matrix.variant.options }}
+            -DOMEGA_ENABLE_SDCARD=ON
 
       - name: Build
         run: cmake --build build -j
@@ -62,13 +54,12 @@ jobs:
         run: |
           mkdir -p out
           for ext in uf2 elf bin; do
-            cp build/omega-amiga.$ext \
-              out/omega-amiga-${{ matrix.variant.name }}-${{ matrix.video }}.$ext
+            cp build/omega-amiga.$ext out/omega-amiga-${{ matrix.video }}.$ext
           done
 
       - uses: actions/upload-artifact@v7
         with:
-          name: firmware-${{ matrix.variant.name }}-${{ matrix.video }}
+          name: firmware-${{ matrix.video }}
           path: out/
           if-no-files-found: error
 

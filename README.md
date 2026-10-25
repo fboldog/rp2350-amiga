@@ -26,7 +26,7 @@ Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 | Paula audio | ✅ emulated, 48 kHz stereo; over HDMI (`OMEGA_HDMI_AUDIO`, NTSC and PAL), native: `OMEGA_PCM=<file>` |
 | USB HID keyboard/mouse | ✅ verified (mouse + keyboard receivers through a powered hub); HDMI builds |
 | 2 MB Fast RAM (Zorro II) | ✅ verified; `OMEGA_FAST_RAM` (default ON) |
-| RTG: Picasso II+ (PrismRTG) | ✅ verified 640x480 8-bit on HDMI; `OMEGA_RTG` (default ON, HDMI builds) |
+| RTG: Picasso II+ (PrismRTG) | ✅ verified 640x480 8-bit on HDMI; `OMEGA_RTG` (default ON, HDMI builds), per Kickstart bank with `rtg <n> on` |
 
 ## Hardware
 
@@ -100,7 +100,9 @@ GD5428, `omega/Picasso2.c`) with 1 MB of VRAM at `0x400000` and its
 registers at `0xE90000`. PrismRTG's PICASSO2 driver drives it unchanged.
 While its monitor switch is on, HDMI shows its picture (`src/rtg_display.c`:
 core 1 copies the changed VRAM pages of the visible screen into the scanout
-frames). CMake `-DOMEGA_RTG=OFF` leaves it out; it needs
+frames). The board offers it to autoconfig only for KickSmash banks with
+`rtg <n> on` in `/rom/kicksmash.cfg` (with `cpu <n> 68020`: the drivers
+need a 68020). CMake `-DOMEGA_RTG=OFF` leaves it out; it needs
 `OMEGA_FAST_RAM` and `OMEGA_ENABLE_HDMI`. Native: `OMEGA_RTG=0` (or `1024`
 for a 1 MB card as on the board).
 
@@ -202,23 +204,15 @@ cmake --build build-weact-hdmi-pal -j
 ```
 
 GitHub Actions (`.github/workflows/build.yml`) builds the HDMI firmware for
-NTSC and PAL with these settings plus `-DOMEGA_ENABLE_SDCARD=ON`, using Arm
-GNU Toolchain 14.3.Rel1, in two variants, and the native runner for both
-video modes, on every push and pull request:
-
-| Artifact | Options | Machine |
-|---|---|---|
-| `firmware-fastram-68000-<video>` | `-DOMEGA_RTG=OFF -DOMEGA_CPU=68000` | 2 MB chip + 2 MB Fast RAM, 68000 |
-| `firmware-rtg-68020-<video>` | `-DOMEGA_RTG=ON -DOMEGA_CPU=68020` | the same plus the Picasso II+ RTG card, 68EC020 |
-
-The `.uf2`, `.elf` and `.bin` files and the native binaries are uploaded as
-artifacts; combine a firmware UF2 with a Kickstart ROM and ADFs using
-`tools/combine_uf2.py`. Without an SD card the firmware falls back to the
-Kickstart in flash.
-
-`-DOMEGA_CPU=68000|68020` (default 68000) is the CPU of a Kickstart from
-flash and of KickSmash banks without a `cpu` line (below); 68020 is a
-68EC020.
+NTSC and PAL with these settings plus `-DOMEGA_ENABLE_SDCARD=ON` (Fast RAM
+and the RTG card are built in by default), using Arm GNU Toolchain
+14.3.Rel1, and the native runner for both, on every push and pull request.
+One firmware serves every machine: `/rom/kicksmash.cfg` picks each
+Kickstart bank's CPU (`cpu <n> 68020`) and whether it gets the RTG card
+(`rtg <n> on`); without a card the Kickstart in flash runs on a 68000
+without RTG. The `.uf2`, `.elf` and `.bin` files and the native binaries are
+uploaded as artifacts; combine a firmware UF2 with a Kickstart ROM and ADFs
+using `tools/combine_uf2.py`.
 
 `PICO_BOARD` defaults to `weact_studio_rp2350b_core`, the only supported
 board. HDMI, SD-card reading and flash-backed ADF loading are `OFF` by
@@ -421,15 +415,15 @@ bank 0 kick205.rom Kickstart 2.05
 bank 1 kick314.rom Kickstart 3.1.4
 bank 2 switcher.rom ROM switcher
 cpu 1 68020
+rtg 1 on
 ```
 
 `cpu <n> 68020` runs bank n on a 68EC020 (a 68020 with the 68000's 24-bit
 bus and no FPU, as in the A1200), which 020-only software and the RTG
-drivers need; `cpu <n> 68000` runs it on a 68000. Banks without a line run
-on the firmware's default CPU (`-DOMEGA_CPU`, 68000 unless built for
-68020). The CPU is chosen each time a bank loads (power-on, Switch and
-Reboot); the switcher's Save writes a line for each bank that differs from
-the default.
+drivers need; other banks run on the 68000. `rtg <n> on` gives bank n the
+Picasso II+ RTG card (RTG builds; other banks don't see it, as if it were
+pulled). Both are applied each time a bank loads (power-on, Switch and
+Reboot); the switcher's Save keeps the lines.
 
 At power-on the board runs the power-on bank (without a settings file, the
 build's Kickstart, `-DOMEGA_SD_ROM`). Holding the SWITCHER button (GPIO26)

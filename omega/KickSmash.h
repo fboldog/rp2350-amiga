@@ -38,6 +38,7 @@ typedef struct {
     char     board_name[16];
     char     file[KS_ROM_BANKS][KS_FILE_MAX];  // ROM file of each bank
     uint8_t  cpu020[KS_ROM_BANKS];   // nonzero: the bank runs a 68EC020
+    uint8_t  rtg[KS_ROM_BANKS];      // nonzero: the bank has the RTG card
     // Transport
     uint8_t  shift;              // request word = offset >> shift
     uint16_t req_pos;            // words received (magic included)
@@ -70,12 +71,12 @@ int kickSmashFormatConfig(char *out, int size);
 void kickSmashDefaultBanks(const char *const *files, int count);
 // The bank whose file is `file` (case-insensitive), or -1.
 int kickSmashFindBank(const char *file);
-// Nonzero if the bank runs on a 68EC020, else on a 68000: "cpu <n>
-// 68000|68020" in the settings, or the build's default (also for no bank).
-#ifndef OMEGA_CPU_68020
-#define OMEGA_CPU_68020 0
-#endif
+// Nonzero if the bank runs on a 68EC020 ("cpu <n> 68020" in the settings),
+// else it runs on a 68000.
 int kickSmashBankCpu020(int bank);
+// Nonzero if the bank has the RTG card ("rtg <n> on" in the settings; off
+// without a line, and for no bank).
+int kickSmashBankRtg(int bank);
 
 // Host side. The switch is requested from inside a ROM read: the host
 // acts on it between emulation slices (kickSmashTakeSwitch()), loading the

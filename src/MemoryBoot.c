@@ -79,9 +79,11 @@ void memory_init(void) {
     memory_map_pages();
     expansionFastRamSize = BOARD_MAP_FAST_RAM_SIZE;
 #if OMEGA_RTG
+    // The card is offered to autoconfig only for KickSmash banks with
+    // "rtg <n> on" (main.c, load_bank_from_sd()).
     p2Init(psram_ptr(BOARD_MAP_RTG_VRAM_OFFSET), BOARD_MAP_RTG_VRAM_SIZE,
            psram_ptr(BOARD_MAP_RTG_STATE_OFFSET));
-    expansionPicasso2Vram = BOARD_MAP_RTG_VRAM_SIZE;
+    expansionPicasso2Vram = 0;
 #endif
 
     printf("Memory: clearing chip RAM\n");

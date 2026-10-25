@@ -22,14 +22,6 @@ option(OMEGA_DF0_INSERT_AT_BOOT "Start flash-backed DF0 inserted at power-on" OF
 # SRAM code too: the core-1 ring gets the room back.
 option(OMEGA_FAST_RAM "Zorro II Fast RAM board (2 MB, PSRAM)" ON)
 option(OMEGA_RTG "Picasso II+ RTG card (needs OMEGA_FAST_RAM and HDMI)" ON)
-# The CPU of a Kickstart from flash and of KickSmash banks without a
-# "cpu <n> ..." line in /rom/kicksmash.cfg: 68000 (A500) or 68020 (a
-# 68EC020, which RTG drivers need).
-set(OMEGA_CPU "68000" CACHE STRING "Default CPU: 68000 or 68020")
-set_property(CACHE OMEGA_CPU PROPERTY STRINGS 68000 68020)
-if(NOT OMEGA_CPU MATCHES "^680[02]0$")
-    message(FATAL_ERROR "OMEGA_CPU must be 68000 or 68020")
-endif()
 # HDMI builds only: HSTX runs from PLL_USB, so clk_sys is independent of the
 # video mode. PSRAM runs at clk_sys / ceil(clk_sys / 133 MHz).
 # USB host needs 48 MHz from PLL_SYS (PLL_USB drives HSTX), so clk_sys must
@@ -228,7 +220,6 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_DF0_INSERT_AT_BOOT=$<BOOL:${OMEGA_DF0_INSERT_AT_BOOT}>
     OMEGA_FAST_RAM=$<BOOL:${OMEGA_FAST_RAM}>
     OMEGA_RTG=$<BOOL:${OMEGA_RTG_ACTIVE}>
-    OMEGA_CPU_68020=$<STREQUAL:${OMEGA_CPU},68020>
     OMEGA_VIDEO_STANDARD=${OMEGA_VIDEO_STANDARD_VALUE}
     OMEGA_SYS_CLK_KHZ=${OMEGA_SYS_CLK_KHZ}u
     OMEGA_CPU_CYCLES_PER_SLOT=${OMEGA_CPU_CYCLES_PER_SLOT}
@@ -321,6 +312,5 @@ message(STATUS "SD card:    ${OMEGA_ENABLE_SDCARD} (Kickstart ${OMEGA_SD_ROM})")
 message(STATUS "Flash ADF:  ${OMEGA_ENABLE_FLASH_FLOPPY}")
 message(STATUS "Fast RAM:   ${OMEGA_FAST_RAM}")
 message(STATUS "RTG card:   ${OMEGA_RTG_ACTIVE}")
-message(STATUS "CPU:        ${OMEGA_CPU} (KickSmash banks may override)")
 message(STATUS "DF0 at boot:${OMEGA_DF0_INSERT_AT_BOOT}")
 message(STATUS "Console:    ${OMEGA_STDIO_DESCRIPTION}")

@@ -68,7 +68,6 @@ void kickSmashInit(KickSmashState *state) {
     ks->bi.valid = 1;
     ks->bi.bank_nextreset = 0xff;
     memset(ks->bi.longreset_seq, 0xff, sizeof ks->bi.longreset_seq);
-    memset(ks->cpu020, OMEGA_CPU_68020, sizeof ks->cpu020);
     strcpy(ks->board_name, "Omega");
     kickSmashBusy = 0;
     switch_bank = switch_ready = -1;
@@ -413,9 +412,11 @@ static void copy_str(char *dst, size_t size, const char *src) {
 }
 
 int kickSmashBankCpu020(int bank) {
-    if (!ks || bank < 0 || bank >= KS_ROM_BANKS)
-        return OMEGA_CPU_68020;
-    return ks->cpu020[bank];
+    return ks && bank >= 0 && bank < KS_ROM_BANKS && ks->cpu020[bank];
+}
+
+int kickSmashBankRtg(int bank) {
+    return ks && bank >= 0 && bank < KS_ROM_BANKS && ks->rtg[bank];
 }
 
 static void set_bank(unsigned b, const char *file, const char *name) {
@@ -525,6 +526,13 @@ void kickSmashParseConfig(const char *text) {
             if (b >= 0 && b < KS_ROM_BANKS)
                 ks->cpu020[b] = !strcmp(tok, "68020") ||
                                 same_name(tok, "68EC020");
+        } else if (!strcmp(key, "rtg")) {
+            // "rtg <bank> on|off"
+            p = word(p, tok, sizeof tok);
+            const int b = number(tok, 10);
+            word(p, tok, sizeof tok);
+            if (b >= 0 && b < KS_ROM_BANKS)
+                ks->rtg[b] = same_name(tok, "on");
         } else if (!strcmp(key, "poweron")) {
             word(p, tok, sizeof tok);
             const int b = number(tok, 10);
@@ -553,8 +561,9 @@ int kickSmashFormatConfig(char *out, int size) {
     int n = snprintf(out, size,
         "# KickSmash ROM switcher settings (Omega). Edited by the switcher's\n"
         "# Save; \"bank <n> <file in /rom> [name]\" lines map banks to files,\n"
-        "# \"cpu <n> 68000|68020\" picks a bank's CPU (68020: a 68EC020);\n"
-        "# without one a bank runs on the firmware's default CPU.\n"
+        "# \"cpu <n> 68020\" runs a bank on a 68EC020 (else a 68000).\n"
+        "# \"rtg <n> on\" gives a bank the Picasso II+ RTG card (RTG builds;\n"
+        "# its drivers need a 68020).\n"
         "name %s\npoweron %u\nlongreset",
         ks->board_name, ks->bi.bank_poweron);
     for (int b = 0; b < KS_ROM_BANKS && ks->bi.longreset_seq[b] != 0xff &&
@@ -575,8 +584,10 @@ int kickSmashFormatConfig(char *out, int size) {
             n += snprintf(out + n, size - n, "bank %d %s %s\n", b,
                           ks->file[b], ks->bi.name[b]);
     for (int b = 0; b < KS_ROM_BANKS && n < size; b++)
-        if (ks->cpu020[b] != OMEGA_CPU_68020)
-            n += snprintf(out + n, size - n, "cpu %d %s\n", b,
-                          ks->cpu020[b] ? "68020" : "68000");
+        if (ks->cpu020[b])
+            n += snprintf(out + n, size - n, "cpu %d 68020\n", b);
+    for (int b = 0; b < KS_ROM_BANKS && n < size; b++)
+        if (ks->rtg[b])
+            n += snprintf(out + n, size - n, "rtg %d on\n", b);
     return n < size ? n : -1;
 }

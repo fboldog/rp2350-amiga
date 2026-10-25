@@ -49,6 +49,7 @@
 #endif
 
 #include "../omega/CPU.h"
+#include "../omega/Expansion.h"
 #include "../omega/m68k.h"
 #include "../omega/Chipset.h"
 #include "../omega/CIA.h"
@@ -327,7 +328,8 @@ static bool load_rom_from_sd(const char *path) {
 }
 
 // Loads a KickSmash bank (or, for bank -1, `path`) and records it as the
-// bank the Amiga runs, on the bank's CPU (68000 or 68EC020).
+// bank the Amiga runs, on the bank's CPU (68000 or 68EC020) and with the
+// RTG card if the bank has it (autoconfig offers it from the next reset).
 static bool load_bank_from_sd(int bank, const char *path) {
     char bank_path[48];
     if (bank >= 0 && kicksmash_sd_bank_path(bank, bank_path, sizeof bank_path))
@@ -336,6 +338,12 @@ static bool load_bank_from_sd(int bank, const char *path) {
         return false;
     kicksmash_sd_set_current(bank);
     cpu_select_68020(kickSmashBankCpu020(bank));
+#if OMEGA_RTG
+    const uint32_t vram = kickSmashBankRtg(bank) ? BOARD_MAP_RTG_VRAM_SIZE : 0;
+    if (vram != expansionPicasso2Vram)
+        printf("RTG: Picasso II+ %s\n", vram ? "on" : "off");
+    expansionPicasso2Vram = vram;
+#endif
     return true;
 }
 
