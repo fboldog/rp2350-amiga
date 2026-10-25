@@ -29,7 +29,8 @@ Covers Musashi/Chipset/CIA/DMA/Blitter/Floppy; NOT the RP2350 `src/` layer.
 - [x] `src/Host.c` – SDL-free host; framebuffer pointer in PSRAM; UART printf
 - [x] `src/main.c` – bare-metal entry and PSRAM/memory/CPU init sequence;
       HDMI clock selection safely retimes PSRAM through the SDK
-- [x] `omega/CPU.c` – `#ifdef PICO_BUILD` guard around `low16Meg` clear in `cpu_pulse_reset`
+- [x] `omega/CPU.c` – `cpu_pulse_reset` no longer clears chip RAM (Early
+      Startup Control's disabled devices and boot device survive its reboot)
 - [x] `omega/Chipset.c` – `chipramW` set via `CHIPRAM_BASE_PTR` macro
 - [x] `omega/DMA.c` – disk DMA writes use `CHIPRAM_BASE_PTR`; SDL_Atomic calls commented
 - [x] `omega/Floppy.h` – `mfmData` is a pointer; only DF0 has a buffer
@@ -241,7 +242,8 @@ Tronic Picasso II+: a Cirrus GD5428 on Zorro II, VRAM 2167/11 + registers
 - [ ] Report to PrismRTG (github.com/lainejones/PrismRTG): a selected icon
       without its own selected image draws as an empty box - PrismD's
       `blit_masked` treats BltMaskBitMapRastPort's minterm 0x20 ("invert
-      source through mask") as a BltBitMap minterm (native/README.md).
+      source through mask") as a BltBitMap minterm (native/README.md). The
+      same happens in WinUAE.
 - [ ] **Dithered 15/16/24-bit view** (planned, not started): keep the 8-bit
       SRAM frame and the RGB332 palette, but convert with an ordered 4x4
       Bayer dither in `rtg_copy()` (`src/rtg_display.c`): per pixel at

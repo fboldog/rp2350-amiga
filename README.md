@@ -983,8 +983,10 @@ deadline.
   Kickstart's drive-ID probe. The desktop `ADF2MFM(fd,...)` retains full-image
   conversion, while RP2350 DF0 uses a one-track SRAM MFM cache over the raw
   flash ADF.
-- **CPU.c** has a `PICO_BUILD` guard in `cpu_pulse_reset()` to call
-  `memory_clear_chipram()` instead of the `low16Meg` loop.
+- **CPU.c**: the RESET instruction (`cpu_pulse_reset()`) resets the chips
+  but keeps RAM, as the reset line does; upstream cleared chip RAM, which
+  lost the boot choices Kickstart 3.1.4+'s Early Startup Control keeps
+  across the reboot it makes.
 - **FatFs** (R0.16, long file names with the buffer on the stack, fast
   seek to check that a disk image is contiguous) finds the Kickstart, the
   KickSmash banks and the hard disk, and writes only `/rom/kicksmash.cfg`; the

@@ -224,7 +224,8 @@ Known PrismRTG 1.2 issue (not the emulator's): a selected icon without its
 own selected image is drawn as an empty box. icon.library clears the masked
 area with pen 0 and calls BltMaskBitMapRastPort with minterm 0x20 ("invert
 the source through the mask"); PrismD's `blit_masked` applies it as a
-BltBitMap minterm (`~source AND destination`), which is 0 there.
+BltBitMap minterm (`~source AND destination`), which is 0 there. WinUAE shows
+the same.
 
 ### Screenshot regression suite
 

@@ -50,15 +50,10 @@ void cpu_pulse_reset(void){
     printf("SP:%06lx\n",(unsigned long)sp);
     
     printf("Machine reset...\n");
-    
-    //clear RAM (don't wipe long at address 0 as that signals a Guru occured)
-#ifdef PICO_BUILD
-    memory_clear_chipram();
-#else
-    for(int i=4;i<0x1FFFFF;i++){
-        low16Meg[i]=0;
-    }
-#endif
+
+    // The reset line resets the chips, not memory: RAM survives, as
+    // ColdReboot() callers expect (Kickstart 3.1.4+'s Early Startup
+    // Control keeps its boot choices there across the reboot it does).
     ChipsetInit();
     expansionReset();   // the reset line unconfigures the Zorro boards
     m68k_set_reg(M68K_REG_PC, cpu_reset_pc()); // the ROM's reset vector
