@@ -20,6 +20,7 @@
 
 #include "CIA.h"
 #include "Expansion.h"
+#include "KickSmash.h"   // OMEGA_CPU_68020
 
 
 unsigned char* _emulatorMemory;
@@ -88,8 +89,10 @@ void cpu_keyboard_reset(void){
 
 /* The CPU model: a 68000 (A500), or a 68EC020 (A1200-like, 24-bit bus),
    which RTG drivers and 020-only software need. Takes effect at once after
-   cpu_init(), so a caller selects it just before a reset. */
-static unsigned int cpu_type = M68K_CPU_TYPE_68000;
+   cpu_init(), so a caller selects it just before a reset. The build's
+   default is OMEGA_CPU_68020 (KickSmash.h). */
+static unsigned int cpu_type = OMEGA_CPU_68020 ? M68K_CPU_TYPE_68EC020
+                                               : M68K_CPU_TYPE_68000;
 static int cpu_ready;
 
 void cpu_select_68020(int on){

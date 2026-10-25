@@ -70,8 +70,11 @@ int kickSmashFormatConfig(char *out, int size);
 void kickSmashDefaultBanks(const char *const *files, int count);
 // The bank whose file is `file` (case-insensitive), or -1.
 int kickSmashFindBank(const char *file);
-// Nonzero if the bank runs on a 68EC020 ("cpu <n> 68020" in the settings),
-// else it runs on a 68000.
+// Nonzero if the bank runs on a 68EC020, else on a 68000: "cpu <n>
+// 68000|68020" in the settings, or the build's default (also for no bank).
+#ifndef OMEGA_CPU_68020
+#define OMEGA_CPU_68020 0
+#endif
 int kickSmashBankCpu020(int bank);
 
 // Host side. The switch is requested from inside a ROM read: the host

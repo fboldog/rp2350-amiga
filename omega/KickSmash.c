@@ -68,6 +68,7 @@ void kickSmashInit(KickSmashState *state) {
     ks->bi.valid = 1;
     ks->bi.bank_nextreset = 0xff;
     memset(ks->bi.longreset_seq, 0xff, sizeof ks->bi.longreset_seq);
+    memset(ks->cpu020, OMEGA_CPU_68020, sizeof ks->cpu020);
     strcpy(ks->board_name, "Omega");
     kickSmashBusy = 0;
     switch_bank = switch_ready = -1;
@@ -412,7 +413,9 @@ static void copy_str(char *dst, size_t size, const char *src) {
 }
 
 int kickSmashBankCpu020(int bank) {
-    return ks && bank >= 0 && bank < KS_ROM_BANKS && ks->cpu020[bank];
+    if (!ks || bank < 0 || bank >= KS_ROM_BANKS)
+        return OMEGA_CPU_68020;
+    return ks->cpu020[bank];
 }
 
 static void set_bank(unsigned b, const char *file, const char *name) {
@@ -550,7 +553,8 @@ int kickSmashFormatConfig(char *out, int size) {
     int n = snprintf(out, size,
         "# KickSmash ROM switcher settings (Omega). Edited by the switcher's\n"
         "# Save; \"bank <n> <file in /rom> [name]\" lines map banks to files,\n"
-        "# \"cpu <n> 68020\" runs a bank on a 68EC020 (else a 68000).\n"
+        "# \"cpu <n> 68000|68020\" picks a bank's CPU (68020: a 68EC020);\n"
+        "# without one a bank runs on the firmware's default CPU.\n"
         "name %s\npoweron %u\nlongreset",
         ks->board_name, ks->bi.bank_poweron);
     for (int b = 0; b < KS_ROM_BANKS && ks->bi.longreset_seq[b] != 0xff &&
@@ -571,7 +575,8 @@ int kickSmashFormatConfig(char *out, int size) {
             n += snprintf(out + n, size - n, "bank %d %s %s\n", b,
                           ks->file[b], ks->bi.name[b]);
     for (int b = 0; b < KS_ROM_BANKS && n < size; b++)
-        if (ks->cpu020[b])
-            n += snprintf(out + n, size - n, "cpu %d 68020\n", b);
+        if (ks->cpu020[b] != OMEGA_CPU_68020)
+            n += snprintf(out + n, size - n, "cpu %d %s\n", b,
+                          ks->cpu020[b] ? "68020" : "68000");
     return n < size ? n : -1;
 }

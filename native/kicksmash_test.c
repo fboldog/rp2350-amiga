@@ -199,8 +199,11 @@ int main(void) {
     CHECK(state.bi.merge[0] == 0 && state.bi.merge[1] == 0);
 
     // Settings round trip
-    kickSmashParseConfig("cpu 1 68020\ncpu 9 68020\n");
-    CHECK(kickSmashBankCpu020(1) && !kickSmashBankCpu020(0));
+    // Banks without a cpu line (and no bank) run the build's default CPU.
+    kickSmashParseConfig("cpu 1 68020\ncpu 3 68000\ncpu 9 68020\n");
+    CHECK(kickSmashBankCpu020(1) && !kickSmashBankCpu020(3));
+    CHECK(kickSmashBankCpu020(0) == OMEGA_CPU_68020 &&
+          kickSmashBankCpu020(-1) == OMEGA_CPU_68020);
     char text[2048];
     CHECK(kickSmashFormatConfig(text, sizeof text) > 0);
     static KickSmashState copy;
@@ -215,7 +218,8 @@ int main(void) {
           !strcmp(copy.bi.name[1], "Workbench"));
     CHECK(!strcmp(copy.file[2], "switcher.rom") && !copy.file[3][0]);
     CHECK(kickSmashFindBank("SWITCHER.ROM") == 2);
-    CHECK(kickSmashBankCpu020(1) && !kickSmashBankCpu020(2));
+    CHECK(kickSmashBankCpu020(1) && !kickSmashBankCpu020(3) &&
+          kickSmashBankCpu020(2) == OMEGA_CPU_68020);
     kickSmashParseConfig("cpu 1 68000\n");
     CHECK(!kickSmashBankCpu020(1));
 
