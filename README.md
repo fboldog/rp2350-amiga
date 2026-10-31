@@ -252,7 +252,10 @@ bits per cycle. `clk_sys` is therefore independent of the video mode and set
 at build time with `-DOMEGA_SYS_CLK_KHZ=<kHz>` (default 336000; PSRAM and
 flash run at `clk_sys / ceil(clk_sys / 133 MHz)`, 112 MHz at 336 MHz).
 `clk_peri` (UART, SPI) moves to `PLL_SYS` divided to ≤150 MHz and the ADC
-clock stops. USB host builds take the 48 MHz USB clock from `PLL_SYS`, so
+clock stops (with `-DOMEGA_TEMP_LOG=ON` it runs from `PLL_SYS` and the chip
+temperature goes to the UART once a second, also in `temp_decidegrees` for
+reading over SWD; uncalibrated, so compare readings rather than trust one).
+USB host builds take the 48 MHz USB clock from `PLL_SYS`, so
 `clk_sys` must be a multiple of 48 MHz (CMake refuses otherwise): 336 MHz is
 7 × 48 MHz, ~6 % faster than the previous 320 MHz default where emulation is
 not paced by the display (idle xSysinfo 53.9 → 57.2 frames/s). Without USB

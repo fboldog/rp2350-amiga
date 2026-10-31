@@ -30,6 +30,7 @@ option(OMEGA_RTG "Picasso II+ RTG card (needs OMEGA_FAST_RAM and HDMI)" ON)
 set(OMEGA_SYS_CLK_KHZ 336000 CACHE STRING "clk_sys in kHz for HDMI builds")
 option(OMEGA_REALTIME
        "Limit emulation to real Amiga speed (frame pacing on core 0)" ON)
+option(OMEGA_TEMP_LOG "Log the chip temperature on the UART once a second" OFF)
 option(OMEGA_ENABLE_USB_HOST
        "USB host on the native port for HID mice and keyboards (HDMI builds)" ON)
 # 68000 cycles per DMA slot (colour clock): 2 matches an A500 (7.09 MHz CPU,
@@ -229,6 +230,7 @@ target_compile_definitions(omega-amiga PRIVATE
     OMEGA_HDMI_AUDIO=$<BOOL:${OMEGA_HDMI_AUDIO_ACTIVE}>
     OMEGA_AUDIO_OUTPUT=$<BOOL:${OMEGA_HDMI_AUDIO_ACTIVE}>
     OMEGA_REALTIME=$<BOOL:${OMEGA_REALTIME}>
+    OMEGA_TEMP_LOG=$<BOOL:${OMEGA_TEMP_LOG}>
     OMEGA_HOT_OPCODES_IN_RAM=$<BOOL:${OMEGA_HOT_OPCODES_IN_RAM}>
     RING_WORDS=${OMEGA_RING_WORDS_VALUE}u
     # Nothing on the device mallocs; keep the SDK's minimum heap so the SRAM
@@ -252,6 +254,10 @@ endif()
 
 if(OMEGA_ENABLE_SDCARD)
     target_link_libraries(omega-amiga hardware_spi)
+endif()
+
+if(OMEGA_TEMP_LOG)
+    target_link_libraries(omega-amiga hardware_adc)
 endif()
 
 if(OMEGA_USB_HOST_ACTIVE)

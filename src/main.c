@@ -22,6 +22,9 @@
 
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
+#if OMEGA_TEMP_LOG
+#include "hardware/adc.h"
+#endif
 #include "hardware/structs/scb.h"
 #include "hardware/structs/qmi.h"
 
@@ -448,7 +451,15 @@ static void prepare_hdmi_clock(void) {
 #else
     clock_stop(clk_usb);
 #endif
+#if OMEGA_TEMP_LOG
+    // ADC for the temperature sensor: at most 48 MHz from PLL_SYS.
+    if (!clock_configure(clk_adc, 0,
+                         CLOCKS_CLK_ADC_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+                         sys_hz, sys_hz / ((sys_hz + 48000000u - 1u) / 48000000u)))
+        panic("Unable to derive the ADC clock from PLL_SYS");
+#else
     clock_stop(clk_adc);
+#endif
     uint vco_hz, post_div1, post_div2;
     if (!check_sys_clock_hz(dvi_display_bit_clock_khz() * 1000u,
                             &vco_hz, &post_div1, &post_div2))
@@ -459,6 +470,33 @@ static void prepare_hdmi_clock(void) {
                                PICO_DEFAULT_PSRAM_MIN_DESELECT) != PICO_OK ||
         psram_reinitialize() != PICO_OK)
         panic("Unable to retime PSRAM for the system clock");
+}
+#endif
+
+#if OMEGA_TEMP_LOG
+// Chip temperature, once a second on the UART and in temp_decidegrees (for
+// reading over SWD). Uncalibrated: good for comparing clocks and loads, a
+// few degrees off in absolute terms.
+#define TEMP_SAMPLES 16u
+volatile int32_t temp_decidegrees;
+
+static void temp_log_init(void) {
+    adc_init();
+    adc_set_temp_sensor_enabled(true);
+    adc_select_input(ADC_TEMPERATURE_CHANNEL_NUM);
+}
+
+static void __attribute__((noinline)) temp_log_report(void) {
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < TEMP_SAMPLES; ++i)
+        sum += adc_read();
+    // Integers: float to double would link libgcc's double code into SRAM.
+    // 3.3 V / 65536 = 50.354 uV per count of the 16-sample sum; the sensor
+    // reads 706 mV at 27 C and falls 1.721 mV per degree.
+    const int32_t microvolts = (int32_t)(sum * 50354u / 1000u);
+    const int32_t t = 270 - (microvolts - 706000) * 10 / 1721;
+    temp_decidegrees = t;
+    printf("Temp: %ld.%ld C\n", (long)(t / 10), (long)((t < 0 ? -t : t) % 10));
 }
 #endif
 
@@ -500,6 +538,13 @@ OMEGA_LOOP_FUNC(emulation_loop)(void) {
         if (hostResetRequested) {
             hostResetRequested = 0;
             cpu_keyboard_reset();
+        }
+#endif
+#if OMEGA_TEMP_LOG
+        static uint32_t temp_last_us;
+        if (time_us_32() - temp_last_us >= 1000000u) {
+            temp_last_us = time_us_32();
+            temp_log_report();
         }
 #endif
         // hostDisplay is called exactly once per VBL by the DMA engine.  It
@@ -596,6 +641,9 @@ int main(void) {
 
 #if OMEGA_ENABLE_USB_HOST
     usb_input_init();
+#endif
+#if OMEGA_TEMP_LOG
+    temp_log_init();
 #endif
     printf("Entering emulation loop\n");
 

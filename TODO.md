@@ -190,6 +190,23 @@ Steps:
       start, PrismSetup DETECT) and on the board (3.1.4 boots on the
       EC020, PrismRTG's installer runs). Open: the CPU pacing on a 68020
       (`OMEGA_CPU_CYCLES_PER_SLOT` was tuned on the 68000).
+- [ ] Optional: a separate CPU budget for 68020 banks (e.g.
+      `OMEGA_CPU020_CYCLES_PER_SLOT`), used when a bank selects that CPU and
+      tuned on the board. The 68020's timing table charges fewer cycles per
+      instruction, so the 68000's budget of 5 runs more instructions per
+      slot. RemGame at 336 MHz (2026-10-31): 17.5 frames/s on the EC020,
+      25.4 on a 68000 bank, and its sprites only come out right on the
+      68000. Lowering the budget would slow RTG and Workbench work.
+- [ ] Optional: 384 MHz for 68020/RTG work (the board stays at 336 MHz).
+      Needs all of: 1.30 V, flash on divider 4 (96 MHz) with read delay 4,
+      PSRAM timing set before `clk_sys` rises (`psram_reinitialize()` puts
+      the boot ROM's flash timing back, so flash is set after it). 1.20 V
+      and 1.25 V failed at any flash delay. 360 MHz cannot run USB (not a
+      multiple of 48 MHz). RemGame, 11 min on the EC020: no faults, ~54 C
+      (peak 55.4) against ~50 C at 336 MHz. Frames/s emulated/shown:
+      EC020 17.5/17.5 -> 20.0/20.0, 68000 25.4/24.5 -> 26.7/23.3 (slower
+      flash; the drop in shown frames is not understood). Would need a
+      longer stability test and a build option defaulting to 336 MHz.
 - [ ] Optional: a tiny on-screen disk chooser
 - [x] **2 MB Fast RAM** (2026-10-24): a Zorro II autoconfig board
       (`omega/Expansion.c`) at `0x200000`, PSRAM after chip RAM; the DF0
