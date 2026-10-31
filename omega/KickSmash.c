@@ -419,6 +419,10 @@ int kickSmashBankRtg(int bank) {
     return ks && bank >= 0 && bank < KS_ROM_BANKS && ks->rtg[bank];
 }
 
+int kickSmashBankCycles(int bank) {
+    return ks && bank >= 0 && bank < KS_ROM_BANKS ? ks->cycles[bank] : 0;
+}
+
 static void set_bank(unsigned b, const char *file, const char *name) {
     copy_str(ks->file[b], KS_FILE_MAX, file);
     memset(ks->bi.name[b], 0, sizeof ks->bi.name[b]);
@@ -533,6 +537,14 @@ void kickSmashParseConfig(const char *text) {
             word(p, tok, sizeof tok);
             if (b >= 0 && b < KS_ROM_BANKS)
                 ks->rtg[b] = same_name(tok, "on");
+        } else if (!strcmp(key, "cycles")) {
+            // "cycles <bank> <1-255>"
+            p = word(p, tok, sizeof tok);
+            const int b = number(tok, 10);
+            word(p, tok, sizeof tok);
+            const int n = number(tok, 10);
+            if (b >= 0 && b < KS_ROM_BANKS && n >= 1 && n <= 255)
+                ks->cycles[b] = (uint8_t)n;
         } else if (!strcmp(key, "poweron")) {
             word(p, tok, sizeof tok);
             const int b = number(tok, 10);
@@ -564,6 +576,8 @@ int kickSmashFormatConfig(char *out, int size) {
         "# \"cpu <n> 68020\" runs a bank on a 68EC020 (else a 68000).\n"
         "# \"rtg <n> on\" gives a bank the Picasso II+ RTG card (RTG builds;\n"
         "# its drivers need a 68020).\n"
+        "# \"cycles <n> <1-255>\" sets a bank's CPU cycles per DMA slot:\n"
+        "# higher is faster for Workbench, too high breaks beam racing.\n"
         "name %s\npoweron %u\nlongreset",
         ks->board_name, ks->bi.bank_poweron);
     for (int b = 0; b < KS_ROM_BANKS && ks->bi.longreset_seq[b] != 0xff &&
@@ -589,5 +603,9 @@ int kickSmashFormatConfig(char *out, int size) {
     for (int b = 0; b < KS_ROM_BANKS && n < size; b++)
         if (ks->rtg[b])
             n += snprintf(out + n, size - n, "rtg %d on\n", b);
+    for (int b = 0; b < KS_ROM_BANKS && n < size; b++)
+        if (ks->cycles[b])
+            n += snprintf(out + n, size - n, "cycles %d %u\n", b,
+                          ks->cycles[b]);
     return n < size ? n : -1;
 }

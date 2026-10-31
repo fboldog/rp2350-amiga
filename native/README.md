@@ -107,7 +107,8 @@ The default native CPU remains a 68000. `OMEGA_CPU=68020` selects Musashi's
 68020 core at run time; its full indexed addressing and 68020 CACR behavior are
 needed by the release 2.0 switcher image. `OMEGA_CPU=68ec020` selects the
 board's 68EC020 (24-bit bus). A KickSmash switch takes the bank's CPU from
-`kicksmash.cfg` (`cpu <n> 68020`), as the board does. Coprocessor (FPU, MMU)
+`kicksmash.cfg` (`cpu <n> 68020`), as the board does; `cycles <n> <1-255>`
+only applies on the board (the runner keeps its own ratio). Coprocessor (FPU, MMU)
 instructions take the F-line exception on the 68020 too, as on a real one
 without an FPU: Kickstart detects the FPU that way.
 

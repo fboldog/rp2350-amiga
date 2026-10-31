@@ -9,6 +9,8 @@ emulation performance isn't the best direction.
 
 Normal builds use the default 150 MHz clock; HDMI builds overclock `clk_sys` to
 `OMEGA_SYS_CLK_KHZ` (default 336 MHz) and retime PSRAM through the Pico SDK.
+Going higher is not simple: 384 MHz, the next clock USB allows, needs 1.30 V
+and slower flash (`TODO.md`), so the board stays at 336 MHz.
 
 ## Status
 
@@ -120,8 +122,8 @@ PRISM:640x480 8bit for the Workbench. Why only this one:
   blitter and PrismRTG work at every depth; only the HDMI view is reduced.
 * The output is 640 pixels wide (PAL: 720x576 with a 640-wide image area;
   NTSC: 640x480), so wider screens (800x600, 1024x768) are cropped at the
-  right and bottom. A different HDMI mode would need clocks the RP2350's
-  HSTX setup does not reach.
+  right and bottom. 720p would need HSTX at 371 MHz (about 2.5x its 150 MHz
+  rating, not tried), and its 921,600-byte 8-bit frame does not fit SRAM.
 * The VRAM is 1 MB (960 KB usable after PrismRTG's scratch): 800x600 at 16
   bits would leave no room for off-screen bitmaps.
 
@@ -208,8 +210,8 @@ NTSC and PAL with these settings plus `-DOMEGA_ENABLE_SDCARD=ON` (Fast RAM
 and the RTG card are built in by default), using Arm GNU Toolchain
 14.3.Rel1, and the native runner for both, on every push and pull request.
 One firmware serves every machine: `/rom/kicksmash.cfg` picks each
-Kickstart bank's CPU (`cpu <n> 68020`) and whether it gets the RTG card
-(`rtg <n> on`); without a card the Kickstart in flash runs on a 68000
+Kickstart bank's CPU (`cpu <n> 68020`), its speed (`cycles <n> <1-255>`) and
+whether it gets the RTG card (`rtg <n> on`); without a card the Kickstart in flash runs on a 68000
 without RTG. The `.uf2`, `.elf` and `.bin` files and the native binaries are
 uploaded as artifacts; combine a firmware UF2 with a Kickstart ROM and ADFs
 using `tools/combine_uf2.py`.
@@ -419,7 +421,15 @@ bank 1 kick314.rom Kickstart 3.1.4
 bank 2 switcher.rom ROM switcher
 cpu 1 68020
 rtg 1 on
+cycles 0 5
+cycles 1 16
 ```
+
+`cycles <n> <1-255>` sets bank n's CPU cycles per DMA slot; without a line
+the bank uses the build's `OMEGA_CPU_CYCLES_PER_SLOT`. High values speed up
+Workbench; 5 is the highest that keeps RemGame's beam racing right (8 and 16
+glitch its sprites). The 68020's shorter instruction timings stretch the
+same budget further, so it runs ahead of the beam at lower values.
 
 `cpu <n> 68020` runs bank n on a 68EC020 (a 68020 with the 68000's 24-bit
 bus and no FPU, as in the A1200), which 020-only software and the RTG
@@ -504,7 +514,8 @@ the PAL frame rate and Paula's pitch were 0.4 % off as well.
 The 68000 gets `OMEGA_CPU_CYCLES_PER_SLOT` cycles per DMA slot (colour clock),
 default 2 as on an A500 (7.09 MHz CPU, 3.55 MHz colour clock); set it at
 configure time with `cmake -DOMEGA_CPU_CYCLES_PER_SLOT=<n>` (a cached value
-wins over the default, so reconfigure existing build directories). Musashi's
+wins over the default, so reconfigure existing build directories), and per
+Kickstart bank with `cycles <n> <1-255>` in `/rom/kicksmash.cfg`. Musashi's
 overrun past a slice's budget is carried into the next slice so the ratio is
 exact. Omega used 16, a 68000 running ~8x fast against the beam: software
 that races the beam (RemGame refills its sprite bands behind the beam) then
@@ -925,7 +936,7 @@ deadline.
 
 | File | Does |
 |---|---|
-| `main.c` | Startup: clocks (`clk_sys`, PLL_USB for HSTX, PSRAM timing), PSRAM check, Kickstart lookup, DF0 disk selection and rotation (state in PSRAM), HDMI start, then the emulation main loop with the CPU:DMA cycle ratio (`OMEGA_CPU_CYCLES_PER_SLOT`); hard-fault report |
+| `main.c` | Startup: clocks (`clk_sys`, PLL_USB for HSTX, PSRAM timing), PSRAM check, Kickstart lookup, DF0 disk selection and rotation (state in PSRAM), HDMI start, then the emulation main loop with the CPU:DMA cycle ratio (`OMEGA_CPU_CYCLES_PER_SLOT`, per bank `cycles <n> <1-255>`); hard-fault report |
 | `board_config.h` | All board pins (PSRAM, HDMI, SD, KEY button), feature defaults and the PSRAM/flash memory map (`BOARD_MAP_*`) |
 | `Memory.c` / `Memory.h` | The 68000's view of memory: 2 MB chip RAM in PSRAM, the custom register mirror at `0xC00000`–`0xD7FFFF`, ROM in flash (or the SD cache), CIA and custom-register dispatch, bounds checks so a runaway program cannot crash the host |
 | `psram.c` / `psram.h` | PSRAM detection check and read/write test; `psram_ptr()` and region offsets |

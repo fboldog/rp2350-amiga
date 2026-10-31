@@ -57,13 +57,17 @@ The RP2350 port uses 8 MB PSRAM (memory-mapped at 0x11000000) with this layout
 | PSRAM offset      | Content              | Amiga address     |
 |-------------------|----------------------|-------------------|
 | 0x000000–0x1FFFFF | Chip RAM (2 MB)      | 0x000000–0x1FFFFF |
-| 0x200000–0x27FFFF | Free (no slow RAM)   | 0xC00000–0xD7FFFF mirrors the custom registers |
-| 0x280000–0x47FFFF | DF0 MFM buffer (2MB) | empty-drive image, or the active track of the flash ADF (uncached) |
-| 0x480000–0x4FFFFF | SD ROM cache (512KB) | (optional)        |
-| 0x540000–0x63FFFF | Raw video raster     | (host rendering)  |
+| 0x200000–0x3FFFFF | Fast RAM (2 MB)      | 0x200000–0x3FFFFF (Zorro II, `OMEGA_FAST_RAM`) |
+| 0x400000–0x4FFFFF | RTG VRAM (1 MB)      | 0x400000–0x4FFFFF (Picasso II+, `OMEGA_RTG`) |
+| 0x500000–0x57FFFF | SD ROM (512 KB)      | Kickstart from the card |
+| 0x580000–0x583FFF | DF0 MFM track (16 KB) | the active track of the flash ADF, or an empty-drive image (uncached) |
+| 0x584000–0x67FFFF | Raw video raster     | (host rendering)  |
 | 0x680000–0x77FFFF | Framebuffer 640×400  | (host output)     |
-| 0x780000–0x787FFF | HDMI frame records   | palette logs and pixel runs of the two indexed frames (cached) |
+| 0x780000–0x7817FF | SD work (6 KB)       | FatFs, sector buffer, KickSmash state |
+| 0x782000–         | RTG chip state       | the Picasso II+'s registers |
 | 0x788000–0x7A7FFF | Opcode table scratch | flat 68000 handler index, built at boot then compressed into SRAM |
+| 0x7A8000–0x7CBFFF | HDMI frame records   | palette logs and pixel runs of the two indexed frames (cached) |
+| 0x7FF000–         | Boot state           | DF0 rotation and the last hard fault (uncached, survives a reset) |
 
 ROM is read-only in flash at 0x10200000 (absolute). `src/Memory.c:memory_init()`
 validates it by checking `rom_base[0] == 0x11`.
@@ -86,7 +90,7 @@ The default values of `OMEGA_ENABLE_HDMI`, `OMEGA_ENABLE_SDCARD` and
 `OMEGA_ENABLE_FLASH_FLOPPY` are `OFF`; disabled subsystems are omitted from the
 source and link lists. Pico SDK `hardware_psram` performs QMI setup before
 `main()`. HDMI builds switch `clk_sys` to `OMEGA_SYS_CLK_KHZ` (default
-320 MHz), retune `PLL_USB` to the TMDS bit rate for HSTX, move `clk_peri` to
+336 MHz), retune `PLL_USB` to the TMDS bit rate for HSTX, move `clk_peri` to
 `PLL_SYS`, and immediately retime PSRAM with the public SDK API.
 
 If `PICO_SDK_PATH` is unset, configure fetches Pico SDK 2.3.1 into the build

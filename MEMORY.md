@@ -3,6 +3,10 @@
 Snapshot of all decisions, rationale, and context needed to resume work
 on a fresh machine or in a new development session.
 
+**This is a dated log, not the current state.** Early entries describe things
+that have since changed (the Waveshare board, slow RAM, DF1, 320 MHz). For the
+current design see `README.md`, `AGENT.md` and `src/board_config.h`.
+
 ---
 
 ## Goal

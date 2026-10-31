@@ -188,15 +188,17 @@ Steps:
       `m68kcpu.h`. Verified
       natively (`hdf314-ec020` regression case, Kick 1.3/2.05/3.1.4/3.2
       start, PrismSetup DETECT) and on the board (3.1.4 boots on the
-      EC020, PrismRTG's installer runs). Open: the CPU pacing on a 68020
-      (`OMEGA_CPU_CYCLES_PER_SLOT` was tuned on the 68000).
-- [ ] Optional: a separate CPU budget for 68020 banks (e.g.
-      `OMEGA_CPU020_CYCLES_PER_SLOT`), used when a bank selects that CPU and
-      tuned on the board. The 68020's timing table charges fewer cycles per
-      instruction, so the 68000's budget of 5 runs more instructions per
-      slot. RemGame at 336 MHz (2026-10-31): 17.5 frames/s on the EC020,
-      25.4 on a 68000 bank, and its sprites only come out right on the
-      68000. Lowering the budget would slow RTG and Workbench work.
+      EC020, PrismRTG's installer runs).
+- [x] **CPU cycles per bank** (2026-10-31): `cycles <n> <1-255>` in
+      `/rom/kicksmash.cfg` sets a bank's cycles per DMA slot; without a line
+      it uses `OMEGA_CPU_CYCLES_PER_SLOT`. Applied when a bank loads, kept by
+      the switcher's Save. Verified on the board: a build with default 16
+      and bank 2 at 5 runs RemGame as a build of 5 does. RemGame at 336 MHz
+      (emulated/shown frames/s), 68000: 1 28.0/22.9, 2 27.1/22.9, 5 25.4/24.5
+      (the ideal), 8 21.7/21.6 with glitched sprites; 16 glitches too. The
+      68EC020 at 5: 17.5/17.5, also glitched: its timing table charges
+      fewer cycles per instruction, so it runs further ahead of the beam.
+      Workbench banks gain from 16. Native keeps its own fixed ratio.
 - [ ] Optional: 384 MHz for 68020/RTG work (the board stays at 336 MHz).
       Needs all of: 1.30 V, flash on divider 4 (96 MHz) with read delay 4,
       PSRAM timing set before `clk_sys` rises (`psram_reinitialize()` puts
@@ -652,8 +654,9 @@ How to measure (no halt, firmware keeps running):
       last 32 lines of 256-line PAL screens) and DIWSTRT-anchored LORES lines
       above line 44 are drawn (RemGame's NTSC window opens at line 34).
 - [ ] **Boot time at the real CPU ratio.** Kickstart 1.3 + Workbench 1.3
-      now needs ~98 s (was ~61 s at 16 cycles/slot); faster emulation of
-      CPU-bound work, or a turbo option for booting, would win it back.
+      now needs ~98 s (was ~61 s at 16 cycles/slot); `cycles <n> 16` gives a
+      bank the old speed; a turbo option for booting only would still help
+      banks kept at a low ratio for beam racing.
 - [ ] **Optional frame skip.** Don't render/clear frames that will not be
       presented (e.g. render 1 of N); make N a build or runtime option.
 - [x] **Pixel conversion on core 1.** Core 0 enqueues bitplane blocks,
@@ -922,7 +925,9 @@ appears only ~2 min 12 s later.
       240 MHz 88.2 s, 266 MHz 79.4 s, 300 MHz 71.5 s. Long-term stability at
       320 MHz / 1.20 V not yet soak-tested. USB needs an external 48 MHz
       clock (GPIN0/GPIO20) or a multiple-of-48 `clk_sys`.
-- [ ] **Soak-test 320 MHz.** A KS 2.04 run once derailed the 68k (illegal
+- [ ] **Soak-test the overclock** (now 336 MHz; 11 minutes of RemGame ran
+      clean on 2026-10-31, about 50 C, `-DOMEGA_TEMP_LOG=ON`, but nothing
+      longer). At 320 MHz a KS 2.04 run once derailed the 68k (illegal
       exception with a bogus supervisor stack) and not again in a 5 min
       rerun; overclock or PSRAM timing is suspected. The resulting host
       hard fault is fixed: word/long writes beyond 0xDFF1FF no longer index

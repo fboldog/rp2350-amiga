@@ -5,7 +5,11 @@ metadata:
   type: project
 ---
 
-Port of Omega (https://github.com/h5n1xp/Omega) to RP2350B (Pimoroni Pico Plus 2) in Cortex-M33 mode.
+Port of Omega (https://github.com/h5n1xp/Omega) to RP2350B in Cortex-M33 mode.
+
+**Historical (2026-09):** the board is now the WeAct Studio RP2350B Core, and
+the memory layout and drive list below are out of date. See `README.md`,
+`AGENT.md` and `src/board_config.h`.
 
 Project directory varies by machine: `/home/fboldog/source/repos/rp2350-amiga/` (machine 1),
 `/root/source/repos/rp2350-amiga/` (machine 2). Git remote is the source of truth.

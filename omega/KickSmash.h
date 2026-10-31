@@ -39,6 +39,7 @@ typedef struct {
     char     file[KS_ROM_BANKS][KS_FILE_MAX];  // ROM file of each bank
     uint8_t  cpu020[KS_ROM_BANKS];   // nonzero: the bank runs a 68EC020
     uint8_t  rtg[KS_ROM_BANKS];      // nonzero: the bank has the RTG card
+    uint8_t  cycles[KS_ROM_BANKS];   // CPU cycles per DMA slot, 0: the default
     // Transport
     uint8_t  shift;              // request word = offset >> shift
     uint16_t req_pos;            // words received (magic included)
@@ -77,6 +78,9 @@ int kickSmashBankCpu020(int bank);
 // Nonzero if the bank has the RTG card ("rtg <n> on" in the settings; off
 // without a line, and for no bank).
 int kickSmashBankRtg(int bank);
+// The bank's CPU cycles per DMA slot ("cycles <n> <1-255>" in the settings);
+// 0 without a line, and for no bank: the build's default.
+int kickSmashBankCycles(int bank);
 
 // Host side. The switch is requested from inside a ROM read: the host
 // acts on it between emulation slices (kickSmashTakeSwitch()), loading the

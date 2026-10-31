@@ -82,6 +82,9 @@
 #ifndef OMEGA_CPU_CYCLES_PER_SLOT
 #define OMEGA_CPU_CYCLES_PER_SLOT 2
 #endif
+// The 68000's budget per slice: a KickSmash bank can set its own ratio
+// ("cycles <n> <1-255>" in kicksmash.cfg).
+static int cpu_slice_cycles = OMEGA_CPU_CYCLES_PER_SLOT * OMEGA_CPU_SLICE_SLOTS;
 
 // ── Flash location of the DF0 ADF images (optional) ──────────────────────
 // Standard raw ADF images are placed back to back from this absolute address
@@ -331,8 +334,9 @@ static bool load_rom_from_sd(const char *path) {
 }
 
 // Loads a KickSmash bank (or, for bank -1, `path`) and records it as the
-// bank the Amiga runs, on the bank's CPU (68000 or 68EC020) and with the
-// RTG card if the bank has it (autoconfig offers it from the next reset).
+// bank the Amiga runs, on the bank's CPU (68000 or 68EC020) at its cycles
+// per DMA slot, and with the RTG card if the bank has it (autoconfig offers
+// it from the next reset).
 static bool load_bank_from_sd(int bank, const char *path) {
     char bank_path[48];
     if (bank >= 0 && kicksmash_sd_bank_path(bank, bank_path, sizeof bank_path))
@@ -341,6 +345,11 @@ static bool load_bank_from_sd(int bank, const char *path) {
         return false;
     kicksmash_sd_set_current(bank);
     cpu_select_68020(kickSmashBankCpu020(bank));
+    const int cycles = kickSmashBankCycles(bank);
+    const int slot_cycles = cycles ? cycles : OMEGA_CPU_CYCLES_PER_SLOT;
+    if (slot_cycles * OMEGA_CPU_SLICE_SLOTS != cpu_slice_cycles)
+        printf("CPU: %d cycles per slot\n", slot_cycles);
+    cpu_slice_cycles = slot_cycles * OMEGA_CPU_SLICE_SLOTS;
 #if OMEGA_RTG
     const uint32_t vram = kickSmashBankRtg(bank) ? BOARD_MAP_RTG_VRAM_SIZE : 0;
     if (vram != expansionPicasso2Vram)
@@ -521,8 +530,7 @@ OMEGA_LOOP_FUNC(emulation_loop)(void) {
         static int cpu_cycle_balance;
         for (int i = 0; i < DMA_CPU_BATCH; i += OMEGA_CPU_SLICE_SLOTS) {
             dma_run(OMEGA_CPU_SLICE_SLOTS);
-            cpu_cycle_balance +=
-                OMEGA_CPU_CYCLES_PER_SLOT * OMEGA_CPU_SLICE_SLOTS;
+            cpu_cycle_balance += cpu_slice_cycles;
             if (cpu_cycle_balance > 0)
                 cpu_cycle_balance -= m68k_execute(cpu_cycle_balance);
         }

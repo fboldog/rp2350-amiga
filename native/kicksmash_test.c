@@ -199,7 +199,11 @@ int main(void) {
     CHECK(state.bi.merge[0] == 0 && state.bi.merge[1] == 0);
 
     // Settings round trip
-    kickSmashParseConfig("cpu 1 68020\ncpu 9 68020\nrtg 1 on\nrtg 2 off\n");
+    kickSmashParseConfig("cpu 1 68020\ncpu 9 68020\nrtg 1 on\nrtg 2 off\n"
+                         "cycles 1 16\ncycles 2 0\ncycles 0 256\n"
+                         "cycles 9 5\n");
+    CHECK(kickSmashBankCycles(1) == 16 && !kickSmashBankCycles(2) &&
+          !kickSmashBankCycles(0) && !kickSmashBankCycles(-1));
     CHECK(kickSmashBankCpu020(1) && !kickSmashBankCpu020(0));
     CHECK(kickSmashBankRtg(1) && !kickSmashBankRtg(2) &&
           !kickSmashBankRtg(0) && !kickSmashBankRtg(-1));
@@ -219,6 +223,7 @@ int main(void) {
     CHECK(kickSmashFindBank("SWITCHER.ROM") == 2);
     CHECK(kickSmashBankCpu020(1) && !kickSmashBankCpu020(2));
     CHECK(kickSmashBankRtg(1) && !kickSmashBankRtg(2));
+    CHECK(kickSmashBankCycles(1) == 16 && !kickSmashBankCycles(2));
     kickSmashParseConfig("rtg 1 off\n");
     CHECK(!kickSmashBankRtg(1));
     kickSmashParseConfig("cpu 1 68000\n");
