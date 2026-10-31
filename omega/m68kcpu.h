@@ -2013,6 +2013,12 @@ INLINE void m68ki_check_interrupts(void)
 /* ============================== END OF FILE ============================= */
 /* ======================================================================== */
 
+/* MULU/MULS on a 68000 take 38 + 2n cycles (Musashi 7ec87cd): n is the set
+ * bits of the source (MULU), or its 01 and 10 pairs with a 0 below it (MULS:
+ * the caller passes src ^ src << 1). The table holds the 38.
+ */
+void m68ki_mul_cycles(uint bits);
+
 /* Bitfields in memory (ported from Musashi f17a970): an offset need not be
  * byte aligned and a width can be 32, so up to 5 bytes are accessed. The
  * bytes read are kept so the bits around the field go back unchanged.

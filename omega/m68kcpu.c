@@ -656,6 +656,18 @@ static int m68k_execute_running(int num_cycles);
 /* The main loop calls this every few DMA slots. Idle screens leave the CPU
    in STOP, so that case returns before any register is saved; the
    instruction loop lives in m68k_execute_running(). */
+void m68ki_mul_cycles(uint bits)
+{
+	if(CPU_TYPE_IS_010_LESS(CPU_TYPE))
+	{
+		bits &= 0xffff;
+		bits -= (bits >> 1) & 0x5555;
+		bits = (bits & 0x3333) + ((bits >> 2) & 0x3333);
+		bits = (bits + (bits >> 4)) & 0x0f0f;
+		USE_CYCLES(((bits + (bits >> 8)) & 0x1f) << 1);
+	}
+}
+
 int m68k_execute(int num_cycles)
 {
 	if(CPU_STOPPED)

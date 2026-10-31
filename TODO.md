@@ -206,7 +206,11 @@ Steps:
       model (4,785 of 98,304 cases failed before, none now). Reviewed and
       left alone: ADDA/SUBA order (already right here), upstream's STOP and
       interrupt rework (cycle accounting only; `m68k_set_irq` wakes the CPU).
-      Upstream's 68000 cycle fixes remain untried: they shift beam timing.
+- [x] **MULU/MULS cycles** (2026-10-31): 38 + 2n on the 68000 (Musashi
+      7ec87cd), was a flat 54. It was the only 68000 cycle difference left
+      from upstream. RemGame's limit stays at ratio 5 (25.1/24.4 frames/s
+      emulated/shown, was 25.4/24.5; 6 starts to glitch), as its sprites
+      depend on the CPU running ahead of the beam, not on MUL.
 - [ ] Optional: 384 MHz for 68020/RTG work (the board stays at 336 MHz).
       Needs all of: 1.30 V, flash on divider 4 (96 MHz) with read delay 4,
       PSRAM timing set before `clk_sys` rises (`psram_reinitialize()` puts
