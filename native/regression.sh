@@ -62,6 +62,13 @@ ${CC:-cc} -O1 -Wall -Wno-unused -include native/sdl_shim.h -Isrc -Iomega \
     -o "$OUTPUT_DIR/kicksmash_test" native/kicksmash_test.c omega/KickSmash.c
 "$OUTPUT_DIR/kicksmash_test"
 
+# 68020 bitfield instructions against a bit-by-bit model.
+${CC:-cc} -O1 -w -include native/sdl_shim.h -Isrc -Iomega \
+    -o "$OUTPUT_DIR/bitfield_test" native/bitfield_test.c omega/m68kcpu.c \
+    omega/m68kops.c omega/m68kopac.c omega/m68kopdm.c omega/m68kopnz.c \
+    omega/m68kdasm.c
+"$OUTPUT_DIR/bitfield_test"
+
 RESULTS="$OUTPUT_DIR/results.sha256"
 : > "$RESULTS"
 

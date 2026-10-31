@@ -2013,4 +2013,70 @@ INLINE void m68ki_check_interrupts(void)
 /* ============================== END OF FILE ============================= */
 /* ======================================================================== */
 
+/* Bitfields in memory (ported from Musashi f17a970): an offset need not be
+ * byte aligned and a width can be 32, so up to 5 bytes are accessed. The
+ * bytes read are kept so the bits around the field go back unchanged.
+ */
+typedef struct
+{
+	uint field;   /* the bytes from the field's first bit, left aligned */
+	uint lo;
+	uint hi;
+} m68ki_bitfield_t;
+
+INLINE uint m68ki_bitfield_patch_offset(sint offset)
+{
+	return ((uint)offset) % 8;
+}
+
+INLINE uint m68ki_bitfield_patch_ea(uint ea, sint offset)
+{
+	return ea + (offset >= 0 ? offset / 8 : -((7 - offset) / 8));
+}
+
+INLINE m68ki_bitfield_t m68ki_load_bitfield(uint ea, uint offset, uint width)
+{
+	m68ki_bitfield_t bf;
+	const uint bytes = (offset + width + 7) / 8;
+
+	bf.hi = 0;
+	if(bytes == 1)
+		bf.lo = m68ki_read_8(ea) << 24;
+	else if(bytes == 2)
+		bf.lo = m68ki_read_16(ea) << 16;
+	else if(bytes == 3)
+		bf.lo = m68ki_read_16(ea) << 16 | m68ki_read_8(ea + 2) << 8;
+	else
+	{
+		bf.lo = m68ki_read_32(ea);
+		if(bytes == 5)
+			bf.hi = m68ki_read_8(ea + 4);
+	}
+	bf.field = offset ? bf.lo << offset | bf.hi >> (8 - offset) : bf.lo;
+	return bf;
+}
+
+INLINE void m68ki_store_bitfield(uint ea, uint offset, uint width, uint res, const m68ki_bitfield_t* bf)
+{
+	const uint bytes = (offset + width + 7) / 8;
+	const uint lomask = offset ? 0xffffffff << (32 - offset) : 0;
+	const uint lo = (bf->lo & lomask) | res >> offset;
+
+	if(bytes == 1)
+		m68ki_write_8(ea, lo >> 24);
+	else if(bytes == 2)
+		m68ki_write_16(ea, lo >> 16);
+	else if(bytes == 3)
+	{
+		m68ki_write_16(ea, lo >> 16);
+		m68ki_write_8(ea + 2, (lo >> 8) & 0xff);
+	}
+	else
+	{
+		m68ki_write_32(ea, lo);
+		if(bytes == 5)
+			m68ki_write_8(ea + 4, (bf->hi & (0xff >> offset)) | ((res << (8 - offset)) & 0xff));
+	}
+}
+
 #endif /* M68KCPU__HEADER */

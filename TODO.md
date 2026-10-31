@@ -199,6 +199,14 @@ Steps:
       68EC020 at 5: 17.5/17.5, also glitched: its timing table charges
       fewer cycles per instruction, so it runs further ahead of the beam.
       Workbench banks gain from 16. Native keeps its own fixed ratio.
+- [x] **Bitfield writes across 32 bits** (2026-10-31): `bfchg`, `bfclr`,
+      `bfset`, `bfins` on memory corrupted fields past 32 bits; ported
+      Musashi f17a970 and its later `bfset` fix, which covers PR #87.
+      `native/bitfield_test.c` checks all eight instructions against a bit
+      model (4,785 of 98,304 cases failed before, none now). Reviewed and
+      left alone: ADDA/SUBA order (already right here), upstream's STOP and
+      interrupt rework (cycle accounting only; `m68k_set_irq` wakes the CPU).
+      Upstream's 68000 cycle fixes remain untried: they shift beam timing.
 - [ ] Optional: 384 MHz for 68020/RTG work (the board stays at 336 MHz).
       Needs all of: 1.30 V, flash on divider 4 (96 MHz) with read delay 4,
       PSRAM timing set before `clk_sys` rises (`psram_reinitialize()` puts
